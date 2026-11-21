@@ -5686,6 +5686,10 @@ void CvGame::doTurn()
 
 	PROFILE_END();
 
+#ifdef BRIDGED_PROFILE
+	bridgedProfileTurn(getGameTurn());
+#endif
+
 	stopProfilingDLL();
 
 	gDLL->getEngineIFace()->AutoSave();

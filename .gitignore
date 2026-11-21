@@ -39,3 +39,7 @@ __pycache__/
 *.CivBeyondSwordReplay
 *.fpk
 *.FPK
+
+# Benchmark harness: the game's own user folder and run logs stay local.
+/bench/altroot/
+/bench/results/

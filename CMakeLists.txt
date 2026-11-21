@@ -52,6 +52,12 @@ set_target_properties(CvGameCoreDLL PROPERTIES PREFIX "" SUFFIX ".dll"
   CXX_EXTENSIONS NO)
 target_compile_definitions(CvGameCoreDLL PRIVATE WIN32 _WINDOWS _USRDLL
   CVGAMECOREDLL_EXPORTS NDEBUG FINAL_RELEASE _MT _DLL)
+# Optional profiling build: times the SDK's existing PROFILE scopes inside the DLL and
+# writes them to the file named by the BRIDGED_PROFILE_LOG environment variable.
+option(BRIDGED_PROFILE "Time the SDK PROFILE scopes inside the DLL" OFF)
+if(BRIDGED_PROFILE)
+  target_compile_definitions(CvGameCoreDLL PRIVATE BRIDGED_PROFILE)
+endif()
 target_include_directories(CvGameCoreDLL PRIVATE "${compat_dir}" "${compat_dir}/include-2")
 target_include_directories(CvGameCoreDLL SYSTEM PRIVATE
   "${compat_dir}/include-2/Boost-1.32.0/include"

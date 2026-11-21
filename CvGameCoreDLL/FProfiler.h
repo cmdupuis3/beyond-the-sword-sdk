@@ -67,6 +67,97 @@ private:
 
 //---------------------------------------------------------------------------------------------------------------------
 
+#ifdef BRIDGED_PROFILE
+// In-DLL profiler. The exe's profiler (gDLL->BeginSample) only draws on screen in debug
+// builds, so with BRIDGED_PROFILE the same PROFILE scopes are timed here instead and
+// written to the file named by the BRIDGED_PROFILE_LOG environment variable.
+// Single-threaded: the current-sample pointer is one global.
+struct BridgedProfileSample
+{
+	const char* szName;					// may point at a stack buffer; valid only until first use
+	unsigned long long uiTicks;			// inclusive; counted for the outermost entry only
+	unsigned long long uiChildTicks;	// spent in samples opened inside this one
+	unsigned long long uiStart;			// PROFILE_BEGIN / PROFILE_END only
+	BridgedProfileSample* pParent;		// PROFILE_BEGIN / PROFILE_END only
+	BridgedProfileSample* pNext;		// registry of samples that have run
+	unsigned int uiCalls;
+	int iOpen;							// recursion depth
+	bool bRegistered;
+	char szNameCopy[64];				// taken from szName when the sample first runs
+};
+
+extern BridgedProfileSample* g_pBridgedProfileCurrent;
+void bridgedProfileRegister(BridgedProfileSample* pSample);
+void bridgedProfileTurn(int iGameTurn);	// call once per game turn; writes the log
+
+inline unsigned long long bridgedProfileTicks()
+{
+	return __builtin_ia32_rdtsc();
+}
+
+inline BridgedProfileSample* bridgedProfileEnter(BridgedProfileSample* pSample)
+{
+	if (!pSample->bRegistered)
+	{
+		bridgedProfileRegister(pSample);
+	}
+	BridgedProfileSample* pParent = g_pBridgedProfileCurrent;
+	g_pBridgedProfileCurrent = pSample;
+	pSample->iOpen++;
+	return pParent;
+}
+
+inline void bridgedProfileLeave(BridgedProfileSample* pSample, BridgedProfileSample* pParent, unsigned long long uiStart)
+{
+	const unsigned long long uiElapsed = bridgedProfileTicks() - uiStart;
+	pSample->uiCalls++;
+	if (--pSample->iOpen == 0)
+	{
+		pSample->uiTicks += uiElapsed;
+	}
+	if (pParent != NULL && pParent != pSample)
+	{
+		pParent->uiChildTicks += uiElapsed;
+	}
+	g_pBridgedProfileCurrent = pParent;
+}
+
+class BridgedProfileScope
+{
+public:
+	BridgedProfileScope(BridgedProfileSample* pSample) : m_pSample(pSample)
+	{
+		m_pParent = bridgedProfileEnter(pSample);
+		m_uiStart = bridgedProfileTicks();
+	}
+	~BridgedProfileScope()
+	{
+		bridgedProfileLeave(m_pSample, m_pParent, m_uiStart);
+	}
+
+private:
+	BridgedProfileSample* m_pSample;
+	BridgedProfileSample* m_pParent;
+	unsigned long long m_uiStart;
+};
+
+#define PROFILE(name)\
+	static BridgedProfileSample sample = { name };\
+	BridgedProfileScope ProfileScope(&sample);
+
+#define PROFILE_BEGIN(name)\
+	static BridgedProfileSample sample__ = { name };\
+	sample__.pParent = bridgedProfileEnter(&sample__);\
+	sample__.uiStart = bridgedProfileTicks();
+#define PROFILE_END()\
+	bridgedProfileLeave(&sample__, sample__.pParent, sample__.uiStart);
+
+#define PROFILE_FUNC()\
+	static BridgedProfileSample sample = { __FUNCTION__ };\
+	BridgedProfileScope ProfileScope(&sample);
+
+#else	// BRIDGED_PROFILE
+
 // Main Interface for Profile
 #ifdef FP_PROFILE_ENABLE				// Turn Profiling On or Off .. 
 #define PROFILE(name)\
@@ -91,6 +182,8 @@ private:
 #define PROFILE_END()
 #define PROFILE_FUNC()
 #endif
+
+#endif	// BRIDGED_PROFILE
 
 
 #endif //__PROFILE_H__

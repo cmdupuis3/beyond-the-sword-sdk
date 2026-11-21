@@ -29,10 +29,15 @@ def main():
     for name in ['vc71', 'windows-sdk']:
         parser.add_argument('--' + name, type=Path, help='override the prepared dependency path')
     parser.add_argument('--icu70-dir', type=Path, help='required for the pinned Linux LLVM package')
-    parser.add_argument('--output-dir', type=Path, default=ROOT / 'tmp/dll-build')
+    parser.add_argument('--output-dir', type=Path,
+                        help='default tmp/dll-build, or tmp/dll-build-profile with --profile')
+    parser.add_argument('--profile', action='store_true',
+                        help='time the SDK PROFILE scopes inside the DLL (see FProfiler.h)')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--cmake', default='cmake')
     args = parser.parse_args()
+    if args.output_dir is None:
+        args.output_dir = ROOT / ('tmp/dll-build-profile' if args.profile else 'tmp/dll-build')
     for name, path in support.dependency_paths(args.deps_dir).items():
         if getattr(args, name) is None:
             setattr(args, name, path)
@@ -85,6 +90,7 @@ def main():
         configure = [args.cmake, '-S', ROOT, '-B', output, '-G', 'Ninja',
                      '-DCMAKE_TOOLCHAIN_FILE=' + (ROOT / 'cmake/windows-x86-clang.cmake').as_posix(),
                      '-DCMAKE_BUILD_TYPE=Release', '-DPython3_EXECUTABLE=' + Path(sys.executable).as_posix(),
+                     '-DBRIDGED_PROFILE=' + ('ON' if args.profile else 'OFF'),
                      '-DBRIDGED_LLVM_BIN=' + args.llvm_bin.resolve().as_posix(),
                      '-DBRIDGED_VC71=' + args.vc71.resolve().as_posix(),
                      '-DBRIDGED_WINDOWS_SDK=' + args.windows_sdk.resolve().as_posix()]
