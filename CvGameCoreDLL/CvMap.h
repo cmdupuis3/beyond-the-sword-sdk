@@ -268,8 +268,8 @@ public:
 	void rebuild(int iGridW, int iGridH, int iTopLatitude, int iBottomLatitude, bool bWrapX, bool bWrapY, WorldSizeTypes eWorldSize, ClimateTypes eClimate, SeaLevelTypes eSeaLevel, int iNumCustomMapOptions, CustomMapOptionTypes * eCustomMapOptions);		// Exposed to Python
 
 	// Which teams have attacking units or territory where: see the team index in CvMap.cpp
-	bool isTeamUnitNear(int iX, int iY, int iRange, unsigned long long uiTeams) const;
-	bool isTeamTerritoryNear(int iX, int iY, int iRange, unsigned long long uiTeams) const;
+	bool isTeamAttackerNear(const CvPlot* pPlot, int iRange, unsigned long long uiTeams, bool bTestMoves) const;
+	bool isTeamBorderNear(const CvPlot* pPlot, int iRange, unsigned long long uiTeams) const;
 	void changeBlockUnits(int iX, int iY, TeamTypes eTeam, int iChange);
 	void changeBlockOwnedPlots(int iX, int iY, TeamTypes eTeam, int iChange);
 	void updatePlotTeams(const CvPlot* pPlot);
@@ -294,6 +294,7 @@ protected:
 
 	FFreeListTrashArray<CvArea> m_areas;
 	enum { TEAM_BLOCK_SHIFT = 3 };										// blocks of 8 x 8 plots
+	enum { TEAM_REACH_WORDS = 4 };										// reach of 1, 2, 3 and 4 or more plots
 	mutable bool m_bTeamIndexDirty;
 	mutable int m_iTeamBlocksWide;
 	mutable std::vector<unsigned short> m_aiBlockTeamUnits;				// per block and team: attacking units there
@@ -302,11 +303,12 @@ protected:
 	mutable std::vector<unsigned long long> m_aiBlockOwnerTeams;		// per block: a bit for each team owning a plot
 	mutable std::vector<unsigned long long> m_aiPlotUnitTeams;			// per plot: as for the blocks
 	mutable std::vector<unsigned long long> m_aiPlotOwnerTeams;
+	mutable std::vector<unsigned long long> m_aiPlotReachTeams;			// per plot, TEAM_REACH_WORDS words: teams with such a unit that reaches that far
 
 	void rebuildTeamIndex() const;
-	unsigned long long calculatePlotUnitTeams(const CvPlot* pPlot) const;
+	unsigned long long calculatePlotUnitTeams(const CvPlot* pPlot, unsigned long long* puiReachTeams) const;
 	void changeBlockTeamCount(std::vector<unsigned short>& aiCounts, std::vector<unsigned long long>& aiBlockTeams, int iX, int iY, TeamTypes eTeam, int iChange);
-	bool isTeamNear(const std::vector<unsigned long long>& aiBlockTeams, const std::vector<unsigned long long>& aiPlotTeams, int iX, int iY, int iRange, unsigned long long uiTeams) const;
+	bool isTeamInBlocks(const std::vector<unsigned long long>& aiBlockTeams, int iX, int iY, int iRange, unsigned long long uiTeams) const;
 
 	void calculateAreas();
 

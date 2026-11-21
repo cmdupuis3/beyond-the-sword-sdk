@@ -3146,15 +3146,19 @@ int CvPlayerAI::AI_getPlotDanger(CvPlot* pPlot, int iRange, bool bTestMoves) con
 
 	iCount = 0;
 	iBorderDanger = 0;
+#ifdef BRIDGED_PROFILE
+	int iProfileCandidates = 0;
+#endif
 
 	if (iRange == -1)
 	{
 		iRange = DANGER_RANGE;
 	}
-	// Most calls are nowhere near anything hostile, and the map's team index can say so
-	// without walking the unit lists. The count below is of units that are enemies and can
-	// attack, plus, for the AI outside its cities, the border danger: enemy territory one
-	// plot away, or two with a route. With neither in range the answer is 0.
+	// Most calls find nothing, and the map's team index can say so without walking the unit
+	// lists. The count below is of enemy units in this plot's area that can attack and, when
+	// moves are tested, are near enough for their reach; plus, for the AI outside its
+	// cities, the border danger. The index answers both exactly enough to skip the scan
+	// whenever the count would be 0 for want of any such unit or border.
 	unsigned long long uiEnemyTeams = 0;
 
 	for (int iTeam = 0; iTeam < MAX_TEAMS; iTeam++)
@@ -3165,11 +3169,11 @@ int CvPlayerAI::AI_getPlotDanger(CvPlot* pPlot, int iRange, bool bTestMoves) con
 		}
 	}
 
-	bool bNothingNear = !GC.getMapINLINE().isTeamUnitNear(pPlot->getX_INLINE(), pPlot->getY_INLINE(), iRange, uiEnemyTeams);
+	bool bNothingNear = !GC.getMapINLINE().isTeamAttackerNear(pPlot, iRange, uiEnemyTeams, bTestMoves);
 
 	if (bNothingNear && !isHuman() && !pPlot->isCity())
 	{
-		bNothingNear = !GC.getMapINLINE().isTeamTerritoryNear(pPlot->getX_INLINE(), pPlot->getY_INLINE(), std::min(iRange, 2), uiEnemyTeams);
+		bNothingNear = !GC.getMapINLINE().isTeamBorderNear(pPlot, iRange, uiEnemyTeams);
 	}
 
 #ifdef BRIDGED_PROFILE
@@ -3229,6 +3233,9 @@ int CvPlayerAI::AI_getPlotDanger(CvPlot* pPlot, int iRange, bool bTestMoves) con
 						{
 							if (pLoopUnit->canAttack())
 							{
+#ifdef BRIDGED_PROFILE
+								iProfileCandidates++;
+#endif
 								if (!(pLoopUnit->isInvisible(getTeam(), false)))
 								{
 								    if (pLoopUnit->canMoveOrAttackInto(pPlot))
@@ -3270,6 +3277,20 @@ int CvPlayerAI::AI_getPlotDanger(CvPlot* pPlot, int iRange, bool bTestMoves) con
 		bridgedProfileAdd(&aDangerSamples[2], 0);
 	}
 #endif
+#ifdef BRIDGED_PROFILE
+	{
+		static BridgedProfileSample aScanSamples[5] = {
+			{ "danger scan: no enemy attacker in the same area, result 0" }, { "danger scan: no enemy attacker in the same area, border danger only" },
+			{ "danger scan: enemy attackers in range but none counted" }, { "danger scan: units counted" }, { "danger scan: enemy attacker candidates seen" } };
+		const int iUnitCount = iCount - ((iBorderDanger > 0 && !isHuman() && !pPlot->isCity()) ? iBorderDanger : 0);
+		if (!bNothingNear)
+		{
+			bridgedProfileAdd(&aScanSamples[(iProfileCandidates == 0) ? ((iCount == 0) ? 0 : 1) : ((iUnitCount == 0) ? 2 : 3)], 0);
+			bridgedProfileAdd(&aScanSamples[4], 0, iProfileCandidates);
+		}
+	}
+#endif
+
 	return iCount;
 }
 

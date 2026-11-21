@@ -3296,6 +3296,12 @@ void CvTeam::changeExtraMoves(DomainTypes eIndex, int iChange)
 	FAssertMsg(eIndex < NUM_DOMAIN_TYPES, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiExtraMoves[eIndex] = (m_aiExtraMoves[eIndex] + iChange);
 	FAssert(getExtraMoves(eIndex) >= 0);
+
+	// every unit of the team in this domain now reaches a different distance: see the team index in CvMap.cpp
+	if (iChange != 0)
+	{
+		GC.getMapINLINE().setTeamIndexDirty();
+	}
 }
 
 

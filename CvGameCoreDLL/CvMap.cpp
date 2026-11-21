@@ -1379,21 +1379,28 @@ void CvMap::calculateAreas()
 //
 // The team index.
 //
-// For each plot the map keeps two words with a bit per team: the teams with a unit there
-// that can attack, and the team that owns it. It keeps the same two words for each block
-// of 8 x 8 plots. "Is a unit of one of these teams within iRange of this plot" is then
-// answered from a few block words when the area is clear of them, and otherwise from the
-// plot words, without walking unit lists. CvPlayerAI::AI_getPlotDanger() asks before it
-// scans for enemy units, and most of the time the answer is no.
+// For each plot the map keeps words with a bit per team: the teams with a unit there that
+// can attack, the same again by how far such a unit can reach, and the team that owns the
+// plot. For each block of 8 x 8 plots it keeps the teams with an attacking unit and the
+// teams owning a plot anywhere in the block.
 //
-// Only units that can attack are counted, because nothing here is a threat otherwise. A
-// unit of an always-hostile type also counts for the barbarian team: it is an enemy to
-// every team but its own, and every team is at war with the barbarians.
+// CvPlayerAI::AI_getPlotDanger() counts the enemy units in range that could attack a plot
+// and adds the border danger. Nearly always both are nothing, and isTeamAttackerNear() and
+// isTeamBorderNear() can say so from a few block words, or failing that from the plot
+// words, without walking unit lists. They answer "no" only when the scan would find
+// nothing; they may answer "yes" when it would still count nothing, since they do not test
+// whether a unit is visible or can enter the plot.
 //
-// CvPlot::addUnit(), removeUnit() and setOwner() keep the index. Anything that changes
-// what a unit or plot counts as without passing through those must call
-// setTeamIndexDirty(), and the index is rebuilt at the next question: loading a game, a
-// player changing team, and a unit gaining or losing the ability to attack.
+// Only units that can attack are indexed. A unit of an always-hostile type also counts
+// for the barbarian team: it is an enemy to every team but its own, and every team is at
+// war with the barbarians. A unit's reach is its base moves, plus one if its plot has a
+// route, which is at least what AI_getPlotDanger() allows it when it tests moves.
+//
+// CvPlot::addUnit(), removeUnit(), setOwner() and setRouteType() and
+// CvUnit::changeExtraMoves() keep the index. Anything else that changes what a unit or
+// plot counts as must call setTeamIndexDirty(), and the index is rebuilt at the next
+// question: loading a game, a player changing team, a team's extra moves changing, and a
+// unit gaining or losing the ability to attack.
 //
 // Blocks and plots do not depend on each other and a question only reads them, so a clean
 // index can be read from several threads at once.
@@ -1404,10 +1411,17 @@ void CvMap::setTeamIndexDirty()
 }
 
 
-unsigned long long CvMap::calculatePlotUnitTeams(const CvPlot* pPlot) const
+// The teams with a unit on the plot that can attack; puiReachTeams gets TEAM_REACH_WORDS words.
+unsigned long long CvMap::calculatePlotUnitTeams(const CvPlot* pPlot, unsigned long long* puiReachTeams) const
 {
 	unsigned long long uiTeams = 0;
+	const int iRouteReach = (pPlot->isRoute() ? 1 : 0);
 	CLLNode<IDInfo>* pUnitNode = pPlot->headUnitNode();
+
+	for (int iI = 0; iI < TEAM_REACH_WORDS; iI++)
+	{
+		puiReachTeams[iI] = 0;
+	}
 
 	while (pUnitNode != NULL)
 	{
@@ -1416,11 +1430,20 @@ unsigned long long CvMap::calculatePlotUnitTeams(const CvPlot* pPlot) const
 
 		if ((pLoopUnit != NULL) && pLoopUnit->canAttack())
 		{
-			uiTeams |= (1ULL << pLoopUnit->getTeam());
+			unsigned long long uiUnitTeams = (1ULL << pLoopUnit->getTeam());
 
 			if (pLoopUnit->getUnitInfo().isAlwaysHostile())
 			{
-				uiTeams |= (1ULL << BARBARIAN_TEAM);
+				uiUnitTeams |= (1ULL << BARBARIAN_TEAM);
+			}
+
+			uiTeams |= uiUnitTeams;
+
+			const int iReach = std::min((int)TEAM_REACH_WORDS, pLoopUnit->baseMoves() + iRouteReach);
+
+			for (int iI = 0; iI < iReach; iI++)
+			{
+				puiReachTeams[iI] |= uiUnitTeams;
 			}
 		}
 	}
@@ -1443,6 +1466,7 @@ void CvMap::rebuildTeamIndex() const
 	m_aiBlockOwnerTeams.assign(iNumBlocks, 0);
 	m_aiPlotUnitTeams.assign(numPlotsINLINE(), 0);
 	m_aiPlotOwnerTeams.assign(numPlotsINLINE(), 0);
+	m_aiPlotReachTeams.assign(numPlotsINLINE() * TEAM_REACH_WORDS, 0);
 
 	for (int iI = 0; iI < numPlotsINLINE(); iI++)
 	{
@@ -1455,7 +1479,7 @@ void CvMap::rebuildTeamIndex() const
 			m_aiBlockTeamOwnedPlots[(iBlock * MAX_TEAMS) + pLoopPlot->getTeam()]++;
 		}
 
-		m_aiPlotUnitTeams[iI] = calculatePlotUnitTeams(pLoopPlot);
+		m_aiPlotUnitTeams[iI] = calculatePlotUnitTeams(pLoopPlot, &m_aiPlotReachTeams[iI * TEAM_REACH_WORDS]);
 
 		CLLNode<IDInfo>* pUnitNode = pLoopPlot->headUnitNode();
 
@@ -1496,14 +1520,14 @@ void CvMap::rebuildTeamIndex() const
 }
 
 
-// after the plot's owner or unit list has changed
+// after the plot's owner, route or unit list has changed, or a unit on it has changed its moves
 void CvMap::updatePlotTeams(const CvPlot* pPlot)
 {
 	if (!m_bTeamIndexDirty)
 	{
 		const int iPlot = plotNumINLINE(pPlot->getX_INLINE(), pPlot->getY_INLINE());
 
-		m_aiPlotUnitTeams[iPlot] = calculatePlotUnitTeams(pPlot);
+		m_aiPlotUnitTeams[iPlot] = calculatePlotUnitTeams(pPlot, &m_aiPlotReachTeams[iPlot * TEAM_REACH_WORDS]);
 		m_aiPlotOwnerTeams[iPlot] = (pPlot->isOwned() ? (1ULL << pPlot->getTeam()) : 0);
 	}
 }
@@ -1554,81 +1578,98 @@ void CvMap::changeBlockOwnedPlots(int iX, int iY, TeamTypes eTeam, int iChange)
 
 
 //
-// False if and only if no plot within iRange of the given one, counting range the way
-// plotXY() does with wrap included, has a bit of uiTeams set in aiPlotTeams.
+// Whether any block touched by the plots within iRange of (iX, iY), counting range the way
+// plotXY() does with wrap included, has a bit of uiTeams set.
 //
-bool CvMap::isTeamNear(const std::vector<unsigned long long>& aiBlockTeams, const std::vector<unsigned long long>& aiPlotTeams, int iX, int iY, int iRange, unsigned long long uiTeams) const
+bool CvMap::isTeamInBlocks(const std::vector<unsigned long long>& aiBlockTeams, int iX, int iY, int iRange, unsigned long long uiTeams) const
 {
 	const int iBlockSize = (1 << TEAM_BLOCK_SHIFT);
+	int aiColumns[8];
+	int aiRows[8];
+	int iNumColumns = 0;
+	int iNumRows = 0;
+
+	if (((2 * iRange) + 1) > (6 * iBlockSize))
+	{
+		return true;	// a window this wide is not worth ruling out block by block
+	}
+
+	// One sample every block width, and the far edge, lands in every block the window touches.
+	for (int iD = -iRange; ; iD += iBlockSize)
+	{
+		iD = std::min(iD, iRange);
+
+		const int iMapX = coordRange(iX + iD, getGridWidthINLINE(), isWrapXINLINE());
+		if ((iMapX >= 0) && (iMapX < getGridWidthINLINE()))
+		{
+			aiColumns[iNumColumns++] = (iMapX >> TEAM_BLOCK_SHIFT);
+		}
+
+		const int iMapY = coordRange(iY + iD, getGridHeightINLINE(), isWrapYINLINE());
+		if ((iMapY >= 0) && (iMapY < getGridHeightINLINE()))
+		{
+			aiRows[iNumRows++] = (iMapY >> TEAM_BLOCK_SHIFT);
+		}
+
+		if (iD == iRange)
+		{
+			break;
+		}
+	}
+
+	for (int iRow = 0; iRow < iNumRows; iRow++)
+	{
+		for (int iColumn = 0; iColumn < iNumColumns; iColumn++)
+		{
+			if ((aiBlockTeams[(aiRows[iRow] * m_iTeamBlocksWide) + aiColumns[iColumn]] & uiTeams) != 0)
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+
+//
+// False only if AI_getPlotDanger() would count no unit for this plot and range, taking
+// uiTeams (a bit per team) as the enemy teams: no unit of theirs that can attack stands in
+// the plot's area within iRange and, when bTestMoves, close enough for its reach.
+//
+// A unit on the plot itself never counts, since it cannot move into the plot it is on.
+//
+bool CvMap::isTeamAttackerNear(const CvPlot* pPlot, int iRange, unsigned long long uiTeams, bool bTestMoves) const
+{
+	const int iX = pPlot->getX_INLINE();
+	const int iY = pPlot->getY_INLINE();
 	const int iGridWidth = getGridWidthINLINE();
 	const int iGridHeight = getGridHeightINLINE();
 
 #ifdef BRIDGED_PROFILE
 	static BridgedProfileSample aSamples[3] = {
-		{ "team index: none in the blocks" }, { "team index: none on the plots" }, { "team index: something in range" } };
+		{ "team index: no attacker in the blocks" }, { "team index: no attacker that counts on the plots" }, { "team index: attacker in reach" } };
 #endif
 
-	if ((uiTeams == 0) || (iRange < 0))
+	if ((uiTeams == 0) || (iRange <= 0))
 	{
 		return false;
 	}
 
-	// The blocks first, unless the window is too wide for that to be the quicker way.
-	if (((2 * iRange) + 1) <= (6 * iBlockSize))
+	if (m_bTeamIndexDirty)
 	{
-		int aiColumns[8];
-		int aiRows[8];
-		int iNumColumns = 0;
-		int iNumRows = 0;
-
-		// One sample every block width, and the far edge, lands in every block the window touches.
-		for (int iD = -iRange; ; iD += iBlockSize)
-		{
-			iD = std::min(iD, iRange);
-
-			const int iMapX = coordRange(iX + iD, iGridWidth, isWrapXINLINE());
-			if ((iMapX >= 0) && (iMapX < iGridWidth))
-			{
-				aiColumns[iNumColumns++] = (iMapX >> TEAM_BLOCK_SHIFT);
-			}
-
-			const int iMapY = coordRange(iY + iD, iGridHeight, isWrapYINLINE());
-			if ((iMapY >= 0) && (iMapY < iGridHeight))
-			{
-				aiRows[iNumRows++] = (iMapY >> TEAM_BLOCK_SHIFT);
-			}
-
-			if (iD == iRange)
-			{
-				break;
-			}
-		}
-
-		bool bInBlocks = false;
-
-		for (int iRow = 0; (iRow < iNumRows) && !bInBlocks; iRow++)
-		{
-			for (int iColumn = 0; iColumn < iNumColumns; iColumn++)
-			{
-				if ((aiBlockTeams[(aiRows[iRow] * m_iTeamBlocksWide) + aiColumns[iColumn]] & uiTeams) != 0)
-				{
-					bInBlocks = true;
-					break;
-				}
-			}
-		}
-
-		if (!bInBlocks)
-		{
-#ifdef BRIDGED_PROFILE
-			bridgedProfileAdd(&aSamples[0], 0);
-#endif
-			return false;
-		}
+		rebuildTeamIndex();
 	}
 
-	// The window itself.
-	const bool bInsideX = ((iX - iRange) >= 0) && ((iX + iRange) < iGridWidth);
+	if (!isTeamInBlocks(m_aiBlockUnitTeams, iX, iY, iRange, uiTeams))
+	{
+#ifdef BRIDGED_PROFILE
+		bridgedProfileAdd(&aSamples[0], 0);
+#endif
+		return false;
+	}
+
+	const int iArea = pPlot->getArea();
 
 	for (int iDY = -iRange; iDY <= iRange; iDY++)
 	{
@@ -1639,34 +1680,35 @@ bool CvMap::isTeamNear(const std::vector<unsigned long long>& aiBlockTeams, cons
 			continue;
 		}
 
-		const unsigned long long* puiRow = &aiPlotTeams[iMapY * iGridWidth];
-
-		if (bInsideX)
+		for (int iDX = -iRange; iDX <= iRange; iDX++)
 		{
-			for (int iMapX = iX - iRange; iMapX <= iX + iRange; iMapX++)
+			const int iMapX = coordRange(iX + iDX, iGridWidth, isWrapXINLINE());
+
+			if ((iMapX < 0) || (iMapX >= iGridWidth) || ((iDX == 0) && (iDY == 0)))
 			{
-				if ((puiRow[iMapX] & uiTeams) != 0)
-				{
-#ifdef BRIDGED_PROFILE
-					bridgedProfileAdd(&aSamples[2], 0);
-#endif
-					return true;
-				}
+				continue;
 			}
-		}
-		else
-		{
-			for (int iDX = -iRange; iDX <= iRange; iDX++)
-			{
-				const int iMapX = coordRange(iX + iDX, iGridWidth, isWrapXINLINE());
 
-				if ((iMapX >= 0) && (iMapX < iGridWidth) && ((puiRow[iMapX] & uiTeams) != 0))
-				{
+			const int iPlot = (iMapY * iGridWidth) + iMapX;
+			unsigned long long uiPlotTeams;
+
+			if (bTestMoves)
+			{
+				// a unit this many plots away counts only if its reach covers the distance
+				const int iDistance = std::max(abs(iDX), abs(iDY));
+				uiPlotTeams = m_aiPlotReachTeams[(iPlot * TEAM_REACH_WORDS) + std::min(iDistance, (int)TEAM_REACH_WORDS) - 1];
+			}
+			else
+			{
+				uiPlotTeams = m_aiPlotUnitTeams[iPlot];
+			}
+
+			if (((uiPlotTeams & uiTeams) != 0) && (m_pMapPlots[iPlot].getArea() == iArea))
+			{
 #ifdef BRIDGED_PROFILE
-					bridgedProfileAdd(&aSamples[2], 0);
+				bridgedProfileAdd(&aSamples[2], 0);
 #endif
-					return true;
-				}
+				return true;
 			}
 		}
 	}
@@ -1678,25 +1720,68 @@ bool CvMap::isTeamNear(const std::vector<unsigned long long>& aiBlockTeams, cons
 }
 
 
-// Is a unit that can attack, belonging to one of uiTeams (a bit per team), within iRange?
-bool CvMap::isTeamUnitNear(int iX, int iY, int iRange, unsigned long long uiTeams) const
+//
+// Whether AI_getPlotDanger() would find border danger for this plot within iRange, taking
+// uiTeams (a bit per team) as the enemy teams: a plot of theirs in the same area one plot
+// away, or two plots away with a route on it.
+//
+bool CvMap::isTeamBorderNear(const CvPlot* pPlot, int iRange, unsigned long long uiTeams) const
 {
+	const int iX = pPlot->getX_INLINE();
+	const int iY = pPlot->getY_INLINE();
+	const int iGridWidth = getGridWidthINLINE();
+	const int iGridHeight = getGridHeightINLINE();
+
+	iRange = std::min(iRange, 2);
+
+	if ((uiTeams == 0) || (iRange <= 0))
+	{
+		return false;
+	}
+
 	if (m_bTeamIndexDirty)
 	{
 		rebuildTeamIndex();
 	}
 
-	return isTeamNear(m_aiBlockUnitTeams, m_aiPlotUnitTeams, iX, iY, iRange, uiTeams);
-}
-
-
-// Is a plot owned by one of uiTeams (a bit per team) within iRange?
-bool CvMap::isTeamTerritoryNear(int iX, int iY, int iRange, unsigned long long uiTeams) const
-{
-	if (m_bTeamIndexDirty)
+	if (!isTeamInBlocks(m_aiBlockOwnerTeams, iX, iY, iRange, uiTeams))
 	{
-		rebuildTeamIndex();
+		return false;
 	}
 
-	return isTeamNear(m_aiBlockOwnerTeams, m_aiPlotOwnerTeams, iX, iY, iRange, uiTeams);
+	const int iArea = pPlot->getArea();
+
+	for (int iDY = -iRange; iDY <= iRange; iDY++)
+	{
+		const int iMapY = coordRange(iY + iDY, iGridHeight, isWrapYINLINE());
+
+		if ((iMapY < 0) || (iMapY >= iGridHeight))
+		{
+			continue;
+		}
+
+		for (int iDX = -iRange; iDX <= iRange; iDX++)
+		{
+			const int iMapX = coordRange(iX + iDX, iGridWidth, isWrapXINLINE());
+
+			if ((iMapX < 0) || (iMapX >= iGridWidth) || ((iDX == 0) && (iDY == 0)))
+			{
+				continue;
+			}
+
+			const int iPlot = (iMapY * iGridWidth) + iMapX;
+
+			if ((m_aiPlotOwnerTeams[iPlot] & uiTeams) != 0)
+			{
+				const CvPlot& kLoopPlot = m_pMapPlots[iPlot];
+
+				if ((kLoopPlot.getArea() == iArea) && ((std::max(abs(iDX), abs(iDY)) == 1) || kLoopPlot.isRoute()))
+				{
+					return true;
+				}
+			}
+		}
+	}
+
+	return false;
 }

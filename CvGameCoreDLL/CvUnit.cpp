@@ -10055,6 +10055,12 @@ void CvUnit::changeExtraMoves(int iChange)
 {
 	m_iExtraMoves += iChange;
 	FAssert(getExtraMoves() >= 0);
+
+	// the map's team index keeps how far the units on each plot reach: see CvMap.cpp
+	if ((iChange != 0) && (plot() != NULL))
+	{
+		GC.getMapINLINE().updatePlotTeams(plot());
+	}
 }
 
 
