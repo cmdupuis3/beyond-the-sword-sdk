@@ -663,6 +663,8 @@ protected:
 	void updateMoves();
 	void updateTimers();
 	void updateAhead();
+	void updateSlice();
+	int nextSliceWait(bool bNewGameTurn, int iStartRequests, int iPasses, DWORD uiStartTime);
 	void updateTurnTimer();
 
 	void testAlive();

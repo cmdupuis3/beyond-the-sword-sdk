@@ -1,6 +1,8 @@
 #include "CvGameCoreDLL.h"
 #include "CvDiploParameters.h"
 
+extern int g_iDiplomacyRequests;
+
 CvDiploParameters::CvDiploParameters(PlayerTypes ePlayer) :
 	m_eWhoTalkingTo(ePlayer),
 	m_eCommentType(NO_DIPLOCOMMENT),
@@ -14,6 +16,7 @@ CvDiploParameters::CvDiploParameters(PlayerTypes ePlayer) :
 {
 	m_ourOffer.clear();
 	m_theirOffer.clear();
+	g_iDiplomacyRequests++;	// see CvGame::update()
 }
 
 CvDiploParameters::~CvDiploParameters() 

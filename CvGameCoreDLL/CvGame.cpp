@@ -2095,10 +2095,196 @@ void CvGame::updateAhead()
 }
 
 
+//
+// The exe calls update() about four times a second and draws frames in between, so the stock
+// game takes at least a quarter of a second for every pass over the players, whatever there
+// was to do. In a single-player game a pass is only worth showing when it leaves something
+// for the player to see or to answer. When it does not, the next pass is run straight away
+// instead of going back to the exe to wait for it.
+//
+// The passes are the stock ones in the stock order: only the frames between them are left
+// out. The game is the same; the turn slice counter counts passes as it always did.
+//
+// A popup does not make the passes wait. The stock game goes on with the other players'
+// turns while one is up, and the player answers it when their own turn has come round.
+//
+// nextSliceWait() says why the next pass has to wait for the exe, or SLICE_WAIT_NONE.
+//
+int g_iDiplomacyRequests = 0;	// diplomacy screens asked for: see CvDiploParameters
+
+// With no human player to wait for (autoplay), the exe gets to draw when a game turn is done
+// and it has not drawn for this long.
+static const DWORD AUTOPLAY_FRAME_MS = 1000;
+
+enum SliceWaitTypes
+{
+	SLICE_WAIT_NONE,
+	SLICE_WAIT_STOCK,			// multiplayer, or STOCK_TURN_SLICES is set
+	SLICE_WAIT_WORLDBUILDER,
+	SLICE_WAIT_GAME_OVER,
+	SLICE_WAIT_GAME_TURN,		// a game turn is done and it is time to draw: see AUTOPLAY_FRAME_MS
+	SLICE_WAIT_HUMAN_TURN,
+	SLICE_WAIT_DIPLOMACY,		// a diplomacy screen is up or has been asked for
+	SLICE_WAIT_ACTION_SHOWN,	// a move or a fight that is being played for the player
+	SLICE_WAIT_FRAME,			// TURN_LOOP_FRAME_MS has passed
+	SLICE_WAIT_PASSES,
+	NUM_SLICE_WAIT_TYPES
+};
+
+static const int MAX_SLICE_PASSES = 500;
+
+int CvGame::nextSliceWait(bool bNewGameTurn, int iStartRequests, int iPasses, DWORD uiStartTime)
+{
+	static int iStock = -1;
+	static int iFrameMs = -1;
+
+	if (iStock == -1)
+	{
+		iStock = ((GC.getDefineINT("STOCK_TURN_SLICES") != 0) ? 1 : 0);
+		iFrameMs = std::max(0, GC.getDefineINT("TURN_LOOP_FRAME_MS"));
+	}
+
+	if ((iStock != 0) || isGameMultiPlayer())
+	{
+		return SLICE_WAIT_STOCK;
+	}
+
+	if (gDLL->GetWorldBuilderMode() || gDLL->getInterfaceIFace()->isInAdvancedStart())
+	{
+		return SLICE_WAIT_WORLDBUILDER;
+	}
+
+	if ((getGameState() == GAMESTATE_OVER) || isPaused())
+	{
+		return SLICE_WAIT_GAME_OVER;
+	}
+
+	const DWORD uiElapsed = GetTickCount() - uiStartTime;
+
+	if (bNewGameTurn && (uiElapsed >= AUTOPLAY_FRAME_MS))
+	{
+		return SLICE_WAIT_GAME_TURN;
+	}
+
+	// An AI player that talks to a human does so at the end of its turn. The request is
+	// counted where it is made, because the exe may not take it up until it next draws;
+	// after that it is in the player's queue or on the screen. The stock pace is kept
+	// until the human has answered.
+	if ((g_iDiplomacyRequests != iStartRequests) || gDLL->isDiplomacy())
+	{
+		return SLICE_WAIT_DIPLOMACY;
+	}
+
+	if ((getActivePlayer() != NO_PLAYER) && !(GET_PLAYER(getActivePlayer()).getDiplomacy().empty()))
+	{
+		return SLICE_WAIT_DIPLOMACY;
+	}
+
+	for (int iI = 0; iI < MAX_PLAYERS; iI++)
+	{
+		CvPlayer& kPlayer = GET_PLAYER((PlayerTypes)iI);
+
+		if (kPlayer.isAlive() && kPlayer.isTurnActive())
+		{
+			// A human who has ended the turn has nothing left to decide: their units finish
+			// their orders, and wait below like any others if they are being shown.
+			if (kPlayer.isHuman() && !kPlayer.isAutoMoves())
+			{
+				return SLICE_WAIT_HUMAN_TURN;
+			}
+
+			// Mission and combat timers are only started for what a human is shown (see
+			// CvSelectionGroup::updateMissionTimer() and CvUnit::isCombatVisible()), and they
+			// count passes. The stock pace is kept while one runs, so it is seen as before.
+			int iLoop;
+			for (CvSelectionGroup* pLoopGroup = kPlayer.firstSelectionGroup(&iLoop); pLoopGroup != NULL; pLoopGroup = kPlayer.nextSelectionGroup(&iLoop))
+			{
+				if (pLoopGroup->isBusy())
+				{
+					return SLICE_WAIT_ACTION_SHOWN;
+				}
+			}
+		}
+	}
+
+	if ((iFrameMs > 0) && (uiElapsed >= (DWORD)iFrameMs))
+	{
+		return SLICE_WAIT_FRAME;
+	}
+
+	if (iPasses >= MAX_SLICE_PASSES)
+	{
+		return SLICE_WAIT_PASSES;
+	}
+
+	return SLICE_WAIT_NONE;
+}
+
+
 void CvGame::update()
 {
-	PROFILE("CvGame::update");
+#ifdef BRIDGED_PROFILE
+	// the time the exe keeps for itself between two calls: frames, and waiting for the next slice
+	// split by how long the call before took, since the exe paces the calls by the clock
+	static unsigned long long uiLastReturn = 0;
+	static DWORD uiLastCallMs = 0;
+	if (uiLastReturn != 0)
+	{
+		static BridgedProfileSample aBetweenSamples[4] = {
+			{ "exe, between calls of CvGame::update: after a call under 100 ms" },
+			{ "exe, between calls of CvGame::update: after a call of 100-249 ms" },
+			{ "exe, between calls of CvGame::update: after a call of 250-999 ms" },
+			{ "exe, between calls of CvGame::update: after a call of 1 s or more" },
+		};
+		bridgedProfileAdd(&aBetweenSamples[(uiLastCallMs < 100) ? 0 : ((uiLastCallMs < 250) ? 1 : ((uiLastCallMs < 1000) ? 2 : 3))], bridgedProfileTicks() - uiLastReturn);
+	}
+	const DWORD uiCallStart = GetTickCount();
+#endif
+	{
+		PROFILE("CvGame::update");
 
+		const DWORD uiStartTime = GetTickCount();
+		int iPasses = 0;
+		int iWait;
+
+		do
+		{
+			const int iStartGameTurn = getGameTurn();
+			const int iStartRequests = g_iDiplomacyRequests;
+
+			updateSlice();
+			iPasses++;
+
+			iWait = nextSliceWait((getGameTurn() != iStartGameTurn), iStartRequests, iPasses, uiStartTime);
+
+#ifdef BRIDGED_PROFILE
+			static BridgedProfileSample aWaitSamples[NUM_SLICE_WAIT_TYPES] = {
+				{ "turn slices: next pass run at once" },
+				{ "turn slices: back to exe, stock pacing (multiplayer or define)" },
+				{ "turn slices: back to exe, world builder or advanced start" },
+				{ "turn slices: back to exe, game over or paused" },
+				{ "turn slices: back to exe, game turn done and time to draw" },
+				{ "turn slices: back to exe, human player's turn" },
+				{ "turn slices: back to exe, diplomacy" },
+				{ "turn slices: back to exe, move or fight being shown" },
+				{ "turn slices: back to exe, frame time reached" },
+				{ "turn slices: back to exe, pass limit" },
+			};
+			bridgedProfileAdd(&aWaitSamples[iWait], 0);
+#endif
+		}
+		while (iWait == SLICE_WAIT_NONE);
+	}
+#ifdef BRIDGED_PROFILE
+	uiLastCallMs = GetTickCount() - uiCallStart;
+	uiLastReturn = bridgedProfileTicks();
+#endif
+}
+
+
+// One pass of the stock CvGame::update().
+void CvGame::updateSlice()
+{
 	if (!gDLL->GetWorldBuilderMode() || isInAdvancedStart())
 	{
 		sendPlayerOptions();

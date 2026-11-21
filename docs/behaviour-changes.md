@@ -176,3 +176,68 @@ The games differ from the turn the rules first act, so the totals are from diffe
 and the first four rows are within what that alone would give. The last row fell in every
 one of the five games. The first rule is rarely needed: it took over a build twice in those
 five games, and eight times in the 250-turn huge game.
+
+## AI turns do not wait for the screen
+
+### What changed
+
+The exe calls `CvGame::update()` about four times a second and draws frames in between. Each
+call makes one pass over the players: whoever's turn it is moves their units, and when they
+are done the turn goes to the next player. A pass that leaves something unfinished is taken
+up again in the next call, so the stock game spends at least a fifth of a second waiting
+every time that happens, and once more for every game turn.
+
+In a single-player game `CvGame::update()` now makes its next pass straight away, in the
+same call, unless there is something for the player to see or to do. The passes are the stock
+ones in the stock order (`CvGame::updateSlice()` is the body of the stock function), and the
+turn slice counter still counts passes. Only the frames between them are left out, so the
+game itself is the same: the seeded standard game has the same state hash on all 151 turns.
+
+`CvGame::nextSliceWait()` decides. The next pass waits for the exe, as in the stock game, when:
+
+- it is a human player's turn and they have not ended it;
+- a unit of the player whose turn it is has a mission or combat timer running. The game only
+  starts these timers for moves and fights that are shown to a human (the Show Enemy Moves,
+  Show Friendly Moves and Quick Combat options, and what the player can see), so everything
+  that was played on screen before is still played, at the same speed;
+- a diplomacy screen is up, or an AI player has just asked for one, until it is answered;
+- the game is over or paused, or the world builder or an advanced start is open;
+- it is a multiplayer game (network, hot seat or play by email): these keep the stock pacing.
+
+With no human player to wait for (autoplay, and the benchmark's autorun), the exe gets to
+draw at the end of a game turn once a second has passed since it last did.
+
+### What a player notices
+
+- The other players' turns take as long as the work in them. Nothing is drawn while they
+  run, unless a move or a fight is being shown, so in a long turn the window does not
+  repaint until it is the player's turn again. Set `TURN_LOOP_FRAME_MS` to draw a frame
+  every so many milliseconds of a long turn; each frame costs about a fifth of a second.
+- A popup raised during the other players' turns (choose production, for example) appears
+  when those turns are over. The stock game goes on with the turns while a popup is up, so
+  what the player decides takes effect no later than it could have before.
+
+Not checked: a game played by a human. The benchmark games have no human player, so the
+waits for a human's turn, for moves being shown and for diplomacy have not been run.
+
+### How to turn it off
+
+Set the global define `STOCK_TURN_SLICES` to 1. Every pass then waits for the exe, as in the
+stock game.
+
+### What it does, measured
+
+Seeded standard game, 150 turns, all players AI. Profile builds have rows for the time the
+exe keeps between calls and for why each pass did or did not wait.
+
+| | stock pacing | passes run at once |
+| --- | ---: | ---: |
+| calls of `CvGame::update()` | 302 | about 10 |
+| time between calls, in the exe | 63.2 s | 1.7 s |
+| time for the 150 turns | 81.8 s | 8.7 s |
+
+The first two rows are from profile builds and the last from release builds. The exe keeps
+about 0.2 s between two calls however long the call before took.
+
+Benchmark times from before this change include those waits and are not comparable with
+times from after it. The state hashes are.
