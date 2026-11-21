@@ -8,6 +8,7 @@
 #include "CvPlot.h"
 #include "CvRandom.h"
 #include "FAStarNode.h"
+#include "KmodPathFinder.h"
 #include "CvCity.h"
 #include "CvTeamAI.h"
 #include "CvInfos.h"
@@ -1219,6 +1220,33 @@ int changeIrrigated(FAStarNode* parent, FAStarNode* node, int data, const void* 
 }
 
 
+//
+// The path functions below serve two pathfinders. The exe's passes itself as the finder and
+// the group as the pointer, and is asked for the flags and the destination of the request.
+// KmodPathFinder passes no finder, and as the pointer its CvPathSettings, which hold all of
+// those.
+//
+static CvSelectionGroup* pathGroup(const void* pointer, FAStar* finder)
+{
+	return ((finder != NULL) ? ((CvSelectionGroup *)pointer) : ((CvPathSettings *)pointer)->pGroup);
+}
+
+static int pathFlags(const void* pointer, FAStar* finder)
+{
+	return ((finder != NULL) ? gDLL->getFAStarIFace()->GetInfo(finder) : ((CvPathSettings *)pointer)->iFlags);
+}
+
+static bool pathIsDest(const void* pointer, FAStar* finder, int iX, int iY)
+{
+	if (finder != NULL)
+	{
+		return gDLL->getFAStarIFace()->IsPathDest(finder, iX, iY);
+	}
+
+	return ((((CvPathSettings *)pointer)->iDestX == iX) && (((CvPathSettings *)pointer)->iDestY == iY));
+}
+
+
 int pathDestValid(int iToX, int iToY, const void* pointer, FAStar* finder)
 {
 	PROFILE_FUNC();
@@ -1235,7 +1263,7 @@ int pathDestValid(int iToX, int iToY, const void* pointer, FAStar* finder)
 	pToPlot = GC.getMapINLINE().plotSorenINLINE(iToX, iToY);
 	FAssert(pToPlot != NULL);
 
-	pSelectionGroup = ((CvSelectionGroup *)pointer);
+	pSelectionGroup = pathGroup(pointer, finder);
 
 	if (pSelectionGroup->atPlot(pToPlot))
 	{
@@ -1251,7 +1279,7 @@ int pathDestValid(int iToX, int iToY, const void* pointer, FAStar* finder)
 
 	if (bAIControl)
 	{
-		if (!(gDLL->getFAStarIFace()->GetInfo(finder) & MOVE_IGNORE_DANGER))
+		if (!(pathFlags(pointer, finder) & MOVE_IGNORE_DANGER))
 		{
 			if (!(pSelectionGroup->canFight()) && !(pSelectionGroup->alwaysInvisible()))
 			{
@@ -1301,7 +1329,7 @@ int pathDestValid(int iToX, int iToY, const void* pointer, FAStar* finder)
 						{
 							if (pLoopUnit2->isGroupHead())
 							{
-								if (pLoopUnit2->getGroup()->canMoveOrAttackInto(pToPlot, (pSelectionGroup->AI_isDeclareWar(pToPlot) || (gDLL->getFAStarIFace()->GetInfo(finder) & MOVE_DECLARE_WAR))))
+								if (pLoopUnit2->getGroup()->canMoveOrAttackInto(pToPlot, (pSelectionGroup->AI_isDeclareWar(pToPlot) || (pathFlags(pointer, finder) & MOVE_DECLARE_WAR))))
 								{
 									bValid = true;
 									break;
@@ -1321,7 +1349,7 @@ int pathDestValid(int iToX, int iToY, const void* pointer, FAStar* finder)
 		}
 		else
 		{
-			if (!(pSelectionGroup->canMoveOrAttackInto(pToPlot, (pSelectionGroup->AI_isDeclareWar(pToPlot) || (gDLL->getFAStarIFace()->GetInfo(finder) & MOVE_DECLARE_WAR)))))
+			if (!(pSelectionGroup->canMoveOrAttackInto(pToPlot, (pSelectionGroup->AI_isDeclareWar(pToPlot) || (pathFlags(pointer, finder) & MOVE_DECLARE_WAR)))))
 			{
 				return FALSE;
 			}
@@ -1357,7 +1385,7 @@ int pathCost(FAStarNode* parent, FAStarNode* node, int data, const void* pointer
 	pToPlot = GC.getMapINLINE().plotSorenINLINE(node->m_iX, node->m_iY);
 	FAssert(pToPlot != NULL);
 
-	pSelectionGroup = ((CvSelectionGroup *)pointer);
+	pSelectionGroup = pathGroup(pointer, finder);
 
 	iWorstCost = MAX_INT;
 	iWorstMovesLeft = MAX_INT;
@@ -1427,7 +1455,9 @@ int pathCost(FAStarNode* parent, FAStarNode* node, int data, const void* pointer
 					{
 						if (pLoopUnit->canAttack())
 						{
-							if (gDLL->getFAStarIFace()->IsPathDest(finder, pToPlot->getX_INLINE(), pToPlot->getY_INLINE()))
+							// The terms below are the only ones that depend on where the path ends;
+							// pathCostUsesDest() says when they can apply.
+							if (pathIsDest(pointer, finder, pToPlot->getX_INLINE(), pToPlot->getY_INLINE()))
 							{
 								if (pToPlot->isVisibleEnemyDefender(pLoopUnit))
 								{
@@ -1477,24 +1507,58 @@ int pathCost(FAStarNode* parent, FAStarNode* node, int data, const void* pointer
 }
 
 
-int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder)
+//
+// Whether pathCost() can charge the group anything for pDestPlot being the destination of
+// the path, which it does for a step that attacks there. KmodPathFinder asks, because a search
+// tree holding a step costed that way is of no use for another destination. This has to be
+// true whenever pathCost() would add its attack terms for some unit of the group; it may be
+// true when it would not.
+//
+bool pathCostUsesDest(CvSelectionGroup* pSelectionGroup, const CvPlot* pDestPlot)
 {
-	CvSelectionGroup* pSelectionGroup;
+	CLLNode<IDInfo>* pUnitNode;
+	CvUnit* pLoopUnit;
+
+	if (!(pSelectionGroup->AI_isControlled()))
+	{
+		return false;
+	}
+
+	pUnitNode = pSelectionGroup->headUnitNode();
+
+	while (pUnitNode != NULL)
+	{
+		pLoopUnit = ::getUnit(pUnitNode->m_data);
+		pUnitNode = pSelectionGroup->nextUnitNode(pUnitNode);
+
+		if (pLoopUnit->canFight() && pLoopUnit->canAttack())
+		{
+			if (pDestPlot->isVisibleEnemyDefender(pLoopUnit))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+
+//
+// pathValid() in two parts, as K-Mod split it: whether the step from one plot to the next
+// is possible, and whether the group can move on from a plot at all. The second does not
+// depend on where the step goes, so KmodPathFinder asks it once for a plot rather than once
+// for each of its neighbours.
+//
+int pathValid_join(FAStarNode* parent, FAStarNode* node, CvSelectionGroup* pSelectionGroup, int iFlags)
+{
 	CvPlot* pFromPlot;
 	CvPlot* pToPlot;
-	bool bAIControl;
-
-	if (parent == NULL)
-	{
-		return TRUE;
-	}
 
 	pFromPlot = GC.getMapINLINE().plotSorenINLINE(parent->m_iX, parent->m_iY);
 	FAssert(pFromPlot != NULL);
 	pToPlot = GC.getMapINLINE().plotSorenINLINE(node->m_iX, node->m_iY);
 	FAssert(pToPlot != NULL);
-
-	pSelectionGroup = ((CvSelectionGroup *)pointer);
 
 	// XXX might want to take this out...
 	if (pSelectionGroup->getDomainType() == DOMAIN_SEA)
@@ -1508,12 +1572,24 @@ int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointe
 		}
 	}
 
+	return TRUE;
+}
+
+
+int pathValid_source(FAStarNode* parent, CvSelectionGroup* pSelectionGroup, int iFlags)
+{
+	CvPlot* pFromPlot;
+	bool bAIControl;
+
+	pFromPlot = GC.getMapINLINE().plotSorenINLINE(parent->m_iX, parent->m_iY);
+	FAssert(pFromPlot != NULL);
+
 	if (pSelectionGroup->atPlot(pFromPlot))
 	{
 		return TRUE;
 	}
 
-	if (gDLL->getFAStarIFace()->GetInfo(finder) & MOVE_SAFE_TERRITORY)
+	if (iFlags & MOVE_SAFE_TERRITORY)
 	{
 		if (!(pFromPlot->isRevealed(pSelectionGroup->getHeadTeam(), false)))
 		{
@@ -1529,7 +1605,7 @@ int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointe
 		}
 	}
 
-	if (gDLL->getFAStarIFace()->GetInfo(finder) & MOVE_NO_ENEMY_TERRITORY)
+	if (iFlags & MOVE_NO_ENEMY_TERRITORY)
 	{
 		if (pFromPlot->isOwned())
 		{
@@ -1546,7 +1622,7 @@ int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointe
 	{
 		if ((parent->m_iData2 > 1) || (parent->m_iData1 == 0))
 		{
-			if (!(gDLL->getFAStarIFace()->GetInfo(finder) & MOVE_IGNORE_DANGER))
+			if (!(iFlags & MOVE_IGNORE_DANGER))
 			{
 				if (!(pSelectionGroup->canFight()) && !(pSelectionGroup->alwaysInvisible()))
 				{
@@ -1561,7 +1637,7 @@ int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointe
 
 	if (bAIControl || pFromPlot->isRevealed(pSelectionGroup->getHeadTeam(), false))
 	{
-		if (gDLL->getFAStarIFace()->GetInfo(finder) & MOVE_THROUGH_ENEMY)
+		if (iFlags & MOVE_THROUGH_ENEMY)
 		{
 			if (!(pSelectionGroup->canMoveOrAttackInto(pFromPlot)))
 			{
@@ -1581,11 +1657,33 @@ int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointe
 }
 
 
+int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder)
+{
+	CvSelectionGroup* pSelectionGroup;
+	int iFlags;
+
+	if (parent == NULL)
+	{
+		return TRUE;
+	}
+
+	pSelectionGroup = pathGroup(pointer, finder);
+	iFlags = pathFlags(pointer, finder);
+
+	if (!pathValid_join(parent, node, pSelectionGroup, iFlags))
+	{
+		return FALSE;
+	}
+
+	return pathValid_source(parent, pSelectionGroup, iFlags);
+}
+
+
 int pathAdd(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder)
 {
 	PROFILE_FUNC();
 
-	CvSelectionGroup* pSelectionGroup = ((CvSelectionGroup *)pointer);
+	CvSelectionGroup* pSelectionGroup = pathGroup(pointer, finder);
 	FAssert(pSelectionGroup->getNumUnits() > 0);
 
 	int iTurns = 1;
@@ -1593,7 +1691,7 @@ int pathAdd(FAStarNode* parent, FAStarNode* node, int data, const void* pointer,
 
 	if (data == ASNC_INITIALADD)
 	{
-		bool bMaxMoves = (gDLL->getFAStarIFace()->GetInfo(finder) & MOVE_MAX_MOVES);
+		bool bMaxMoves = (pathFlags(pointer, finder) & MOVE_MAX_MOVES);
 		if (bMaxMoves)
 		{
 			iMoves = 0;

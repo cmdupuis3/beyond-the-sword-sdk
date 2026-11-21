@@ -7,6 +7,7 @@
 
 //#include "CvStructs.h"
 #include "LinkedList.h"
+#include "KmodPathFinder.h"
 
 class CvPlot;
 class CvArea;
@@ -201,6 +202,10 @@ public:
 	virtual void AI_seperateNonAI(UnitAITypes eUnitAI) = 0;
 	virtual void AI_seperateAI(UnitAITypes eUnitAI) = 0;
 	virtual bool AI_isFull() = 0;
+
+	// The pathfinder that serves generatePath() for groups under AI control. All groups share
+	// the one instance, so a group's path is there to be read only until the next request.
+	static KmodPathFinder path_finder;
 
 protected:
 	// WARNING: adding to this class will cause the civ4 exe to crash

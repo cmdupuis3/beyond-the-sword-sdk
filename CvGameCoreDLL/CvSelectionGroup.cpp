@@ -24,6 +24,234 @@
 #include "CvEventReporter.h"
 
 
+KmodPathFinder CvSelectionGroup::path_finder;
+
+// The group each pathfinder served last, which is the group whose path it holds.
+static const CvSelectionGroup* s_pKmodPathGroup = NULL;
+static const CvSelectionGroup* s_pExePathGroup = NULL;
+
+//
+// Whether the K-Mod pathfinder in the DLL serves this group, rather than the exe's.
+// It serves the groups under AI control. Groups a human moves stay with the exe's pathfinder:
+// that is the engine that draws the path in the interface, and the units have to go where
+// the path was drawn.
+//
+static bool isKmodPathGroup(const CvSelectionGroup* pGroup)
+{
+#ifdef BRIDGED_PROFILE
+	// PATH_EXE_ONLY: a global define for profile builds. Set, the exe's pathfinder serves
+	// every group, as in the stock game, and a seeded game must match the stock DLL's turn
+	// for turn. That is the test of the branch human groups take, which an all-AI game
+	// otherwise never enters.
+	static int iExeOnly = -1;
+	if (iExeOnly == -1)
+	{
+		iExeOnly = ((GC.getDefineINT("PATH_EXE_ONLY") != 0) ? 1 : 0);
+	}
+	if (iExeOnly != 0)
+	{
+		return false;
+	}
+#endif
+
+	return const_cast<CvSelectionGroup*>(pGroup)->AI_isControlled();
+}
+
+#ifdef BRIDGED_PROFILE
+#include <stdio.h>
+#include <stdlib.h>
+
+//
+// PATH_VERIFY: a global define for profile builds. Set, every request the K-Mod pathfinder
+// serves is also put to a pathfinder of the exe's kept for the purpose, and the two answers
+// are counted against each other in the profile. With 1 the exe's pathfinder searches from
+// scratch each time, which is the stock answer to the request on its own. With 2 it is given
+// the caller's bReuse, and resetPath() resets it, as in the stock game; it then answers as
+// the stock game would to the same run of requests, including the paths it gets wrong by
+// reusing a search aimed at another destination.
+//
+// The first hundred requests of each kind of difference are written, with both paths, to the
+// file named by the BRIDGED_PROFILE_LOG environment variable with ".pathverify.txt" added.
+//
+static int pathVerifyMode()
+{
+	static int iMode = -1;
+	if (iMode == -1)
+	{
+		iMode = std::max(0, GC.getDefineINT("PATH_VERIFY"));
+	}
+	return iMode;
+}
+
+static FAStar* pathVerifyFinder()
+{
+	static FAStar* pFinder = NULL;
+	static int iWidth = 0;
+	static int iHeight = 0;
+	static bool bWrapX = false;
+	static bool bWrapY = false;
+
+	const CvMap& kMap = GC.getMapINLINE();
+
+	if (pFinder == NULL)
+	{
+		pFinder = gDLL->getFAStarIFace()->create();
+	}
+
+	if ((iWidth != kMap.getGridWidthINLINE()) || (iHeight != kMap.getGridHeightINLINE()) || (bWrapX != kMap.isWrapXINLINE()) || (bWrapY != kMap.isWrapYINLINE()))
+	{
+		iWidth = kMap.getGridWidthINLINE();
+		iHeight = kMap.getGridHeightINLINE();
+		bWrapX = kMap.isWrapXINLINE();
+		bWrapY = kMap.isWrapYINLINE();
+		// as CvMap::setup() does for the exe's own pathfinder
+		gDLL->getFAStarIFace()->Initialize(pFinder, iWidth, iHeight, bWrapX, bWrapY, pathDestValid, pathHeuristic, pathCost, pathValid, pathAdd, NULL, NULL);
+	}
+
+	return pFinder;
+}
+
+// Writes "x,y:moves/turns" for each plot of the path that ends at pNode, start first.
+static void pathVerifyWritePath(FILE* pFile, const FAStarNode* pNode)
+{
+	const FAStarNode* apNodes[64];
+	int iCount = 0;
+
+	for (; (pNode != NULL) && (iCount < 64); pNode = pNode->m_pParent)
+	{
+		apNodes[iCount++] = pNode;
+	}
+
+	if (pNode != NULL)
+	{
+		fprintf(pFile, " ...");
+	}
+
+	while (iCount-- > 0)
+	{
+		fprintf(pFile, " %d,%d:%d/%d", apNodes[iCount]->m_iX, apNodes[iCount]->m_iY, apNodes[iCount]->m_iData1, apNodes[iCount]->m_iData2);
+	}
+}
+
+static void pathVerify(const CvSelectionGroup* pGroup, const CvPlot* pFromPlot, const CvPlot* pToPlot, int iFlags, bool bReuse, bool bKmodSuccess, const FAStarNode* pKmodNode)
+{
+	PROFILE("path verify: the exe pathfinder's search");
+
+	static BridgedProfileSample aSamples[5] = {
+		{ "path verify: both failed" }, { "path verify: both succeeded, same turns" },
+		{ "path verify: K-MOD PATH TAKES MORE TURNS" }, { "path verify: K-Mod path takes fewer turns" },
+		{ "path verify: ONE SUCCEEDED, THE OTHER FAILED" } };
+	// The same requests again by the cost of the two paths, which is what both pathfinders
+	// minimise, and the failures by which side failed.
+	static BridgedProfileSample aDetailSamples[11] = {
+		{ "path verify detail: same turns, same cost" }, { "path verify detail: same turns, K-Mod cost lower" }, { "path verify detail: same turns, K-MOD COST HIGHER" },
+		{ "path verify detail: more turns, same cost" }, { "path verify detail: more turns, K-Mod cost lower" }, { "path verify detail: more turns, K-MOD COST HIGHER" },
+		{ "path verify detail: fewer turns, same cost" }, { "path verify detail: fewer turns, K-Mod cost lower" }, { "path verify detail: fewer turns, K-MOD COST HIGHER" },
+		{ "path verify detail: only the K-Mod pathfinder succeeded" }, { "path verify detail: ONLY THE EXE PATHFINDER SUCCEEDED" } };
+	static const char* const aszKind[5] = { "", "COST_HIGHER", "MORE_TURNS", "FEWER_TURNS", "ONE_FAILED" };
+	static int aiWritten[5] = { 0, 0, 0, 0, 0 };
+	static bool bFileStarted = false;
+
+	FAStar* pFinder = pathVerifyFinder();
+
+	gDLL->getFAStarIFace()->SetData(pFinder, pGroup);
+
+	const bool bExeSuccess = gDLL->getFAStarIFace()->GeneratePath(pFinder, pFromPlot->getX_INLINE(), pFromPlot->getY_INLINE(), pToPlot->getX_INLINE(), pToPlot->getY_INLINE(), false, iFlags, (bReuse && (pathVerifyMode() == 2)));
+	const FAStarNode* pExeNode = (bExeSuccess ? gDLL->getFAStarIFace()->GetLastNode(pFinder) : NULL);
+
+	if (!bKmodSuccess)
+	{
+		pKmodNode = NULL;
+	}
+
+	int iKind;	// index into aSamples; for writing, 1 stands for a costlier path in the same turns
+
+	if ((pKmodNode == NULL) || (pExeNode == NULL))
+	{
+		iKind = (((pKmodNode == NULL) && (pExeNode == NULL)) ? 0 : 4);
+
+		if (iKind == 4)
+		{
+			bridgedProfileAdd(&aDetailSamples[(pKmodNode != NULL) ? 9 : 10], 0);
+		}
+	}
+	else
+	{
+		const int iTurns = ((pKmodNode->m_iData2 == pExeNode->m_iData2) ? 0 : ((pKmodNode->m_iData2 > pExeNode->m_iData2) ? 1 : 2));
+		const int iCost = ((pKmodNode->m_iKnownCost == pExeNode->m_iKnownCost) ? 0 : ((pKmodNode->m_iKnownCost < pExeNode->m_iKnownCost) ? 1 : 2));
+
+		iKind = 1 + iTurns;
+		bridgedProfileAdd(&aDetailSamples[(3 * iTurns) + iCost], 0);
+
+		if ((iKind == 1) && (iCost != 2))
+		{
+			bridgedProfileAdd(&aSamples[1], 0);
+			return;
+		}
+	}
+
+	bridgedProfileAdd(&aSamples[iKind], 0);
+
+	if ((iKind == 0) || (aiWritten[iKind] >= 100))
+	{
+		return;
+	}
+
+	const char* szProfilePath = getenv("BRIDGED_PROFILE_LOG");
+
+	if (szProfilePath == NULL)
+	{
+		return;
+	}
+
+	char szPath[1024];
+	_snprintf(szPath, sizeof(szPath) - 1, "%s.pathverify.txt", szProfilePath);
+	szPath[sizeof(szPath) - 1] = '\0';
+
+	FILE* pFile = fopen(szPath, (bFileStarted ? "a" : "w"));
+
+	if (pFile == NULL)
+	{
+		return;
+	}
+
+	bFileStarted = true;
+	aiWritten[iKind]++;
+
+	const CvUnit* pHeadUnit = pGroup->getHeadUnit();
+
+	fprintf(pFile, "%s turn=%d player=%d group=%d units=%d head=%s unitai=%d from=%d,%d to=%d,%d flags=0x%x reuse=%d\n", aszKind[iKind],
+		GC.getGameINLINE().getGameTurn(), (int)pGroup->getOwnerINLINE(), pGroup->getID(), pGroup->getNumUnits(),
+		((pHeadUnit != NULL) ? GC.getUnitInfo(pHeadUnit->getUnitType()).getType() : "none"), ((pHeadUnit != NULL) ? (int)pHeadUnit->AI_getUnitAIType() : -1),
+		pFromPlot->getX_INLINE(), pFromPlot->getY_INLINE(), pToPlot->getX_INLINE(), pToPlot->getY_INLINE(), iFlags, (bReuse ? 1 : 0));
+
+	if (pKmodNode != NULL)
+	{
+		fprintf(pFile, "\tkmod turns=%d cost=%d path", pKmodNode->m_iData2, pKmodNode->m_iKnownCost);
+		pathVerifyWritePath(pFile, pKmodNode);
+		fprintf(pFile, "\n");
+	}
+	else
+	{
+		fprintf(pFile, "\tkmod failed\n");
+	}
+
+	if (pExeNode != NULL)
+	{
+		fprintf(pFile, "\texe  turns=%d cost=%d path", pExeNode->m_iData2, pExeNode->m_iKnownCost);
+		pathVerifyWritePath(pFile, pExeNode);
+		fprintf(pFile, "\n");
+	}
+	else
+	{
+		fprintf(pFile, "\texe  failed\n");
+	}
+
+	fclose(pFile);
+}
+#endif	// BRIDGED_PROFILE
+
+
 // Public Functions...
 
 CvSelectionGroup::CvSelectionGroup()
@@ -3678,6 +3906,30 @@ void CvSelectionGroup::setAutomateType(AutomateTypes eNewValue)
 
 FAStarNode* CvSelectionGroup::getPathLastNode() const
 {
+	bool bKmod;
+
+	// The path is in the pathfinder that served this group's last generatePath(). A group
+	// that neither pathfinder served last has no path of its own left to read, and is shown
+	// the one in the pathfinder it would use, as it was when there was a single pathfinder.
+	if (s_pKmodPathGroup == this)
+	{
+		bKmod = true;
+	}
+	else if (s_pExePathGroup == this)
+	{
+		bKmod = false;
+	}
+	else
+	{
+		bKmod = isKmodPathGroup(this);
+	}
+
+	if (bKmod)
+	{
+		// NULL after a request that failed, and once the pathfinder has been reset
+		return (path_finder.IsPathComplete() ? path_finder.GetEndNode() : NULL);
+	}
+
 	return gDLL->getFAStarIFace()->GetLastNode(&GC.getPathFinder());
 }
 
@@ -3687,6 +3939,11 @@ CvPlot* CvSelectionGroup::getPathFirstPlot() const
 	FAStarNode* pNode;
 
 	pNode = getPathLastNode();
+
+	if (pNode == NULL)
+	{
+		return NULL;
+	}
 
 	if (pNode->m_pParent == NULL)
 	{
@@ -3746,9 +4003,48 @@ bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToP
 	FAStarNode* pNode;
 	bool bSuccess;
 
-	gDLL->getFAStarIFace()->SetData(&GC.getPathFinder(), this);
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample aServedSamples[2] = { { "path: served by the K-Mod pathfinder" }, { "path: served by the exe pathfinder" } };
+#endif
 
-	bSuccess = gDLL->getFAStarIFace()->GeneratePath(&GC.getPathFinder(), pFromPlot->getX_INLINE(), pFromPlot->getY_INLINE(), pToPlot->getX_INLINE(), pToPlot->getY_INLINE(), false, iFlags, bReuse);
+	// The K-Mod pathfinder works out for itself what it can keep from the request before,
+	// so bReuse is not passed on to it.
+	if (isKmodPathGroup(this))
+	{
+		path_finder.SetSettings(this, iFlags);
+
+		bSuccess = path_finder.GeneratePath(pFromPlot->getX_INLINE(), pFromPlot->getY_INLINE(), pToPlot->getX_INLINE(), pToPlot->getY_INLINE());
+
+		s_pKmodPathGroup = this;
+		if (s_pExePathGroup == this)
+		{
+			s_pExePathGroup = NULL;
+		}
+
+#ifdef BRIDGED_PROFILE
+		bridgedProfileAdd(&aServedSamples[0], 0);
+		if (pathVerifyMode() != 0)
+		{
+			pathVerify(this, pFromPlot, pToPlot, iFlags, bReuse, bSuccess, (path_finder.IsPathComplete() ? path_finder.GetEndNode() : NULL));
+		}
+#endif
+	}
+	else
+	{
+		gDLL->getFAStarIFace()->SetData(&GC.getPathFinder(), this);
+
+		bSuccess = gDLL->getFAStarIFace()->GeneratePath(&GC.getPathFinder(), pFromPlot->getX_INLINE(), pFromPlot->getY_INLINE(), pToPlot->getX_INLINE(), pToPlot->getY_INLINE(), false, iFlags, bReuse);
+
+		s_pExePathGroup = this;
+		if (s_pKmodPathGroup == this)
+		{
+			s_pKmodPathGroup = NULL;
+		}
+
+#ifdef BRIDGED_PROFILE
+		bridgedProfileAdd(&aServedSamples[1], 0);
+#endif
+	}
 
 	if (piPathTurns != NULL)
 	{
@@ -3771,7 +4067,22 @@ bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToP
 
 void CvSelectionGroup::resetPath()
 {
-	gDLL->getFAStarIFace()->ForceReset(&GC.getPathFinder());
+	// the pathfinder that generatePath() would use for this group
+	if (isKmodPathGroup(this))
+	{
+		path_finder.Reset();
+
+#ifdef BRIDGED_PROFILE
+		if (pathVerifyMode() == 2)
+		{
+			gDLL->getFAStarIFace()->ForceReset(pathVerifyFinder());
+		}
+#endif
+	}
+	else
+	{
+		gDLL->getFAStarIFace()->ForceReset(&GC.getPathFinder());
+	}
 }
 
 
@@ -3823,6 +4134,12 @@ bool CvSelectionGroup::addUnit(CvUnit* pUnit, bool bMinimalChange)
 	if (!bAdded)
 	{
 		m_units.insertAtEnd(pUnit->getIDInfo());
+	}
+
+	// A search tree made for the units this group had is of no use for the ones it has now.
+	if (path_finder.GetGroup() == this)
+	{
+		path_finder.Reset();
 	}
 
 	if(!bMinimalChange)
@@ -3892,6 +4209,12 @@ CLLNode<IDInfo>* CvSelectionGroup::deleteUnitNode(CLLNode<IDInfo>* pNode)
 	}
 
 	pNextUnitNode = m_units.deleteNode(pNode);
+
+	// as in addUnit()
+	if (path_finder.GetGroup() == this)
+	{
+		path_finder.Reset();
+	}
 
 	return pNextUnitNode;
 }

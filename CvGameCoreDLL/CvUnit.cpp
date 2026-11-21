@@ -9122,6 +9122,11 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
 	FAssert((iX == INVALID_PLOT_COORD) || (GC.getMapINLINE().plotINLINE(iX, iY)->getX_INLINE() == iX));
 	FAssert((iY == INVALID_PLOT_COORD) || (GC.getMapINLINE().plotINLINE(iX, iY)->getY_INLINE() == iY));
 
+	// A unit arriving on a plot or leaving one (this is also how units appear and die) changes
+	// where groups can go, what they would have to attack and where they are in danger. A
+	// search tree the K-Mod pathfinder has kept does not show that.
+	CvSelectionGroup::path_finder.Reset();
+
 	if (getGroup() != NULL)
 	{
 		eOldActivityType = getGroup()->getActivityType();
@@ -11202,6 +11207,10 @@ void CvUnit::setHasPromotion(PromotionTypes eIndex, bool bNewValue)
 	if (isHasPromotion(eIndex) != bNewValue)
 	{
 		m_pabHasPromotion[eIndex] = bNewValue;
+
+		// A promotion can change what plots cost the unit to enter and how far it moves; a
+		// search tree the K-Mod pathfinder has kept was made without it.
+		CvSelectionGroup::path_finder.Reset();
 
 		iChange = ((isHasPromotion(eIndex)) ? 1 : -1);
 

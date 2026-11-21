@@ -3461,6 +3461,10 @@ void CvTeam::setAtWar(TeamTypes eIndex, bool bNewValue)
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_abAtWar[eIndex] = bNewValue;
 	m_iAtWarEpoch++;	// see getEnemyTeams()
+
+	// War and peace change whose territory and whose units block a group. A search tree the
+	// K-Mod pathfinder has kept was made under the old terms.
+	CvSelectionGroup::path_finder.Reset();
 }
 
 

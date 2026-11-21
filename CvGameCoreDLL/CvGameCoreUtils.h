@@ -28,6 +28,7 @@ class CvCity;
 class CvUnit;
 class CvString;
 class CvRandom;
+class CvSelectionGroup;
 class FAStarNode;
 class FAStar;
 class CvInfoBase;
@@ -322,6 +323,9 @@ int changeIrrigated(FAStarNode* parent, FAStarNode* node, int data, const void* 
 int pathDestValid(int iToX, int iToY, const void* pointer, FAStar* finder);
 int pathHeuristic(int iFromX, int iFromY, int iToX, int iToY);
 int pathCost(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder);
+bool pathCostUsesDest(CvSelectionGroup* pSelectionGroup, const CvPlot* pDestPlot);
+int pathValid_join(FAStarNode* parent, FAStarNode* node, CvSelectionGroup* pSelectionGroup, int iFlags);
+int pathValid_source(FAStarNode* parent, CvSelectionGroup* pSelectionGroup, int iFlags);
 int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder);
 int pathAdd(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder);
 int stepDestValid(int iToX, int iToY, const void* pointer, FAStar* finder);
