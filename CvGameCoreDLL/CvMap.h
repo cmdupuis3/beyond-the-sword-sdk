@@ -275,6 +275,21 @@ public:
 	void changeBlockOwnedPlots(int iX, int iY, TeamTypes eTeam, int iChange);
 	void updatePlotTeams(const CvPlot* pPlot);
 	void setTeamIndexDirty();
+
+	// City-site scores kept by the players: which plots need another look, a bit per player.
+	// See CvPlayerAI::AI_refreshFoundValues().
+	void foundValuesChanged(const CvPlot* pPlot, int iScoreRange, int iDeadlockRange);
+	void setFoundValuesAllDirty();
+	void setFoundValuesDirty(PlayerTypes ePlayer);
+	void setFoundValuesDirtyInArea(PlayerTypes ePlayer, int iArea);
+	void ensureFoundValueDirtyBits();
+	bool isFoundValueScoreDirty(int iPlot, PlayerTypes ePlayer) const { return (((m_aiFoundScoreDirty[iPlot] >> ePlayer) & 1) != 0); }
+	bool isFoundValueDeadlockDirty(int iPlot, PlayerTypes ePlayer) const { return (((m_aiFoundDeadlockDirty[iPlot] >> ePlayer) & 1) != 0); }
+	void clearFoundValueDirty(int iPlot, PlayerTypes ePlayer)
+	{
+		m_aiFoundScoreDirty[iPlot] &= ~(1ULL << ePlayer);
+		m_aiFoundDeadlockDirty[iPlot] &= ~(1ULL << ePlayer);
+	}
 protected:
 
 	int m_iGridWidth;
@@ -297,6 +312,8 @@ protected:
 	enum { TEAM_BLOCK_SHIFT = 3 };										// blocks of 8 x 8 plots
 	enum { TEAM_REACH_WORDS = 4 };										// reach of 1, 2, 3 and 4 or more plots
 	enum { TEAM_INDEX_MAX_RANGE = 12 };									// beyond this the questions are not answered from the index
+	std::vector<unsigned long long> m_aiFoundScoreDirty;		// per plot, a bit per player: score it again
+	std::vector<unsigned long long> m_aiFoundDeadlockDirty;	// per plot, a bit per player: count its deadlocked bonuses again
 	mutable bool m_bTeamIndexDirty;
 	mutable int m_iTeamBlocksWide;
 	mutable std::vector<unsigned short> m_aiBlockTeamUnits;				// per block and team: attacking units there

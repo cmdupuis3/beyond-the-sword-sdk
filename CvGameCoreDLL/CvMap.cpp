@@ -122,6 +122,7 @@ void CvMap::reset(CvMapInitData* pInitInfo)
 	// Uninit class
 	uninit();
 	m_bTeamIndexDirty = true;
+	setFoundValuesAllDirty();
 
 	//
 	// set grid size
@@ -1206,6 +1207,8 @@ void CvMap::recalculateAreas()
 {
 	PROFILE("CvMap::recalculateAreas");
 
+	setFoundValuesAllDirty();	// city-site scores read which area a plot is in
+
 	int iI;
 
 	for (iI = 0; iI < numPlotsINLINE(); iI++)
@@ -1292,6 +1295,7 @@ void CvMap::read(FDataStreamBase* pStream)
 	setup();
 	// the plots' owners and unit lists were read without going through setOwner() and addUnit()
 	m_bTeamIndexDirty = true;
+	setFoundValuesAllDirty();
 }
 
 // save object to a stream
@@ -1409,6 +1413,121 @@ void CvMap::calculateAreas()
 // Blocks and plots do not depend on each other and a question only reads them, so a clean
 // index can be read from several threads at once.
 //
+//
+// The dirty bits for the city-site scores the players keep: see
+// CvPlayerAI::AI_refreshFoundValues(), which lists what a score is worked out from and which
+// call here covers each input.
+//
+// A plot has two bits for each player. The first says that something the plot's score reads
+// may have changed, so it is scored again. The second says that only something its count of
+// deadlocked bonuses reads may have changed, which reaches much further than the rest of the
+// score; then the count is taken again and the plot is scored only if it differs.
+//
+// The bits exist once a player has asked for them, and they start out all set.
+//
+void CvMap::ensureFoundValueDirtyBits()
+{
+	FAssert(MAX_PLAYERS <= 64);	// one bit per player
+
+	if ((int)m_aiFoundScoreDirty.size() != numPlotsINLINE())
+	{
+		m_aiFoundScoreDirty.assign(numPlotsINLINE(), ~0ULL);
+		m_aiFoundDeadlockDirty.assign(numPlotsINLINE(), ~0ULL);
+	}
+}
+
+
+// Every plot, for every player.
+void CvMap::setFoundValuesAllDirty()
+{
+	m_aiFoundScoreDirty.clear();
+	m_aiFoundDeadlockDirty.clear();
+}
+
+
+void CvMap::setFoundValuesDirty(PlayerTypes ePlayer)
+{
+	const unsigned long long uiPlayer = (1ULL << ePlayer);
+
+	for (size_t i = 0; i < m_aiFoundScoreDirty.size(); i++)
+	{
+		m_aiFoundScoreDirty[i] |= uiPlayer;
+	}
+}
+
+
+void CvMap::setFoundValuesDirtyInArea(PlayerTypes ePlayer, int iArea)
+{
+	const unsigned long long uiPlayer = (1ULL << ePlayer);
+
+	for (size_t i = 0; i < m_aiFoundScoreDirty.size(); i++)
+	{
+		if (m_pMapPlots[i].getArea() == iArea)
+		{
+			m_aiFoundScoreDirty[i] |= uiPlayer;
+		}
+	}
+}
+
+
+//
+// Something about pPlot has changed that the score of a plot within iScoreRange reads, or
+// that the deadlocked-bonus count of a plot within iDeadlockRange reads (-1 for neither).
+//
+void CvMap::foundValuesChanged(const CvPlot* pPlot, int iScoreRange, int iDeadlockRange)
+{
+	if (m_aiFoundScoreDirty.empty())
+	{
+		return;	// nobody keeps scores yet
+	}
+
+	const int iRange = std::max(iScoreRange, iDeadlockRange);
+
+	if ((iRange < 0) || (iRange > TEAM_INDEX_MAX_RANGE))
+	{
+		FAssert(iRange < 0);
+		return;
+	}
+
+	int aiMapX[(2 * TEAM_INDEX_MAX_RANGE) + 1];
+	int aiRowStart[(2 * TEAM_INDEX_MAX_RANGE) + 1];
+	getWindowCoords(pPlot->getX_INLINE(), pPlot->getY_INLINE(), iRange, aiMapX, aiRowStart);
+
+	const int iWidth = (2 * iRange) + 1;
+
+	for (int iRow = 0; iRow < iWidth; iRow++)
+	{
+		if (aiRowStart[iRow] < 0)
+		{
+			continue;
+		}
+
+		const int iRowDistance = abs(iRow - iRange);
+
+		for (int iColumn = 0; iColumn < iWidth; iColumn++)
+		{
+			if (aiMapX[iColumn] < 0)
+			{
+				continue;
+			}
+
+			const int iPlot = aiRowStart[iRow] + aiMapX[iColumn];
+			const int iDistance = std::max(iRowDistance, abs(iColumn - iRange));
+
+			if (iDistance <= iScoreRange)
+			{
+				m_aiFoundScoreDirty[iPlot] = ~0ULL;
+			}
+
+			if (iDistance <= iDeadlockRange)
+			{
+				m_aiFoundDeadlockDirty[iPlot] = ~0ULL;
+			}
+		}
+	}
+}
+
+
 void CvMap::setTeamIndexDirty()
 {
 	m_bTeamIndexDirty = true;

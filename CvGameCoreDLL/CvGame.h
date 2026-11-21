@@ -662,6 +662,7 @@ protected:
 	void updateWar();
 	void updateMoves();
 	void updateTimers();
+	void updateAhead();
 	void updateTurnTimer();
 
 	void testAlive();

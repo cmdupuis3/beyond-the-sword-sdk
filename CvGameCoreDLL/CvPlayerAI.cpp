@@ -384,6 +384,18 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 
 	AI_updateFoundValues();
 
+	// FOUND_VALUE_AHEAD_TEST: a global define for games with no human player. Set, the first
+	// player's turn stands in for a human's: the other players' city-site scores are worked
+	// on at its start, as CvGame::updateAhead() does while a human takes their turn. A game
+	// must play out exactly as it does without it.
+	if ((getID() == 0) && (GC.getDefineINT("FOUND_VALUE_AHEAD_TEST") != 0))
+	{
+		for (int iPlayer = 1; iPlayer < MAX_CIV_PLAYERS; iPlayer++)
+		{
+			GET_PLAYER((PlayerTypes)iPlayer).AI_updateFoundValuesAhead();
+		}
+	}
+
 	if (GC.getGameINLINE().getSorenRandNum(8, "AI Update Area Targets") == 0) // XXX personality???
 	{
 		AI_updateAreaTargets();
@@ -878,12 +890,9 @@ void CvPlayerAI::AI_updateFoundValues(bool bStartingLoc) const
 	{
 		const int iMaxCityCount = 4;
 
-		// FOUND_VALUE_CACHE is a global define, absent (0) in the stock game. Set to 1, a
-		// plot is re-scored only when something its score depends on has changed; see
-		// AI_updateFoundValuesCached(). The values are the same either way. The cache cannot
-		// follow a Python found value override, and the barbarians' scores depend on every
-		// city in the game, so both keep the plain sweep.
-		const bool bCached = (GC.getDefineINT("FOUND_VALUE_CACHE") != 0) && !isBarbarian() && !GC.getUSE_GET_CITY_FOUND_VALUE_CALLBACK();
+		// A plot is scored again only when something its score is worked out from has
+		// changed: see AI_refreshFoundValues(). The values are the same as the plain sweep's.
+		const bool bCached = AI_isFoundValueKept();
 
 		if (!isBarbarian())
 		{
@@ -891,13 +900,13 @@ void CvPlayerAI::AI_updateFoundValues(bool bStartingLoc) const
 		}
 
 #ifdef BRIDGED_PROFILE
-		static BridgedProfileSample aSweepSamples[2] = { { "FV sweep, every revealed plot" }, { "FV sweep, cached" } };
+		static BridgedProfileSample aSweepSamples[2] = { { "FV sweep, every revealed plot" }, { "FV sweep, changed plots only" } };
 		const unsigned long long uiSweepStart = bridgedProfileTicks();
 #endif
 
 		if (bCached)
 		{
-			AI_updateFoundValuesCached();
+			AI_refreshFoundValues(false);
 		}
 		else
 		{
@@ -924,10 +933,10 @@ void CvPlayerAI::AI_updateFoundValues(bool bStartingLoc) const
 }
 
 
+// Every plot is scored afresh at the next sweep.
 void CvPlayerAI::AI_invalidateFoundValueCache() const
 {
-	m_aiFoundValueCache.clear();
-	m_aiFoundValueSignature.clear();
+	m_aFoundValueRecords.clear();
 }
 
 
@@ -1002,195 +1011,283 @@ void CvPlayerAI::AI_updateFoundValuesAll() const
 
 
 //
-// What one sweep of AI_updateFoundValuesCached() works out once and uses for every plot.
+// What one call of AI_refreshFoundValues() works out once, and what the scoring of the plot in
+// hand has read so far.
 //
 struct FoundValueSweep
 {
-	unsigned long long uiPlayerSignature;	// the inputs that are the same for every plot
-	int iClaimThreshold;					// as AI_foundValue() derives it
-	std::vector<int> aiBonusVal;			// AI_bonusVal() per bonus; MIN_INT until first needed
-	std::vector<int> aiNoTradeableBonus;	// (getNumTradeableBonuses() == 0) per bonus; -1 until first needed
+	const CvPlayerAI* pPlayer;
+	bool bAhead;
+	int iClaimThreshold;				// as AI_foundValue() derives it
+	std::vector<int> aiBonusVal;		// AI_bonusVal() per bonus as this sweep sees it; MIN_INT until first asked for
+
+	bool bRecording;
+	bool bCultureRead;
+	int iDeadlockCount;
+	int iNumBonusAsked;
+	unsigned char aeBonusAsked[CvPlayerAI::FOUND_VALUE_MAX_ASKED];
+	unsigned long long uiTradeableAsked;
 };
+
+// the sweep under way, if any; AI_foundValue() reports to it through the functions below
+static FoundValueSweep* s_pFoundValueSweep = NULL;
 
 inline void foundValueMix(unsigned long long& uiHash, int iValue)
 {
 	uiHash = (uiHash ^ (unsigned int)iValue) * 0x100000001b3ULL;
 }
 
-
-//
-// A hash of everything AI_foundValue(plot) reads when there are no planned city sites, or
-// 0 where it is certain to return 0. Two calls that give the same non-zero result mean
-// AI_foundValue() would return the same score, so AI_updateFoundValuesCached() can keep
-// the score it has.
-//
-// This must read every input AI_foundValue() reads on its normal path (bStartingLoc
-// false, iMinRivalRange -1). Each test below names the part of AI_foundValue() it covers;
-// a change there needs the matching change here. Reading more than the score uses is
-// harmless: it only costs a re-score. Profile builds can check the pairing by setting the
-// FOUND_VALUE_VERIFY define, which compares every cached score with a fresh one.
-//
-// Left out because they cannot change during a game: rivers, the map's shape, the info
-// XML, the player's traits, game options and global defines.
-//
-unsigned long long CvPlayerAI::AI_foundValueSignature(CvPlot* pPlot, FoundValueSweep& kSweep) const
+// AI_foundValue() has read a culture multiplier.
+inline void foundValueCultureRead(const CvPlayerAI* pPlayer)
 {
-	const int iX = pPlot->getX_INLINE();
-	const int iY = pPlot->getY_INLINE();
-	const TeamTypes eTeam = getTeam();
-	CvPlot* pLoopPlot;
-	int iI;
+	FoundValueSweep* pSweep = s_pFoundValueSweep;
 
-	// the three ways out before any scoring
-	if (!canFound(iX, iY))
+	if ((pSweep != NULL) && (pSweep->pPlayer == pPlayer) && pSweep->bRecording)
 	{
-		return 0;
+		pSweep->bCultureRead = true;
 	}
-
-	CvArea* pArea = pPlot->area();
-	const bool bIsCoastal = pPlot->isCoastalLand(GC.getMIN_WATER_SIZE_FOR_OCEAN());
-	const int iNumAreaCities = pArea->getCitiesPerPlayer(getID());
-
-	if ((getAdvancedStartPoints() < 0) && !bIsCoastal && (iNumAreaCities == 0))
-	{
-		return 0;
-	}
-
-	int iOwnedTiles = 0;
-
-	for (iI = 0; iI < NUM_CITY_PLOTS; iI++)
-	{
-		pLoopPlot = plotCity(iX, iY, iI);
-
-		if (pLoopPlot == NULL)
-		{
-			iOwnedTiles++;
-		}
-		else if (pLoopPlot->isOwned())
-		{
-			if (pLoopPlot->getTeam() != eTeam)
-			{
-				iOwnedTiles++;
-			}
-		}
-	}
-
-	if (iOwnedTiles > (NUM_CITY_PLOTS / 3))
-	{
-		return 0;
-	}
-
-	unsigned long long uiHash = kSweep.uiPlayerSignature;
-
-	// the plot itself, and its area's city counts (the coastal bonus and the area multipliers)
-	foundValueMix(uiHash, pPlot->getFoundModifier(getID()));
-	foundValueMix(uiHash, bIsCoastal);
-	foundValueMix(uiHash, iNumAreaCities);
-	foundValueMix(uiHash, pArea->getNumCities());
-	foundValueMix(uiHash, pArea->getNumTiles());
-	foundValueMix(uiHash, GET_TEAM(eTeam).countNumCitiesByArea(pArea));
-	foundValueMix(uiHash, GET_TEAM(BARBARIAN_TEAM).countNumCitiesByArea(pArea));
-	foundValueMix(uiHash, pPlot->getBonusType());	// the advanced start penalty looks at the bonus whether or not it is revealed
-
-	// AI_countDeadlockedBonuses() reaches well beyond the city radius, so take its answer
-	foundValueMix(uiHash, AI_countDeadlockedBonuses(pPlot));
-
-	// the city radius: bad tiles, taken tiles, yields, culture, bonuses, health
-	for (iI = 0; iI < NUM_CITY_PLOTS; iI++)
-	{
-		pLoopPlot = plotCity(iX, iY, iI);
-
-		if (pLoopPlot == NULL)
-		{
-			foundValueMix(uiHash, -1);
-			continue;
-		}
-
-		const PlayerTypes eOwner = pLoopPlot->getOwnerINLINE();
-
-		foundValueMix(uiHash, eOwner);
-		foundValueMix(uiHash, pLoopPlot->getTeam());
-		foundValueMix(uiHash, pLoopPlot->getPlotType());		// with terrain, feature and bonus: impassable, hills,
-		foundValueMix(uiHash, pLoopPlot->getTerrainType());		// water and the calculateBestNatureYield() results
-		foundValueMix(uiHash, pLoopPlot->getFeatureType());
-		foundValueMix(uiHash, pLoopPlot->isFreshWater());
-		foundValueMix(uiHash, pLoopPlot->isCityRadius());
-		foundValueMix(uiHash, pLoopPlot->getYield(YIELD_FOOD));
-		foundValueMix(uiHash, pLoopPlot->getYield(YIELD_PRODUCTION));
-		foundValueMix(uiHash, pLoopPlot->getYield(YIELD_COMMERCE));
-		foundValueMix(uiHash, (pLoopPlot->area() == pArea) ? 1 : 0);
-		foundValueMix(uiHash, (pLoopPlot->area()->getCitiesPerPlayer(getID()) > 0) ? 1 : 0);
-
-		// culture enters only through this multiplier, and only on plots someone else owns
-		if ((eOwner != NO_PLAYER) && (eOwner != getID()))
-		{
-			int iCultureMultiplier = 100 * (pLoopPlot->getCulture(getID()) + kSweep.iClaimThreshold);
-			iCultureMultiplier /= (std::max(1, pLoopPlot->getCulture(eOwner)) + kSweep.iClaimThreshold);
-			foundValueMix(uiHash, std::min(100, iCultureMultiplier));
-		}
-
-		const BonusTypes eBonus = pLoopPlot->getBonusType(eTeam);
-
-		foundValueMix(uiHash, eBonus);
-
-		if (eBonus != NO_BONUS)
-		{
-			if (kSweep.aiBonusVal[eBonus] == MIN_INT)
-			{
-				kSweep.aiBonusVal[eBonus] = AI_bonusVal(eBonus);
-				kSweep.aiNoTradeableBonus[eBonus] = (getNumTradeableBonuses(eBonus) == 0) ? 1 : 0;
-			}
-
-			foundValueMix(uiHash, kSweep.aiBonusVal[eBonus]);
-			foundValueMix(uiHash, kSweep.aiNoTradeableBonus[eBonus]);
-		}
-	}
-
-	return std::max(1ULL, uiHash);
 }
 
 
 //
-// The sweep with the FOUND_VALUE_CACHE define set. Scoring a plot is the expensive part of
-// AI_updateFoundValues(), and from one turn to the next most scores do not change, so the
-// score of each plot is kept together with a signature of what it was computed from, and a
-// plot is scored again only when its signature has changed.
+// AI_bonusVal() for a sweep.
 //
-// Working out a signature is not cheap: it still counts the deadlocked bonuses, tests
-// fresh water around the plot and asks for bonus values, as scoring does. What it saves
-// is the yield and value arithmetic. In a 150-turn standard-map game about a quarter of
-// the candidate plots were re-scored and the whole update took 7% less time.
+// AI_baseBonusVal() keeps the first value it works out for a bonus until the player's next
+// turn, so asking is not free of consequences: it fixes the value at the moment of asking.
+// A sweep at the player's own turn asks as the stock sweep does. A sweep made ahead of the
+// turn must leave no trace, so where the value has not been fixed yet it is worked out and
+// the slot is cleared again.
 //
-// Every revealed plot's found value is still written back on every call, because choosing
-// the planned city sites afterwards adjusts the values around each site. The cache holds
-// the scores before that adjustment.
+int CvPlayerAI::AI_foundSweepBonusVal(FoundValueSweep& kSweep, BonusTypes eBonus) const
+{
+	if (kSweep.aiBonusVal[eBonus] == MIN_INT)
+	{
+		const bool bUnfixed = (m_aiBonusValue[eBonus] == -1);
+
+		kSweep.aiBonusVal[eBonus] = AI_bonusVal(eBonus);
+
+		if (kSweep.bAhead && bUnfixed)
+		{
+			m_aiBonusValue[eBonus] = -1;
+		}
+	}
+
+	return kSweep.aiBonusVal[eBonus];
+}
+
+
+// AI_bonusVal() as AI_foundValue() asks for it: a sweep notes which bonuses were asked for.
+int CvPlayerAI::AI_foundBonusVal(BonusTypes eBonus) const
+{
+	FoundValueSweep* pSweep = s_pFoundValueSweep;
+
+	if ((pSweep == NULL) || (pSweep->pPlayer != this))
+	{
+		return AI_bonusVal(eBonus);
+	}
+
+	const int iValue = AI_foundSweepBonusVal(*pSweep, eBonus);
+
+	if (pSweep->bRecording)
+	{
+		bool bKnown = false;
+
+		for (int iI = 0; iI < std::min(pSweep->iNumBonusAsked, (int)FOUND_VALUE_MAX_ASKED); iI++)
+		{
+			if (pSweep->aeBonusAsked[iI] == eBonus)
+			{
+				bKnown = true;
+				break;
+			}
+		}
+
+		if (!bKnown)
+		{
+			if (pSweep->iNumBonusAsked < FOUND_VALUE_MAX_ASKED)
+			{
+				pSweep->aeBonusAsked[pSweep->iNumBonusAsked] = (unsigned char)eBonus;
+			}
+
+			pSweep->iNumBonusAsked++;	// past FOUND_VALUE_MAX_ASKED the list is not kept
+		}
+	}
+
+	return iValue;
+}
+
+
+// (getNumTradeableBonuses(eBonus) == 0) as AI_foundValue() asks it.
+bool CvPlayerAI::AI_foundNoTradeableBonus(BonusTypes eBonus) const
+{
+	FoundValueSweep* pSweep = s_pFoundValueSweep;
+
+	if ((pSweep != NULL) && (pSweep->pPlayer == this) && pSweep->bRecording)
+	{
+		pSweep->uiTradeableAsked |= (1ULL << eBonus);
+	}
+
+	return (getNumTradeableBonuses(eBonus) == 0);
+}
+
+
+// AI_countDeadlockedBonuses() as AI_foundValue() asks for it.
+int CvPlayerAI::AI_foundDeadlockedBonuses(CvPlot* pPlot) const
+{
+	FoundValueSweep* pSweep = s_pFoundValueSweep;
+	const int iCount = AI_countDeadlockedBonuses(pPlot);
+
+	if ((pSweep != NULL) && (pSweep->pPlayer == this) && pSweep->bRecording)
+	{
+		pSweep->iDeadlockCount = iCount;
+	}
+
+	return iCount;
+}
+
+
 //
-// One difference from the plain sweep is not in the values: this asks AI_bonusVal() about
-// every revealed bonus near a candidate plot, where AI_foundValue() skips some, and
-// AI_baseBonusVal() keeps the first answer it gives until the player's next turn.
+// A hash of the culture multipliers AI_foundValue() works out around pPlot, one for each
+// plot of the city radius that another player owns. Never 0.
 //
-void CvPlayerAI::AI_updateFoundValuesCached() const
+unsigned int CvPlayerAI::AI_foundCultureHash(const CvPlot* pPlot, int iClaimThreshold) const
+{
+	unsigned long long uiHash = 0xcbf29ce484222325ULL;
+
+	for (int iI = 0; iI < NUM_CITY_PLOTS; iI++)
+	{
+		const CvPlot* pLoopPlot = plotCity(pPlot->getX_INLINE(), pPlot->getY_INLINE(), iI);
+
+		if ((pLoopPlot != NULL) && pLoopPlot->isOwned() && (pLoopPlot->getOwnerINLINE() != getID()))
+		{
+			int iCultureMultiplier = 100 * (pLoopPlot->getCulture(getID()) + iClaimThreshold);
+			iCultureMultiplier /= (std::max(1, pLoopPlot->getCulture(pLoopPlot->getOwnerINLINE())) + iClaimThreshold);
+
+			foundValueMix(uiHash, iI);
+			foundValueMix(uiHash, std::min(100, iCultureMultiplier));
+		}
+	}
+
+	return std::max(1U, (unsigned int)(uiHash ^ (uiHash >> 32)));
+}
+
+
+//
+// Whether this player's city-site scores are kept between turns. Not where the score can
+// come from Python or depend on it, which cannot be followed, and not for the barbarians,
+// whose scores depend on every city in the game. FOUND_VALUE_FULL_SWEEP is a global define
+// that turns the keeping off: every revealed plot is then scored every turn, as in stock.
+//
+bool CvPlayerAI::AI_isFoundValueKept() const
+{
+	if (isBarbarian() || (GC.getNumBonusInfos() > 64) || (MAX_PLAYERS > 64))
+	{
+		return false;
+	}
+
+	if (GC.getUSE_GET_CITY_FOUND_VALUE_CALLBACK() || GC.getUSE_CANNOT_FOUND_CITY_CALLBACK() || GC.getUSE_CAN_FOUND_CITIES_ON_WATER_CALLBACK())
+	{
+		return false;
+	}
+
+	return (GC.getDefineINT("FOUND_VALUE_FULL_SWEEP") == 0);
+}
+
+
+// The city-site scores brought up to date while another player takes their turn: see CvGame::updateAhead().
+void CvPlayerAI::AI_updateFoundValuesAhead() const
+{
+	if (!isAlive() || isHuman() || !AI_isFoundValueKept())
+	{
+		return;
+	}
+
+	PROFILE("FV ahead of the player's turn");
+
+	AI_refreshFoundValues(true);
+}
+
+
+//
+// The sweep that keeps city-site scores.
+//
+// Scoring a plot is the expensive part of AI_updateFoundValues(), and from one turn to the
+// next most scores do not change. So each plot's score is kept, and a plot is scored again
+// only when something its score was worked out from has changed. The result is what the
+// plain sweep gives: the same found values, and the same bonus values fixed at the same
+// moment (see AI_foundSweepBonusVal()).
+//
+// Because a kept score stays right until an input changes, the work can also be done ahead:
+// with bAhead the scores are brought up to date but nothing is written to the plots, and the
+// sweep at the player's own turn then has only what changed in between left to do.
+//
+// What a score is worked out from, and how a change in it is noticed. Anything added to
+// AI_foundValue() has to be added here; profile builds can check the pairing with the
+// FOUND_VALUE_VERIFY define, which compares every kept score with a fresh one.
+//
+// Changes that mark plots through CvMap::foundValuesChanged() (score range, deadlock range):
+//  - who owns a plot: CvPlot::setOwner (2, 6)
+//  - terrain, feature and bonus: CvPlot::setTerrainType, setFeatureType, setBonusType (3, 7)
+//  - a plot's yields: CvPlot::updateYield (2)
+//  - a city coming or going: CvPlot::setPlotCity (4, 8)
+//  - a plot's type, and the areas: CvPlot::setPlotType, CvMap::recalculateAreas (every plot)
+//  - a plot that stops being revealed: CvPlot::setRevealed (0)
+//  - the found modifier and fixed found value of a plot: AI_invalidateFoundValueCache()
+// The score ranges are the city radius, plus one where fresh water is carried to a
+// neighbour and plus two for a city's own radius. The deadlock ranges are those of
+// AI_countDeadlockedBonuses(), which asks canFound() about plots up to six away.
+//
+// Compared here at every sweep:
+//  - what every plot shares: advanced start, the traits, the team's cities and which bonuses
+//    the team can see. A change scores every plot again.
+//  - per area, whether its cities are all this team's, or this team's and the barbarians'.
+//    A change scores that area again.
+//  - per bonus, its value and whether any is tradeable, against the plots that asked.
+//  - the culture multipliers around a plot that read any, by their hash.
+//  - the deadlocked bonuses of a plot whose second bit is set, by their count.
+//
+// Not followed because they cannot change during a game: rivers, the map's shape, the info
+// XML, game options and global defines.
+//
+void CvPlayerAI::AI_refreshFoundValues(bool bAhead) const
 {
 	CvMap& kMap = GC.getMapINLINE();
 	const int iNumPlots = kMap.numPlotsINLINE();
+	const int iNumBonuses = GC.getNumBonusInfos();
 	int iI;
 
 #ifdef BRIDGED_PROFILE
-	static BridgedProfileSample aPlotSamples[4] = {
-		{ "FV cached sweep: plot ruled out" }, { "FV cached sweep: plot kept" },
-		{ "FV cached sweep: plot re-scored" }, { "FV cached sweep: plot prescribed" } };
-	int aiPlotCounts[4] = { 0, 0, 0, 0 };
+	enum { COUNT_KEPT, COUNT_CHANGED_NEARBY, COUNT_FIRST, COUNT_TRADEABLE, COUNT_CULTURE, COUNT_DEADLOCK, COUNT_BONUS, COUNT_DEADLOCK_SAME, NUM_COUNTS };
+	static BridgedProfileSample aPlotSamples[2][NUM_COUNTS] = {
+		{ { "FV plot: kept" }, { "FV plot: scored, something changed nearby" }, { "FV plot: scored for the first time" },
+		  { "FV plot: scored, a bonus became tradeable or stopped" }, { "FV plot: scored, culture changed" },
+		  { "FV plot: scored, deadlocked bonuses changed" }, { "FV plot: scored, a bonus value changed" }, { "FV plot: deadlocked bonuses counted again, same" } },
+		{ { "FV ahead plot: kept" }, { "FV ahead plot: scored, something changed nearby" }, { "FV ahead plot: scored for the first time" },
+		  { "FV ahead plot: scored, a bonus became tradeable or stopped" }, { "FV ahead plot: scored, culture changed" },
+		  { "FV ahead plot: scored, deadlocked bonuses changed" }, { "FV ahead plot: scored, a bonus value changed" }, { "FV ahead plot: deadlocked bonuses counted again, same" } } };
+	int aiCounts[NUM_COUNTS] = { 0, 0, 0, 0, 0, 0, 0, 0 };
 #endif
 
-	if ((int)m_aiFoundValueCache.size() != iNumPlots)
+	kMap.ensureFoundValueDirtyBits();
+
+	if (((int)m_aFoundValueRecords.size() != iNumPlots) || ((int)m_aiFoundBonusVal.size() != iNumBonuses))
 	{
-		m_aiFoundValueCache.assign(iNumPlots, MIN_INT);
-		m_aiFoundValueSignature.assign(iNumPlots, 0);
+		FoundValueRecord kEmpty;
+		memset(&kEmpty, 0, sizeof(kEmpty));
+		kEmpty.iValue = MIN_INT;
+		kEmpty.iDeadlockCount = -1;
+
+		m_aFoundValueRecords.assign(iNumPlots, kEmpty);
+		m_aiFoundBonusVal.assign(iNumBonuses, MIN_INT);
+		m_uiFoundNoTradeable = 0;
+		m_uiFoundPlayerSignature = 0;
+		m_aFoundAreaClass.clear();
 	}
 
 	FoundValueSweep kSweep;
-	kSweep.aiBonusVal.assign(GC.getNumBonusInfos(), MIN_INT);
-	kSweep.aiNoTradeableBonus.assign(GC.getNumBonusInfos(), -1);
+	kSweep.pPlayer = this;
+	kSweep.bAhead = bAhead;
+	kSweep.aiBonusVal.assign(iNumBonuses, MIN_INT);
+	kSweep.bRecording = false;
 
 	// as AI_foundValue() derives it
 	const bool bAdvancedStart = (getAdvancedStartPoints() >= 0);
@@ -1216,11 +1313,13 @@ void CvPlayerAI::AI_updateFoundValuesCached() const
 	kSweep.iClaimThreshold = std::max(1, kSweep.iClaimThreshold);
 	kSweep.iClaimThreshold *= (std::max(100, iGreed));
 
-	// The inputs every plot shares: advanced start, and the team's cities, which decide
-	// the nearest city, the capital, the city count and the spread of the empire.
-	kSweep.uiPlayerSignature = 0xcbf29ce484222325ULL;
-	foundValueMix(kSweep.uiPlayerSignature, bAdvancedStart ? 1 : 0);
-	foundValueMix(kSweep.uiPlayerSignature, iGreed);
+	// What every plot shares: advanced start and the traits, the team's cities, which decide
+	// the nearest city, the capital, the city counts and the spread of the empire, and the
+	// bonuses the team can see.
+	unsigned long long uiPlayerSignature = 0xcbf29ce484222325ULL;
+	foundValueMix(uiPlayerSignature, bAdvancedStart ? 1 : 0);
+	foundValueMix(uiPlayerSignature, iGreed);
+	foundValueMix(uiPlayerSignature, getTeam());
 
 	for (iI = 0; iI < MAX_PLAYERS; iI++)
 	{
@@ -1232,74 +1331,260 @@ void CvPlayerAI::AI_updateFoundValuesCached() const
 
 			for (CvCity* pLoopCity = kLoopPlayer.firstCity(&iLoop); pLoopCity != NULL; pLoopCity = kLoopPlayer.nextCity(&iLoop))
 			{
-				foundValueMix(kSweep.uiPlayerSignature, iI);
-				foundValueMix(kSweep.uiPlayerSignature, pLoopCity->getX_INLINE());
-				foundValueMix(kSweep.uiPlayerSignature, pLoopCity->getY_INLINE());
-				foundValueMix(kSweep.uiPlayerSignature, pLoopCity->isCapital() ? 1 : 0);
+				foundValueMix(uiPlayerSignature, iI);
+				foundValueMix(uiPlayerSignature, pLoopCity->getX_INLINE());
+				foundValueMix(uiPlayerSignature, pLoopCity->getY_INLINE());
+				foundValueMix(uiPlayerSignature, pLoopCity->isCapital() ? 1 : 0);
 			}
 		}
 	}
+
+	for (iI = 0; iI < iNumBonuses; iI++)
+	{
+		// as CvPlot::getBonusType(eTeam) decides it
+		const bool bRevealed = (GET_TEAM(getTeam()).isHasTech((TechTypes)(GC.getBonusInfo((BonusTypes)iI).getTechReveal())) || GET_TEAM(getTeam()).isForceRevealedBonus((BonusTypes)iI));
+		foundValueMix(uiPlayerSignature, bRevealed ? 1 : 0);
+	}
+
+	uiPlayerSignature = std::max(1ULL, uiPlayerSignature);
+
+	if (uiPlayerSignature != m_uiFoundPlayerSignature)
+	{
+		kMap.setFoundValuesDirty(getID());
+		m_uiFoundPlayerSignature = uiPlayerSignature;
+	}
+
+	// The areas. AI_foundValue() asks of a plot's area whether it has no cities, only this
+	// team's, or only this team's and the barbarians'. (How many of them are this team's is
+	// covered by the team's cities above.)
+	{
+		std::vector<std::pair<int, int> > aAreaClass;
+		int iLoop;
+
+		for (CvArea* pLoopArea = kMap.firstArea(&iLoop); pLoopArea != NULL; pLoopArea = kMap.nextArea(&iLoop))
+		{
+			int iClass = 0;
+			const int iAreaCities = pLoopArea->getNumCities();
+
+			if (iAreaCities > 0)
+			{
+				const int iTeamAreaCities = GET_TEAM(getTeam()).countNumCitiesByArea(pLoopArea);
+
+				iClass = 1;
+
+				if (iAreaCities == iTeamAreaCities)
+				{
+					iClass += 1;
+				}
+
+				if (iAreaCities == (iTeamAreaCities + GET_TEAM(BARBARIAN_TEAM).countNumCitiesByArea(pLoopArea)))
+				{
+					iClass += 2;
+				}
+			}
+
+			aAreaClass.push_back(std::make_pair(pLoopArea->getID(), iClass));
+		}
+
+		if (aAreaClass != m_aFoundAreaClass)
+		{
+			bool bSameAreas = (aAreaClass.size() == m_aFoundAreaClass.size());
+
+			for (size_t i = 0; bSameAreas && (i < aAreaClass.size()); i++)
+			{
+				bSameAreas = (aAreaClass[i].first == m_aFoundAreaClass[i].first);
+			}
+
+			if (!bSameAreas)
+			{
+				kMap.setFoundValuesDirty(getID());
+			}
+			else
+			{
+				for (size_t i = 0; i < aAreaClass.size(); i++)
+				{
+					if (aAreaClass[i].second != m_aFoundAreaClass[i].second)
+					{
+						kMap.setFoundValuesDirtyInArea(getID(), aAreaClass[i].first);
+					}
+				}
+			}
+
+			m_aFoundAreaClass.swap(aAreaClass);
+		}
+	}
+
+	// The bonuses none of which is tradeable. Reading this fixes nothing, so every bonus is
+	// looked at; a plot counts as changed if its scoring read one that has flipped.
+	unsigned long long uiNoTradeable = 0;
+
+	for (iI = 0; iI < iNumBonuses; iI++)
+	{
+		if (getNumTradeableBonuses((BonusTypes)iI) == 0)
+		{
+			uiNoTradeable |= (1ULL << iI);
+		}
+	}
+
+	const unsigned long long uiTradeableChanged = (uiNoTradeable ^ m_uiFoundNoTradeable);
+	m_uiFoundNoTradeable = uiNoTradeable;
+
+	// The scores kept are the scores with no city sites planned. At the player's own turn
+	// AI_updateFoundValues() has just cleared the plan; ahead of it the plan is set aside.
+	std::vector<int> aiKeptCitySites;
+	aiKeptCitySites.swap(m_aiAICitySites);
+
+	s_pFoundValueSweep = &kSweep;
 
 	for (iI = 0; iI < iNumPlots; iI++)
 	{
 		CvPlot* pLoopPlot = kMap.plotByIndexINLINE(iI);
 
-		if (pLoopPlot->isRevealed(getTeam(), false))
+		if (!pLoopPlot->isRevealed(getTeam(), false))
 		{
-			int iValue = m_aiFoundValueCache[iI];
-#ifdef BRIDGED_PROFILE
-			int iOutcome = 1;
-#endif
+			// not swept; CvPlot::setRevealed() marks a plot that stops being revealed
+			continue;
+		}
 
-			if ((pLoopPlot->getFixedFoundValue(getID()) >= 0) || (pLoopPlot->getFoundModifier(getID()) <= 0))
-			{
-				// AI_foundValue() answers these at once
-				iValue = AI_foundValueForSweep(pLoopPlot);
-				m_aiFoundValueSignature[iI] = 0;
+		FoundValueRecord& kRecord = m_aFoundValueRecords[iI];
+
+		// Is the kept score still right? The tests run in the order AI_foundValue() reads:
+		// a bonus value is asked for last, and only while every earlier answer stands, so
+		// that no bonus value is fixed that the plain sweep would have left alone.
 #ifdef BRIDGED_PROFILE
-				iOutcome = 3;
+		int iReason = COUNT_KEPT;
 #endif
+		bool bScore = true;
+
+		if (kMap.isFoundValueScoreDirty(iI, getID()))
+		{
+#ifdef BRIDGED_PROFILE
+			iReason = COUNT_CHANGED_NEARBY;
+#endif
+		}
+		else if ((kRecord.iValue == MIN_INT) || (kRecord.iNumBonusAsked == FOUND_VALUE_ASKED_OVERFLOW))
+		{
+#ifdef BRIDGED_PROFILE
+			iReason = COUNT_FIRST;
+#endif
+		}
+		else if ((kRecord.uiTradeableAsked & uiTradeableChanged) != 0)
+		{
+#ifdef BRIDGED_PROFILE
+			iReason = COUNT_TRADEABLE;
+#endif
+		}
+		else if ((kRecord.uiCultureHash != 0) && (AI_foundCultureHash(pLoopPlot, kSweep.iClaimThreshold) != kRecord.uiCultureHash))
+		{
+#ifdef BRIDGED_PROFILE
+			iReason = COUNT_CULTURE;
+#endif
+		}
+		else
+		{
+			bScore = false;
+
+			if ((kRecord.iDeadlockCount >= 0) && kMap.isFoundValueDeadlockDirty(iI, getID()))
+			{
+				if (AI_countDeadlockedBonuses(pLoopPlot) != kRecord.iDeadlockCount)
+				{
+					bScore = true;
+#ifdef BRIDGED_PROFILE
+					iReason = COUNT_DEADLOCK;
+#endif
+				}
+#ifdef BRIDGED_PROFILE
+				else
+				{
+					aiCounts[COUNT_DEADLOCK_SAME]++;
+				}
+#endif
+			}
+
+			for (int iAsked = 0; !bScore && (iAsked < kRecord.iNumBonusAsked); iAsked++)
+			{
+				const BonusTypes eBonus = (BonusTypes)kRecord.aeBonusAsked[iAsked];
+
+				if (AI_foundSweepBonusVal(kSweep, eBonus) != m_aiFoundBonusVal[eBonus])
+				{
+					bScore = true;
+#ifdef BRIDGED_PROFILE
+					iReason = COUNT_BONUS;
+#endif
+				}
+			}
+		}
+
+		kMap.clearFoundValueDirty(iI, getID());
+
+		if (bScore)
+		{
+			kSweep.bRecording = true;
+			kSweep.bCultureRead = false;
+			kSweep.iDeadlockCount = -1;
+			kSweep.iNumBonusAsked = 0;
+			kSweep.uiTradeableAsked = 0;
+
+			kRecord.iValue = AI_foundValueForSweep(pLoopPlot);
+
+			kSweep.bRecording = false;
+
+			kRecord.uiTradeableAsked = kSweep.uiTradeableAsked;
+			kRecord.uiCultureHash = (kSweep.bCultureRead ? AI_foundCultureHash(pLoopPlot, kSweep.iClaimThreshold) : 0);
+			kRecord.iDeadlockCount = (short)kSweep.iDeadlockCount;
+
+			if (kSweep.iNumBonusAsked > FOUND_VALUE_MAX_ASKED)
+			{
+				kRecord.iNumBonusAsked = FOUND_VALUE_ASKED_OVERFLOW;
 			}
 			else
 			{
-				const unsigned long long uiSignature = AI_foundValueSignature(pLoopPlot, kSweep);
+				kRecord.iNumBonusAsked = (unsigned char)kSweep.iNumBonusAsked;
 
-				if (uiSignature == 0)
+				for (int iAsked = 0; iAsked < kSweep.iNumBonusAsked; iAsked++)
 				{
-					iValue = 0;
-#ifdef BRIDGED_PROFILE
-					iOutcome = 0;
-#endif
+					kRecord.aeBonusAsked[iAsked] = kSweep.aeBonusAsked[iAsked];
 				}
-				else if ((iValue == MIN_INT) || (uiSignature != m_aiFoundValueSignature[iI]))
-				{
-					iValue = AI_foundValueForSweep(pLoopPlot);
-#ifdef BRIDGED_PROFILE
-					iOutcome = 2;
-#endif
-				}
-
-				m_aiFoundValueSignature[iI] = uiSignature;
 			}
+		}
 
-			m_aiFoundValueCache[iI] = iValue;
 #ifdef BRIDGED_PROFILE
-			aiPlotCounts[iOutcome]++;
+		aiCounts[iReason]++;
 #endif
 
-			pLoopPlot->setFoundValue(getID(), iValue);
+		if (!bAhead)
+		{
+			// Every revealed plot's found value is written back at every sweep, because
+			// choosing the planned city sites afterwards adjusts the values around each site.
+			pLoopPlot->setFoundValue(getID(), kRecord.iValue);
 
-			if (iValue > pLoopPlot->area()->getBestFoundValue(getID()))
+			if (kRecord.iValue > pLoopPlot->area()->getBestFoundValue(getID()))
 			{
-				pLoopPlot->area()->setBestFoundValue(getID(), iValue);
+				pLoopPlot->area()->setBestFoundValue(getID(), kRecord.iValue);
 			}
 		}
 	}
 
-#ifdef BRIDGED_PROFILE
-	for (iI = 0; iI < 4; iI++)
+	s_pFoundValueSweep = NULL;
+
+	// every kept score that asked for one of these values now stands on the value seen here
+	for (iI = 0; iI < iNumBonuses; iI++)
 	{
-		bridgedProfileAdd(&aPlotSamples[iI], 0, aiPlotCounts[iI]);
+		if (kSweep.aiBonusVal[iI] != MIN_INT)
+		{
+			m_aiFoundBonusVal[iI] = kSweep.aiBonusVal[iI];
+		}
+	}
+
+	if (bAhead)
+	{
+		m_aiAICitySites.swap(aiKeptCitySites);
+	}
+
+#ifdef BRIDGED_PROFILE
+	for (iI = 0; iI < NUM_COUNTS; iI++)
+	{
+		bridgedProfileAdd(&aPlotSamples[bAhead ? 1 : 0][iI], 0, aiCounts[iI]);
 	}
 #endif
 }
@@ -1347,7 +1632,7 @@ void CvPlayerAI::AI_verifyFoundValueCache(int iMaxCityCount) const
 		if (pLoopPlot->isRevealed(getTeam(), false))
 		{
 			const int iStockValue = pLoopPlot->getFoundValue(getID());
-			const bool bSame = ((short)m_aiFoundValueCache[iI] == (short)iStockValue);
+			const bool bSame = ((short)m_aFoundValueRecords[iI].iValue == (short)iStockValue);
 
 			aiCounts[((iStockValue >= iMinFoundValue) ? 0 : 2) + (bSame ? 0 : 1)]++;
 		}
@@ -2275,7 +2560,7 @@ int CvPlayerAI::AI_foundValue(int iX, int iY, int iMinRivalRange, bool bStarting
 
 							if (eBonus != NO_BONUS)
 							{
-								if ((getNumTradeableBonuses(eBonus) == 0) || (AI_bonusVal(eBonus) > 10)
+								if (AI_foundNoTradeableBonus(eBonus) || (AI_foundBonusVal(eBonus) > 10)
 									|| (GC.getBonusInfo(eBonus).getYieldChange(YIELD_FOOD) > 0))
 								{
 									bHasGoodBonus = true;
@@ -2363,6 +2648,7 @@ int CvPlayerAI::AI_foundValue(int iX, int iY, int iMinRivalRange, bool bStarting
                 iCultureMultiplier = 100 * (iOurCulture + iClaimThreshold);
                 iCultureMultiplier /= (iOtherCulture + iClaimThreshold);
                 iCultureMultiplier = std::min(100, iCultureMultiplier);
+                foundValueCultureRead(this);
                 //The multiplier is basically normalized...
                 //100% means we own (or rightfully own) the tile.
                 //50% means the hostile culture is fairly firmly entrenched.
@@ -2526,7 +2812,7 @@ int CvPlayerAI::AI_foundValue(int iX, int iY, int iMinRivalRange, bool bStarting
                     paiBonusCount[eBonus]++;
                     FAssert(paiBonusCount[eBonus] > 0);
 
-                    iTempValue = (AI_bonusVal(eBonus) * ((!bStartingLoc && (getNumTradeableBonuses(eBonus) == 0) && (paiBonusCount[eBonus] == 1)) ? 80 : 20));
+                    iTempValue = (AI_foundBonusVal(eBonus) * ((!bStartingLoc && AI_foundNoTradeableBonus(eBonus) && (paiBonusCount[eBonus] == 1)) ? 80 : 20));
                     iTempValue *= ((bStartingLoc) ? 100 : iGreed);
                     iTempValue /= 100;
 
@@ -2926,7 +3212,7 @@ int CvPlayerAI::AI_foundValue(int iX, int iY, int iMinRivalRange, bool bStarting
 	
 	if (!bStartingLoc)
 	{
-		int iDeadLockCount = AI_countDeadlockedBonuses(pPlot);
+		int iDeadLockCount = AI_foundDeadlockedBonuses(pPlot);
 		if (bAdvancedStart && (iDeadLockCount > 0))
 		{
 			iDeadLockCount += 2;

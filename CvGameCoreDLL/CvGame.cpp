@@ -2043,6 +2043,58 @@ int CvGame::getTeamClosenessScore(int** aaiDistances, int* aiStartingLocs)
 }
 
 
+//
+// Work for the AI players that can be done while a human takes their turn, so that it is not
+// waited for when the turn ends. For now that is their city-site scores.
+//
+// What is done here is never relied on: when an AI player's turn comes it brings its scores
+// up to date in the usual place, and work done ahead only means there is less left to do. So
+// how much gets done, which depends on how long the human takes, cannot change the game.
+//
+// Single-player games only, and one player at a time with a pause between, so that the
+// interface is not held up.
+//
+void CvGame::updateAhead()
+{
+	if (isGameMultiPlayer() || (getActivePlayer() == NO_PLAYER) || (getAIAutoPlay() != 0))
+	{
+		return;
+	}
+
+	const CvPlayerAI& kActivePlayer = GET_PLAYER(getActivePlayer());
+
+	if (!kActivePlayer.isHuman() || !kActivePlayer.isTurnActive())
+	{
+		return;
+	}
+
+	static DWORD uiLastTime = 0;
+	static int iNextPlayer = 0;
+
+	const DWORD uiTime = GetTickCount();
+
+	if ((uiTime - uiLastTime) < 100)
+	{
+		return;
+	}
+
+	uiLastTime = uiTime;
+
+	for (int iI = 0; iI < MAX_CIV_PLAYERS; iI++)
+	{
+		const PlayerTypes ePlayer = (PlayerTypes)((iNextPlayer + iI) % MAX_CIV_PLAYERS);
+		const CvPlayerAI& kPlayer = GET_PLAYER(ePlayer);
+
+		if (kPlayer.isAlive() && !kPlayer.isHuman())
+		{
+			kPlayer.AI_updateFoundValuesAhead();
+			iNextPlayer = (ePlayer + 1) % MAX_CIV_PLAYERS;
+			break;
+		}
+	}
+}
+
+
 void CvGame::update()
 {
 	PROFILE("CvGame::update");
@@ -2082,6 +2134,8 @@ void CvGame::update()
 		AI_updateAssignWork();
 
 		testAlive();
+
+		updateAhead();
 
 		if ((getAIAutoPlay() == 0) && !(gDLL->GetAutorun()) && GAMESTATE_EXTENDED != getGameState())
 		{

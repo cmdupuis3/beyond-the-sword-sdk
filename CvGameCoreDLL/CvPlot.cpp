@@ -4598,6 +4598,7 @@ void CvPlot::setOwner(PlayerTypes eNewValue, bool bCheckUnits, bool bUpdatePlotG
 			m_eOwner = eNewValue;
 
 			GC.getMapINLINE().changeBlockOwnedPlots(getX_INLINE(), getY_INLINE(), getTeam(), 1);
+			GC.getMapINLINE().foundValuesChanged(this, 2, 6);	// see CvPlayerAI::AI_refreshFoundValues()
 			GC.getMapINLINE().updatePlotTeams(this);
 
 			setWorkingCityOverride(NULL);
@@ -4753,6 +4754,7 @@ void CvPlot::setPlotType(PlotTypes eNewValue, bool bRecalculate, bool bRebuildGr
 		updateSeeFromSight(false, true);
 
 		m_ePlotType = eNewValue;
+		GC.getMapINLINE().setFoundValuesAllDirty();	// see CvPlayerAI::AI_refreshFoundValues()
 
 		updateYield();
 		updatePlotGroup();
@@ -5004,6 +5006,7 @@ void CvPlot::setTerrainType(TerrainTypes eNewValue, bool bRecalculate, bool bReb
 		}
 
 		m_eTerrainType = eNewValue;
+		GC.getMapINLINE().foundValuesChanged(this, 3, 7);	// see CvPlayerAI::AI_refreshFoundValues()
 
 		updateYield();
 		updatePlotGroup();
@@ -5078,6 +5081,7 @@ void CvPlot::setFeatureType(FeatureTypes eNewValue, int iVariety)
 		}
 
 		m_eFeatureType = eNewValue;
+		GC.getMapINLINE().foundValuesChanged(this, 3, 7);	// see CvPlayerAI::AI_refreshFoundValues()
 		m_iFeatureVariety = iVariety;
 
 		updateYield();
@@ -5225,6 +5229,7 @@ void CvPlot::setBonusType(BonusTypes eNewValue)
 
 		updatePlotGroupBonus(false);
 		m_eBonusType = eNewValue;
+		GC.getMapINLINE().foundValuesChanged(this, 3, 7);	// see CvPlayerAI::AI_refreshFoundValues()
 		updatePlotGroupBonus(true);
 
 		if (getBonusType() != NO_BONUS)
@@ -5461,6 +5466,10 @@ void CvPlot::setPlotCity(CvCity* pNewValue)
 
 	if (getPlotCity() != pNewValue)
 	{
+		// a city coming or going changes where cities can be founded and which plots are in a
+		// city's radius: see CvPlayerAI::AI_refreshFoundValues()
+		GC.getMapINLINE().foundValuesChanged(this, 4, 8);
+
 		if (isCity())
 		{
 			for (iI = 0; iI < NUM_CITY_PLOTS; ++iI)
@@ -6056,6 +6065,7 @@ void CvPlot::updateYield()
 			iOldYield = getYield((YieldTypes)iI);
 
 			m_aiYield[iI] = iNewYield;
+			GC.getMapINLINE().foundValuesChanged(this, 2, -1);	// see CvPlayerAI::AI_refreshFoundValues()
 			FAssert(getYield((YieldTypes)iI) >= 0);
 
 			pWorkingCity = getWorkingCity();
@@ -7196,6 +7206,13 @@ void CvPlot::setRevealed(TeamTypes eTeam, bool bNewValue, bool bTerrainOnly, Tea
 		}
 
 		m_abRevealed[eTeam] = bNewValue;
+
+		if (!bNewValue)
+		{
+			// a plot that is not revealed is not swept, so what the team's players keep for
+			// it goes out of date: see CvPlayerAI::AI_refreshFoundValues()
+			GC.getMapINLINE().foundValuesChanged(this, 0, -1);
+		}
 
 		if (area())
 		{

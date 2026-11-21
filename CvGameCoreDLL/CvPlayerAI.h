@@ -50,6 +50,8 @@ public:
 
 	void AI_updateFoundValues(bool bStartingLoc = false) const;
 	void AI_invalidateFoundValueCache() const;
+	void AI_updateFoundValuesAhead() const;
+	bool AI_isFoundValueKept() const;
 	void AI_updateAreaTargets();
 
 	int AI_movementPriority(CvSelectionGroup* pGroup) const;
@@ -401,13 +403,32 @@ protected:
 	int** m_aaiMemoryCount;
 	
 	mutable std::vector<int> m_aiAICitySites;
-	// See AI_updateFoundValuesCached(). Not saved with the game.
-	mutable std::vector<int> m_aiFoundValueCache;					// per plot: score with no planned sites, or MIN_INT
-	mutable std::vector<unsigned long long> m_aiFoundValueSignature;	// per plot: what that score was computed from
+	// The city-site scores kept between turns: see AI_refreshFoundValues(). Not saved with the game.
+	enum { FOUND_VALUE_MAX_ASKED = 8, FOUND_VALUE_ASKED_OVERFLOW = 255 };
+	struct FoundValueRecord
+	{
+		int iValue;												// the score with no planned sites; MIN_INT until first scored
+		unsigned long long uiTradeableAsked;					// a bit per bonus whose tradeable count the scoring read
+		unsigned int uiCultureHash;								// of the culture multipliers, if the scoring read any; else 0
+		short iDeadlockCount;									// the deadlocked bonuses as the scoring counted them; -1 if it did not
+		unsigned char iNumBonusAsked;							// FOUND_VALUE_ASKED_OVERFLOW: too many to keep, score every time
+		unsigned char aeBonusAsked[FOUND_VALUE_MAX_ASKED];		// the bonuses whose value the scoring asked for, in order
+	};
+	mutable std::vector<FoundValueRecord> m_aFoundValueRecords;	// per plot
+	mutable std::vector<int> m_aiFoundBonusVal;					// per bonus: the value the kept scores were worked out with
+	mutable unsigned long long m_uiFoundNoTradeable;			// a bit per bonus: none was tradeable when the kept scores were worked out
+	mutable unsigned long long m_uiFoundPlayerSignature;		// the inputs every plot shares
+	mutable std::vector<std::pair<int, int> > m_aFoundAreaClass;	// per area: how its cities divide between this team and the rest
+
+	friend struct FoundValueSweep;
 
 	void AI_updateFoundValuesAll() const;
-	void AI_updateFoundValuesCached() const;
-	unsigned long long AI_foundValueSignature(CvPlot* pPlot, FoundValueSweep& kSweep) const;
+	void AI_refreshFoundValues(bool bAhead) const;
+	int AI_foundSweepBonusVal(FoundValueSweep& kSweep, BonusTypes eBonus) const;
+	int AI_foundBonusVal(BonusTypes eBonus) const;
+	bool AI_foundNoTradeableBonus(BonusTypes eBonus) const;
+	int AI_foundDeadlockedBonuses(CvPlot* pPlot) const;
+	unsigned int AI_foundCultureHash(const CvPlot* pPlot, int iClaimThreshold) const;
 	int AI_foundValueForSweep(CvPlot* pPlot) const;
 #ifdef BRIDGED_PROFILE
 	void AI_verifyFoundValueCache(int iMaxCityCount) const;
