@@ -6375,18 +6375,33 @@ bool CvUnit::build(BuildTypes eBuild)
 
 #ifdef BRIDGED_PROFILE
 	// how the workers spend their turns
-	static BridgedProfileSample aWorkSamples[3] = {
-		{ "worker: turns of building" }, { "worker: builds finished" }, { "worker: build begun on a plot with another build unfinished" } };
+	static BridgedProfileSample aWorkSamples[4] = {
+		{ "worker: turns of building" }, { "worker: builds finished" }, { "worker: build begun on a plot with another build unfinished" },
+		{ "worker: improvement begun on a plot with another improvement unfinished" } };
 	bridgedProfileAdd(&aWorkSamples[0], 0);
 	if (plot()->getBuildProgress(eBuild) == 0)
 	{
+		bool bOtherBuild = false;
+		bool bOtherImprovement = false;
 		for (int iOtherBuild = 0; iOtherBuild < GC.getNumBuildInfos(); iOtherBuild++)
 		{
 			if ((iOtherBuild != eBuild) && (plot()->getBuildProgress((BuildTypes)iOtherBuild) > 0))
 			{
-				bridgedProfileAdd(&aWorkSamples[2], 0);
-				break;
+				bOtherBuild = true;
+				if ((GC.getBuildInfo(eBuild).getImprovement() != NO_IMPROVEMENT) && (GC.getBuildInfo((BuildTypes)iOtherBuild).getImprovement() != NO_IMPROVEMENT)
+					&& (GC.getBuildInfo(eBuild).getImprovement() != GC.getBuildInfo((BuildTypes)iOtherBuild).getImprovement()))
+				{
+					bOtherImprovement = true;
+				}
 			}
+		}
+		if (bOtherBuild)
+		{
+			bridgedProfileAdd(&aWorkSamples[2], 0);
+		}
+		if (bOtherImprovement)
+		{
+			bridgedProfileAdd(&aWorkSamples[3], 0);
 		}
 	}
 #endif

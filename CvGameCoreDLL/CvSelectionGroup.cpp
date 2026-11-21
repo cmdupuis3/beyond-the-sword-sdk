@@ -418,6 +418,15 @@ void CvSelectionGroup::doTurn()
 		{
 			if ((getActivityType() != ACTIVITY_MISSION) || (!canFight() && (GET_PLAYER(getOwnerINLINE()).AI_getPlotDanger(plot(), 2) > 0)))
 			{
+#ifdef BRIDGED_PROFILE
+				if (getActivityType() == ACTIVITY_MISSION)
+				{
+					// a group that had orders and is made to decide again because an enemy is near
+					static BridgedProfileSample aWokenSamples[2] = { { "woken by danger: worker with orders" }, { "woken by danger: other group with orders" } };
+					const CvUnit* pWokenHead = getHeadUnit();
+					bridgedProfileAdd(&aWokenSamples[((pWokenHead != NULL) && (pWokenHead->AI_getUnitAIType() == UNITAI_WORKER)) ? 0 : 1], 0);
+				}
+#endif
 				setForceUpdate(true);
 			}
 		}
