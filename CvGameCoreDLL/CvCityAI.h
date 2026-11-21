@@ -142,6 +142,37 @@ protected:
 	int m_aiAssignCacheValue[NUM_ASSIGN_CACHE_TYPES];
 
 	int AI_assignCached(AssignCacheTypes eType);
+
+	// The values AI_buildingValueThreshold() works from that do not depend on the building:
+	// see AI_buildingValueContext()
+	struct BuildingValueContext
+	{
+		bool bAreaAlone;
+		int iHasMetCount;
+		int iFoodDifference;
+		int iHappinessLevel;
+		int iHealthLevel;
+		int iTotalPopulation;
+		int iNumCities;
+		int iNumCitiesInArea;
+		int iProductionRank;
+		int iCultureRank;
+		int iCulturalVictoryNumCultureCities;
+		bool bFinancialTrouble;
+		bool bCulturalVictory1;
+		bool bCulturalVictory2;
+		bool bCulturalVictory3;
+		bool bCanPopRush;
+		bool bForeignTrade;
+
+		bool isSame(const BuildingValueContext& kOther) const;
+	};
+	bool m_bBuildingValueContextActive;
+	bool m_bBuildingValueContextValid;
+	BuildingValueContext m_kBuildingValueContext;
+
+	void AI_calculateBuildingValueContext(BuildingValueContext& kContext);
+	const BuildingValueContext& AI_buildingValueContext(BuildingValueContext& kLocal);
 	int AI_calculateAssignCached(AssignCacheTypes eType);
 	bool m_bChooseProductionDirty;
 

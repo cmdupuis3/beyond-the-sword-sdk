@@ -100,6 +100,8 @@ void CvCityAI::AI_reset()
 
 	m_bAssignWorkDirty = false;
 	m_bAssignCacheActive = false;
+	m_bBuildingValueContextActive = false;
+	m_bBuildingValueContextValid = false;
 	m_iAssignCacheChangeCount = -1;
 	m_bChooseProductionDirty = false;
 
@@ -691,6 +693,17 @@ int CvCityAI::AI_specialistValue(SpecialistTypes eSpecialist, bool bAvoidGrowth,
 void CvCityAI::AI_chooseProduction()
 {
 	PROFILE_FUNC();
+
+	// From here to the end, the city-wide values AI_buildingValueThreshold() works from are
+	// worked out once: see AI_buildingValueContext().
+	struct BuildingValueContextScope
+	{
+		bool& bActive;
+		~BuildingValueContextScope() { bActive = false; }
+	} kBuildingValueContextScope = { m_bBuildingValueContextActive };
+
+	m_bBuildingValueContextActive = true;
+	m_bBuildingValueContextValid = false;
 
 	CvArea* pWaterArea;
 	UnitTypes eProductionUnit;
@@ -2190,6 +2203,8 @@ void CvCityAI::AI_chooseProduction()
 
 UnitTypes CvCityAI::AI_bestUnit(bool bAsync, AdvisorTypes eIgnoreAdvisor, UnitAITypes* peBestUnitAI)
 {
+	PROFILE_FUNC();
+
 	CvArea* pWaterArea;
 	int aiUnitAIVal[NUM_UNITAI_TYPES];
 	UnitTypes eUnit;
@@ -2442,6 +2457,8 @@ UnitTypes CvCityAI::AI_bestUnit(bool bAsync, AdvisorTypes eIgnoreAdvisor, UnitAI
 
 UnitTypes CvCityAI::AI_bestUnitAI(UnitAITypes eUnitAI, bool bAsync, AdvisorTypes eIgnoreAdvisor)
 {
+	PROFILE_FUNC();
+
 	UnitTypes eLoopUnit;
 	UnitTypes eBestUnit;
 	int iValue;
@@ -2659,6 +2676,8 @@ BuildingTypes CvCityAI::AI_bestBuilding(int iFocusFlags, int iMaxTurns, bool bAs
 
 BuildingTypes CvCityAI::AI_bestBuildingThreshold(int iFocusFlags, int iMaxTurns, int iMinThreshold, bool bAsync, AdvisorTypes eIgnoreAdvisor)
 {
+	PROFILE_FUNC();
+
 	BuildingTypes eLoopBuilding;
 	BuildingTypes eBestBuilding;
 	bool bAreaAlone;
@@ -2841,6 +2860,115 @@ int CvCityAI::AI_buildingValue(BuildingTypes eBuilding, int iFocusFlags)
 
 // XXX should some of these count cities, buildings, etc. based on teams (because wonders are shared...)
 // XXX in general, this function needs to be more sensitive to what makes this city unique (more likely to build airports if there already is a harbor...)
+bool CvCityAI::BuildingValueContext::isSame(const BuildingValueContext& kOther) const
+{
+	return ((bAreaAlone == kOther.bAreaAlone) && (iHasMetCount == kOther.iHasMetCount) && (iFoodDifference == kOther.iFoodDifference)
+		&& (iHappinessLevel == kOther.iHappinessLevel) && (iHealthLevel == kOther.iHealthLevel) && (iTotalPopulation == kOther.iTotalPopulation)
+		&& (iNumCities == kOther.iNumCities) && (iNumCitiesInArea == kOther.iNumCitiesInArea) && (iProductionRank == kOther.iProductionRank)
+		&& (iCultureRank == kOther.iCultureRank) && (iCulturalVictoryNumCultureCities == kOther.iCulturalVictoryNumCultureCities)
+		&& (bFinancialTrouble == kOther.bFinancialTrouble) && (bCulturalVictory1 == kOther.bCulturalVictory1)
+		&& (bCulturalVictory2 == kOther.bCulturalVictory2) && (bCulturalVictory3 == kOther.bCulturalVictory3)
+		&& (bCanPopRush == kOther.bCanPopRush) && (bForeignTrade == kOther.bForeignTrade));
+}
+
+
+// The stock code for these values, in the stock order, moved here from AI_buildingValueThreshold().
+void CvCityAI::AI_calculateBuildingValueContext(BuildingValueContext& kContext)
+{
+	CvPlayerAI& kOwner = GET_PLAYER(getOwnerINLINE());
+
+	kContext.bAreaAlone = kOwner.AI_isAreaAlone(area());
+
+	kContext.iHasMetCount = GET_TEAM(getTeam()).getHasMetCivCount(true);
+	kContext.iFoodDifference = foodDifference(false);
+
+	kContext.iHappinessLevel = happyLevel() - unhappyLevel(1);
+	kContext.iHealthLevel = goodHealth() - badHealth(/*bNoAngry*/ false, std::max(0, (kContext.iHappinessLevel + 1) / 2));
+
+	kContext.iTotalPopulation = kOwner.getTotalPopulation();
+	kContext.iNumCities = kOwner.getNumCities();
+	kContext.iNumCitiesInArea = area()->getCitiesPerPlayer(getOwnerINLINE());
+
+	kContext.iProductionRank = findBaseYieldRateRank(YIELD_PRODUCTION);
+
+	kContext.iCultureRank = findCommerceRateRank(COMMERCE_CULTURE);
+	kContext.iCulturalVictoryNumCultureCities = GC.getGameINLINE().culturalVictoryNumCultureCities();
+
+	kContext.bFinancialTrouble = GET_PLAYER(getOwnerINLINE()).AI_isFinancialTrouble();
+
+	kContext.bCulturalVictory1 = GET_PLAYER(getOwnerINLINE()).AI_isDoStrategy(AI_STRATEGY_CULTURE1);
+	kContext.bCulturalVictory2 = GET_PLAYER(getOwnerINLINE()).AI_isDoStrategy(AI_STRATEGY_CULTURE2);
+	kContext.bCulturalVictory3 = GET_PLAYER(getOwnerINLINE()).AI_isDoStrategy(AI_STRATEGY_CULTURE3);
+
+	kContext.bCanPopRush = GET_PLAYER(getOwnerINLINE()).canPopRush();
+
+	kContext.bForeignTrade = false;
+	int iNumTradeRoutes = getTradeRoutes();
+	for (int iI = 0; iI < iNumTradeRoutes; ++iI)
+	{
+		CvCity* pTradeCity = getTradeCity(iI);
+		if (NULL != pTradeCity)
+		{
+			if (GET_PLAYER(pTradeCity->getOwnerINLINE()).getTeam() != getTeam() || pTradeCity->area() != area())
+			{
+				kContext.bForeignTrade = true;
+				break;
+			}
+		}
+	}
+}
+
+
+//
+// The city-wide values AI_buildingValueThreshold() works from.
+//
+// AI_chooseProduction() values the buildings the city could construct several times over,
+// once for each kind of building it is looking for, and every one of those calls used to
+// work out afresh how happy and healthy the city is, its food surplus, its ranks among the
+// owner's cities, whether the owner is in financial trouble and so on. None of that depends
+// on the building, and AI_chooseProduction() changes nothing about the city until it has
+// chosen. So while AI_chooseProduction() runs the values are worked out once and kept.
+// Outside it nothing is kept; kLocal is where the values go then.
+//
+const CvCityAI::BuildingValueContext& CvCityAI::AI_buildingValueContext(BuildingValueContext& kLocal)
+{
+	if (!m_bBuildingValueContextActive)
+	{
+		AI_calculateBuildingValueContext(kLocal);
+		return kLocal;
+	}
+
+#ifdef BRIDGED_PROFILE
+	// BUILDING_VERIFY: a global define for profile builds. Set, kept values are also worked
+	// out afresh and the calls where any of them differs are counted.
+	static BridgedProfileSample aSamples[3] = {
+		{ "building value context: kept" }, { "building value context: worked out" }, { "building value context verify: KEPT VALUES WERE STALE" } };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("BUILDING_VERIFY") != 0) ? 1 : 0;
+	}
+	bridgedProfileAdd(&aSamples[m_bBuildingValueContextValid ? 0 : 1], 0);
+	if (m_bBuildingValueContextValid && (iVerify != 0))
+	{
+		AI_calculateBuildingValueContext(kLocal);
+		if (!m_kBuildingValueContext.isSame(kLocal))
+		{
+			bridgedProfileAdd(&aSamples[2], 0);
+		}
+	}
+#endif
+
+	if (!m_bBuildingValueContextValid)
+	{
+		AI_calculateBuildingValueContext(m_kBuildingValueContext);
+		m_bBuildingValueContextValid = true;
+	}
+
+	return m_kBuildingValueContext;
+}
+
+
 int CvCityAI::AI_buildingValueThreshold(BuildingTypes eBuilding, int iFocusFlags, int iThreshold)
 {
 	PROFILE_FUNC();
@@ -2857,15 +2985,19 @@ int CvCityAI::AI_buildingValueThreshold(BuildingTypes eBuilding, int iFocusFlags
 
 	ReligionTypes eStateReligion = kOwner.getStateReligion();
 
-	bool bAreaAlone = kOwner.AI_isAreaAlone(area());
+	// the values that do not depend on the building
+	BuildingValueContext kLocalContext;
+	const BuildingValueContext& kContext = AI_buildingValueContext(kLocalContext);
+
+	bool bAreaAlone = kContext.bAreaAlone;
 	bool bProvidesPower = (kBuilding.isPower() || ((kBuilding.getPowerBonus() != NO_BONUS) && hasBonus((BonusTypes)(kBuilding.getPowerBonus()))));
 
-	int iHasMetCount = GET_TEAM(getTeam()).getHasMetCivCount(true);
-	int iFoodDifference = foodDifference(false);
+	int iHasMetCount = kContext.iHasMetCount;
+	int iFoodDifference = kContext.iFoodDifference;
 
-	int iHappinessLevel = happyLevel() - unhappyLevel(1);
+	int iHappinessLevel = kContext.iHappinessLevel;
 	int iAngryPopulation = range(-iHappinessLevel, 0, (getPopulation() + 1));
-	int iHealthLevel = goodHealth() - badHealth(/*bNoAngry*/ false, std::max(0, (iHappinessLevel + 1) / 2));
+	int iHealthLevel = kContext.iHealthLevel;
 	int iBadHealth = std::max(0, -iHealthLevel);
 
 	int iHappyModifier = (iHappinessLevel >= iHealthLevel && iHappinessLevel <= 6) ? 6 : 3;
@@ -2879,9 +3011,9 @@ int CvCityAI::AI_buildingValueThreshold(BuildingTypes eBuilding, int iFocusFlags
 		iHealthModifier = 0;
 	}
 	
-	int iTotalPopulation = kOwner.getTotalPopulation();
-	int iNumCities = kOwner.getNumCities();
-	int iNumCitiesInArea = area()->getCitiesPerPlayer(getOwnerINLINE());
+	int iTotalPopulation = kContext.iTotalPopulation;
+	int iNumCities = kContext.iNumCities;
+	int iNumCitiesInArea = kContext.iNumCitiesInArea;
 	
 	int aiYieldRank[NUM_YIELD_TYPES];
 	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
@@ -2895,34 +3027,21 @@ int CvCityAI::AI_buildingValueThreshold(BuildingTypes eBuilding, int iFocusFlags
 		aiCommerceRank[iI] = MAX_INT;
 	}
 
-	aiYieldRank[YIELD_PRODUCTION] = findBaseYieldRateRank(YIELD_PRODUCTION);
+	aiYieldRank[YIELD_PRODUCTION] = kContext.iProductionRank;
 	bool bIsHighProductionCity = (aiYieldRank[YIELD_PRODUCTION] <= std::max(3, (iNumCities / 2)));
 	
-	int iCultureRank = findCommerceRateRank(COMMERCE_CULTURE);
-	int iCulturalVictoryNumCultureCities = GC.getGameINLINE().culturalVictoryNumCultureCities();
+	int iCultureRank = kContext.iCultureRank;
+	int iCulturalVictoryNumCultureCities = kContext.iCulturalVictoryNumCultureCities;
 
-	bool bFinancialTrouble = GET_PLAYER(getOwnerINLINE()).AI_isFinancialTrouble();
+	bool bFinancialTrouble = kContext.bFinancialTrouble;
 
-	bool bCulturalVictory1 = GET_PLAYER(getOwnerINLINE()).AI_isDoStrategy(AI_STRATEGY_CULTURE1);
-	bool bCulturalVictory2 = GET_PLAYER(getOwnerINLINE()).AI_isDoStrategy(AI_STRATEGY_CULTURE2);
-	bool bCulturalVictory3 = GET_PLAYER(getOwnerINLINE()).AI_isDoStrategy(AI_STRATEGY_CULTURE3);
+	bool bCulturalVictory1 = kContext.bCulturalVictory1;
+	bool bCulturalVictory2 = kContext.bCulturalVictory2;
+	bool bCulturalVictory3 = kContext.bCulturalVictory3;
 	
-	bool bCanPopRush = GET_PLAYER(getOwnerINLINE()).canPopRush();
+	bool bCanPopRush = kContext.bCanPopRush;
 
-	bool bForeignTrade = false;
-	int iNumTradeRoutes = getTradeRoutes();
-	for (iI = 0; iI < iNumTradeRoutes; ++iI)
-	{
-		CvCity* pTradeCity = getTradeCity(iI);
-		if (NULL != pTradeCity)
-		{
-			if (GET_PLAYER(pTradeCity->getOwnerINLINE()).getTeam() != getTeam() || pTradeCity->area() != area())
-			{
-				bForeignTrade = true;
-				break;
-			}
-		}
-	}
+	bool bForeignTrade = kContext.bForeignTrade;
 
 	if (kBuilding.isCapital())
 	{
@@ -4230,6 +4349,8 @@ int CvCityAI::AI_buildingValueThreshold(BuildingTypes eBuilding, int iFocusFlags
 
 ProjectTypes CvCityAI::AI_bestProject()
 {
+	PROFILE_FUNC();
+
 	ProjectTypes eBestProject;
 	int iProductionRank;
 	int iTurnsLeft;
@@ -4848,6 +4969,8 @@ int CvCityAI::AI_getBestBuildValue(int iIndex)
 
 int CvCityAI::AI_totalBestBuildValue(CvArea* pArea)
 {
+	PROFILE_FUNC();
+
 	CvPlot* pLoopPlot;
 	int iTotalValue;
 	int iI;

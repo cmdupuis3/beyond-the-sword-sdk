@@ -1704,6 +1704,8 @@ bool CvCity::isBuildingsMaxed() const
 
 bool CvCity::canTrain(UnitTypes eUnit, bool bContinue, bool bTestVisible, bool bIgnoreCost, bool bIgnoreUpgrades) const
 {
+	PROFILE_FUNC();
+
 	if (eUnit == NO_UNIT)
 	{
 		return false;
@@ -1792,6 +1794,8 @@ bool CvCity::canTrain(UnitCombatTypes eUnitCombat) const
 
 bool CvCity::canConstruct(BuildingTypes eBuilding, bool bContinue, bool bTestVisible, bool bIgnoreCost) const
 {
+	PROFILE_FUNC();
+
 	BuildingTypes ePrereqBuilding;
 	bool bRequiresBonus;
 	bool bNeedsBonus;
