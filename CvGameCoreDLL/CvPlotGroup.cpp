@@ -9,6 +9,80 @@
 #include "CvCity.h"
 #include "CvDLLFAStarIFaceBase.h"
 #include "FProfiler.h"
+#include "CvGameCoreUtils.h"
+#include <algorithm>
+
+//
+// How many plots of the group can be reached from pStart along the group's own trade
+// connections: what recalculatePlots() asked the exe's plot-group finder for (a flood
+// with plotGroupValid() as the step test and countPlotGroup() counting closed nodes).
+// The same flood, done here: each plot is counted once, the first time a step into it
+// from a counted plot passes plotGroupValid()'s tests.
+//
+// PLOT_GROUP_VERIFY: a global define for profile builds. Set, the exe's flood runs as
+// well and the counts that differ are counted.
+//
+namespace
+{
+	std::vector<int> s_aiFloodStamp;
+	std::vector<CvPlot*> s_apFloodQueue;
+	int s_iFloodStamp = 0;
+
+	int countConnectedPlots(CvPlot* pStart, PlayerTypes eOwner)
+	{
+		CvMap& kMap = GC.getMapINLINE();
+		const TeamTypes eTeam = GET_PLAYER(eOwner).getTeam();
+		const CvPlotGroup* pGroup = pStart->getPlotGroup(eOwner);
+
+		if ((int)s_aiFloodStamp.size() != kMap.numPlotsINLINE())
+		{
+			s_aiFloodStamp.assign(kMap.numPlotsINLINE(), 0);
+			s_iFloodStamp = 0;
+		}
+
+		if (++s_iFloodStamp == MAX_INT)
+		{
+			std::fill(s_aiFloodStamp.begin(), s_aiFloodStamp.end(), 0);
+			s_iFloodStamp = 1;
+		}
+
+		s_apFloodQueue.clear();
+		s_apFloodQueue.push_back(pStart);
+		s_aiFloodStamp[kMap.plotNumINLINE(pStart->getX_INLINE(), pStart->getY_INLINE())] = s_iFloodStamp;
+
+		for (size_t iNext = 0; iNext < s_apFloodQueue.size(); iNext++)
+		{
+			CvPlot* pPlot = s_apFloodQueue[iNext];
+
+			for (int iI = 0; iI < NUM_DIRECTION_TYPES; iI++)
+			{
+				CvPlot* pAdjacentPlot = plotDirection(pPlot->getX_INLINE(), pPlot->getY_INLINE(), ((DirectionTypes)iI));
+
+				if (pAdjacentPlot == NULL)
+				{
+					continue;
+				}
+
+				int& iStamp = s_aiFloodStamp[kMap.plotNumINLINE(pAdjacentPlot->getX_INLINE(), pAdjacentPlot->getY_INLINE())];
+
+				if (iStamp == s_iFloodStamp)
+				{
+					continue;
+				}
+
+				// plotGroupValid(pPlot, pAdjacentPlot); pPlot is in the group, so the first
+				// test is that pAdjacentPlot is too
+				if ((pAdjacentPlot->getPlotGroup(eOwner) == pGroup) && pAdjacentPlot->isTradeNetwork(eTeam) && pAdjacentPlot->isTradeNetworkConnected(pPlot, eTeam))
+				{
+					iStamp = s_iFloodStamp;
+					s_apFloodQueue.push_back(pAdjacentPlot);
+				}
+			}
+		}
+
+		return (int)s_apFloodQueue.size();
+	}
+}
 
 // Public Functions...
 
@@ -128,10 +202,28 @@ void CvPlotGroup::recalculatePlots()
 	{
 		pPlot = GC.getMapINLINE().plotSorenINLINE(pPlotNode->m_data.iX, pPlotNode->m_data.iY);
 
-		iCount = 0;
+		iCount = countConnectedPlots(pPlot, eOwner);	// see above
 
-		gDLL->getFAStarIFace()->SetData(&GC.getPlotGroupFinder(), &iCount);
-		gDLL->getFAStarIFace()->GeneratePath(&GC.getPlotGroupFinder(), pPlot->getX_INLINE(), pPlot->getY_INLINE(), -1, -1, false, eOwner);
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample aSamples[3] = {
+			{ "plot group: still connected" }, { "plot group: split, built again" }, { "plot group verify: FLOOD COUNT DIFFERS" } };
+		static int iVerify = -1;
+		if (iVerify == -1)
+		{
+			iVerify = (GC.getDefineINT("PLOT_GROUP_VERIFY") != 0) ? 1 : 0;
+		}
+		if (iVerify != 0)
+		{
+			int iExeCount = 0;
+			gDLL->getFAStarIFace()->SetData(&GC.getPlotGroupFinder(), &iExeCount);
+			gDLL->getFAStarIFace()->GeneratePath(&GC.getPlotGroupFinder(), pPlot->getX_INLINE(), pPlot->getY_INLINE(), -1, -1, false, eOwner);
+			if (iExeCount != iCount)
+			{
+				bridgedProfileAdd(&aSamples[2], 0);
+			}
+		}
+		bridgedProfileAdd(&aSamples[(iCount == getLengthPlots()) ? 0 : 1], 0);
+#endif
 
 		if (iCount == getLengthPlots())
 		{

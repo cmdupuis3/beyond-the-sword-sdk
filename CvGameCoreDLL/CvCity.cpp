@@ -10478,9 +10478,16 @@ void CvCity::updateTradeRoutes()
 	int iLoop;
 	int iI, iJ, iK;
 
-	paiBestValue = new int[GC.getDefineINT("MAX_TRADE_ROUTES")];
+	PROFILE_FUNC();
 
-	for (iI = 0; iI < GC.getDefineINT("MAX_TRADE_ROUTES"); iI++)
+	// Looked up by name once here, where stock looked them up in each loop's test and,
+	// for IGNORE_PLOT_GROUP_FOR_TRADE_ROUTES, for every city not in this one's plot group
+	const int iMaxTradeRoutes = GC.getDefineINT("MAX_TRADE_ROUTES");
+	const bool bIgnorePlotGroup = (GC.getDefineINT("IGNORE_PLOT_GROUP_FOR_TRADE_ROUTES") != 0);
+
+	paiBestValue = new int[iMaxTradeRoutes];
+
+	for (iI = 0; iI < iMaxTradeRoutes; iI++)
 	{
 		paiBestValue[iI] = 0;
 	}
@@ -10491,7 +10498,9 @@ void CvCity::updateTradeRoutes()
 	{
 		iTradeRoutes = getTradeRoutes();
 
-		FAssert(iTradeRoutes <= GC.getDefineINT("MAX_TRADE_ROUTES"));
+		FAssert(iTradeRoutes <= iMaxTradeRoutes);
+
+		CvPlotGroup* pPlotGroup = plotGroup(getOwnerINLINE());	// nothing below changes it
 
 		for (iI = 0; iI < MAX_PLAYERS; iI++)
 		{
@@ -10503,7 +10512,7 @@ void CvCity::updateTradeRoutes()
 					{
 						if (!(pLoopCity->isTradeRoute(getOwnerINLINE())) || (getTeam() == GET_PLAYER((PlayerTypes)iI).getTeam()))
 						{
-							if (pLoopCity->plotGroup(getOwnerINLINE()) == plotGroup(getOwnerINLINE()) || GC.getDefineINT("IGNORE_PLOT_GROUP_FOR_TRADE_ROUTES"))
+							if (pLoopCity->plotGroup(getOwnerINLINE()) == pPlotGroup || bIgnorePlotGroup)
 							{
 								iValue = calculateTradeProfit(pLoopCity);
 
@@ -10533,7 +10542,7 @@ void CvCity::updateTradeRoutes()
 
 	iTradeProfit = 0;
 
-	for (iI = 0; iI < GC.getDefineINT("MAX_TRADE_ROUTES"); iI++)
+	for (iI = 0; iI < iMaxTradeRoutes; iI++)
 	{
 		pLoopCity = getTradeCity(iI);
 

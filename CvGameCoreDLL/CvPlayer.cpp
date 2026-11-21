@@ -2680,14 +2680,20 @@ void CvPlayer::updatePlotGroups()
 		return;
 	}
 
-	for(pLoopPlotGroup = firstPlotGroup(&iLoop); pLoopPlotGroup != NULL; pLoopPlotGroup = nextPlotGroup(&iLoop))
 	{
-		pLoopPlotGroup->recalculatePlots();
+		PROFILE("CvPlayer::updatePlotGroups: each group checked");
+		for(pLoopPlotGroup = firstPlotGroup(&iLoop); pLoopPlotGroup != NULL; pLoopPlotGroup = nextPlotGroup(&iLoop))
+		{
+			pLoopPlotGroup->recalculatePlots();
+		}
 	}
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
 	{
-		GC.getMapINLINE().plotByIndexINLINE(iI)->updatePlotGroup(getID(), false);
+		PROFILE("CvPlayer::updatePlotGroups: every plot joined");
+		for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+		{
+			GC.getMapINLINE().plotByIndexINLINE(iI)->updatePlotGroup(getID(), false);
+		}
 	}
 
 	updateTradeRoutes();
@@ -2874,6 +2880,8 @@ void CvPlayer::updateCitySight(bool bIncrement, bool bUpdatePlotGroups)
 
 void CvPlayer::updateTradeRoutes()
 {
+	PROFILE_FUNC();
+
 	CLLNode<int>* pCityNode;
 	CvCity* pLoopCity;
 	CvCity* pListCity;
