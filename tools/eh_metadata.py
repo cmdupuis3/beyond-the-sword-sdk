@@ -82,7 +82,12 @@ class Coff:
                 name = strings[name_offset:end]
             else:
                 name = raw_name.rstrip(b'\0')
-            value, section, _, _, aux = self.read('LhHBB', off + 8)
+            value, section, _, _, aux = self.read('LHHBB', off + 8)
+            # The section number is unsigned, so that an object can have more than 32,767
+            # sections (one merged by link-time optimisation does); the top two values are
+            # the special ones, absolute (-1) and debug (-2).
+            if section >= 0xfffe:
+                section -= 0x10000
             if index + aux >= nsym or section > nsec or section < -2:
                 raise ValueError(f'{path}: malformed COFF symbol or auxiliary records')
             self.symbols[index] = (name, value, section)

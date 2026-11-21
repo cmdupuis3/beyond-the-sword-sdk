@@ -71,6 +71,16 @@ target_compile_options(CvGameCoreDLL PRIVATE
   -Xclang -fno-wchar -fno-stack-protector
   -fno-strict-aliasing -ffp-contract=off -Wall -Wextra)
 target_link_options(CvGameCoreDLL PRIVATE /subsystem:windows /largeaddressaware /opt:ref /opt:icf)
+# Link-time optimisation of the SDK units. Without it no call into another source file is
+# ever inlined, and nearly every accessor in this code is a one-line function in a .cpp
+# file. The EH adapter stays ordinary object code. The linker keeps the one object it makes
+# of the SDK (CvGameCoreDLL.dll.lto.obj) so that tools/build_dll.py can check its exception
+# metadata, as it checks each object of a build without this.
+option(BRIDGED_LTO "Optimise the SDK across source files at link time" ON)
+if(BRIDGED_LTO)
+  target_compile_options(CvGameCoreDLL PRIVATE -flto)
+  target_link_options(CvGameCoreDLL PRIVATE /lldsavetemps:prelink)
+endif()
 target_link_libraries(CvGameCoreDLL PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/CvGameCoreDLL/Python24/libs/python24.lib"
   "${CMAKE_CURRENT_SOURCE_DIR}/CvGameCoreDLL/Boost-1.32.0/libs/boost_python-vc71-mt-1_32.lib"

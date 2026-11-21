@@ -33,6 +33,8 @@ def main():
                         help='default tmp/dll-build, or tmp/dll-build-profile with --profile')
     parser.add_argument('--profile', action='store_true',
                         help='time the SDK PROFILE scopes inside the DLL (see FProfiler.h)')
+    parser.add_argument('--no-lto', dest='lto', action='store_false',
+                        help='compile each SDK unit on its own, without link-time optimisation')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--cmake', default='cmake')
     args = parser.parse_args()
@@ -91,6 +93,7 @@ def main():
                      '-DCMAKE_TOOLCHAIN_FILE=' + (ROOT / 'cmake/windows-x86-clang.cmake').as_posix(),
                      '-DCMAKE_BUILD_TYPE=Release', '-DPython3_EXECUTABLE=' + Path(sys.executable).as_posix(),
                      '-DBRIDGED_PROFILE=' + ('ON' if args.profile else 'OFF'),
+                     '-DBRIDGED_LTO=' + ('ON' if args.lto else 'OFF'),
                      '-DBRIDGED_LLVM_BIN=' + args.llvm_bin.resolve().as_posix(),
                      '-DBRIDGED_VC71=' + args.vc71.resolve().as_posix(),
                      '-DBRIDGED_WINDOWS_SDK=' + args.windows_sdk.resolve().as_posix()]
@@ -166,6 +169,9 @@ def main():
                                   '-fno-wchar', '-fno-strict-aliasing', '-ffp-contract=off', '-Wall', '-Wextra'}
                 if not required_flags.issubset(flags) or any(flag in flags for flag in ['-O3', '-ffast-math']):
                     raise RuntimeError('an SDK unit does not use the required target/language/helper configuration')
+                if ('-flto' in flags) != args.lto:
+                    raise RuntimeError(f'an SDK unit was not compiled for the requested link-time optimisation: '
+                                       f'{source}; configure a fresh build directory with --output-dir')
             elif source.suffix == '.cpp':
                 required_flags = {'-std=c++23', '-pedantic-errors', '-Wall', '-Wextra', '-Werror',
                                   '-ffreestanding', '-fno-builtin', '-fno-exceptions', '-fno-rtti',
@@ -177,10 +183,21 @@ def main():
             obj = Path(row['output'])
             if not obj.is_absolute():
                 obj = Path(row['directory']) / obj
-            if not obj.exists() or obj.read_bytes()[:2] != b'\x4c\x01':
-                raise RuntimeError(f'missing/non-i386 object: {obj}')
-            if source in expected_sources:
+            # with link-time optimisation an SDK unit is LLVM bitcode until the link
+            lto_unit = args.lto and source in expected_sources
+            magic = b'BC\xc0\xde' if lto_unit else b'\x4c\x01'
+            if not obj.exists() or obj.read_bytes()[:len(magic)] != magic:
+                raise RuntimeError(f'missing/unexpected object: {obj}')
+            if source in expected_sources and not lto_unit:
                 exception_metadata[str(source.relative_to(ROOT))] = eh_metadata.inspect_object(obj)
+        if args.lto:
+            # the one object the linker made of the SDK units, kept by /lldsavetemps:prelink
+            lto_object = output / 'CvGameCoreDLL.dll.lto.obj'
+            if not lto_object.exists() or lto_object.read_bytes()[:2] != b'\x4c\x01':
+                raise RuntimeError(f'missing/non-i386 link-time object: {lto_object}')
+            if lto_object.stat().st_mtime < binary.stat().st_mtime - 600:
+                raise RuntimeError(f'link-time object is older than the DLL: {lto_object}')
+            exception_metadata[lto_object.name] = eh_metadata.inspect_object(lto_object)
         log = (attempt / 'build.log').read_text()
         libraries = [args.vc71 / 'lib' / name for name in ['msvcrt.lib', 'msvcprt.lib', 'oldnames.lib']]
         libraries += [args.windows_sdk / 'lib' / name for name in ['Kernel32.Lib', 'User32.Lib', 'WinMM.Lib']]
@@ -191,6 +208,7 @@ def main():
                       original_public_exports=len(stock['exports']), missing_public_exports=missing_public,
                       added_public_exports=sorted(set(image['exports']) - set(stock['exports'])),
                       units=len(expected_sources), adapter_units=len(adapter_sources),
+                      link_time_optimisation=args.lto,
                       exception_route='Static Clang EH3 to VC7.1 frame adapter; no supplemental CRT DLL',
                       legacy_eh_imports=legacy_eh_imports, provider_hashes=provider_hashes,
                       exception_metadata=exception_metadata,
