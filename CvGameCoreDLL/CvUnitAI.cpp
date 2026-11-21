@@ -461,8 +461,7 @@ void CvUnitAI::AI_upgrade()
 		return;
 	}
 
-	std::vector<UnitTypes> aeUpgradeUnits;
-	getUpgradeUnitTypes(aeUpgradeUnits);
+	const std::vector<UnitTypes>& aeUpgradeUnits = getUpgradeUnitTypes();
 
 	if (aeUpgradeUnits.empty())
 	{

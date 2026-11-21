@@ -6646,6 +6646,8 @@ int CvUnit::getStackExperienceToGive(int iNumUnits) const
 
 int CvUnit::upgradePrice(UnitTypes eUnit) const
 {
+	PROFILE_FUNC();
+
 	int iPrice;
 
 	CyArgsList argsList;
@@ -6730,20 +6732,75 @@ bool CvUnit::upgradeAvailable(UnitTypes eFromUnit, UnitClassTypes eToUnitClass, 
 //
 // One walk over the tree replaces an upgradeAvailable() recursion per unit type.
 //
-void CvUnit::getUpgradeUnitTypes(std::vector<UnitTypes>& aeUnits) const
+// The list depends on the unit type and the civilization only, which is to say on the XML,
+// so getUpgradeUnitTypes() builds each one once and keeps it.
+//
+const std::vector<UnitTypes>& CvUnit::getUpgradeUnitTypes() const
+{
+	static std::vector<std::vector<UnitTypes> > aaeLists;
+	static std::vector<unsigned char> abBuilt;
+	static int iNumUnitInfos = -1;
+	static int iNumUnitClassInfos = -1;
+	static int iNumCivilizationInfos = -1;
+
+	if ((iNumUnitInfos != GC.getNumUnitInfos()) || (iNumUnitClassInfos != GC.getNumUnitClassInfos()) || (iNumCivilizationInfos != GC.getNumCivilizationInfos()))
+	{
+		// first use, or the XML was loaded again
+		iNumUnitInfos = GC.getNumUnitInfos();
+		iNumUnitClassInfos = GC.getNumUnitClassInfos();
+		iNumCivilizationInfos = GC.getNumCivilizationInfos();
+
+		aaeLists.clear();
+		aaeLists.resize(iNumUnitInfos * iNumCivilizationInfos);
+		abBuilt.assign(iNumUnitInfos * iNumCivilizationInfos, 0);
+	}
+
+	const int iIndex = (getCivilizationType() * iNumUnitInfos) + getUnitType();
+
+	if (abBuilt[iIndex] == 0)
+	{
+		calculateUpgradeUnitTypes(getCivilizationType(), getUnitType(), aaeLists[iIndex]);
+		abBuilt[iIndex] = 1;
+	}
+
+#ifdef BRIDGED_PROFILE
+	// UPGRADE_VERIFY: a global define for profile builds. Set, the kept list is checked
+	// against one built afresh.
+	static BridgedProfileSample kWrong = { "upgrade verify: KEPT UPGRADE LIST DIFFERS" };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("UPGRADE_VERIFY") != 0) ? 1 : 0;
+	}
+	if (iVerify != 0)
+	{
+		std::vector<UnitTypes> aeFresh;
+		calculateUpgradeUnitTypes(getCivilizationType(), getUnitType(), aeFresh);
+		if (aeFresh != aaeLists[iIndex])
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
+
+	return aaeLists[iIndex];
+}
+
+
+void CvUnit::calculateUpgradeUnitTypes(CivilizationTypes eCivilization, UnitTypes eUnit, std::vector<UnitTypes>& aeUnits)
 {
 	aeUnits.clear();
 
 	const int iNumUnitClassInfos = GC.getNumUnitClassInfos();
 	const int iNumUnitInfos = GC.getNumUnitInfos();
-	const CvCivilizationInfo& kCivilization = GC.getCivilizationInfo(getCivilizationType());
+	const CvCivilizationInfo& kCivilization = GC.getCivilizationInfo(eCivilization);
 
 	std::vector<bool> abClassReachable(iNumUnitClassInfos, false);
 	std::vector<bool> abExpanded(iNumUnitInfos, false);
 	std::vector<UnitTypes> aeOpen;
 
-	abExpanded[getUnitType()] = true;
-	aeOpen.push_back(getUnitType());
+	abExpanded[eUnit] = true;
+	aeOpen.push_back(eUnit);
 
 	while (!aeOpen.empty())
 	{
@@ -6793,6 +6850,15 @@ bool CvUnit::canUpgrade(UnitTypes eUnit, bool bTestVisible) const
 		return false;
 	}
 	
+	// The stock code looked at the price before it looked for a city that can train the unit.
+	// The answer is the same either way round, and the price asks Python
+	// (getUpgradePriceOverride) every time, so the city comes first: the price is then only
+	// asked for an upgrade that is possible.
+	if (!hasUpgrade(eUnit))
+	{
+		return false;
+	}
+
 	if (!bTestVisible)
 	{
 		if (GET_PLAYER(getOwnerINLINE()).getGold() < upgradePrice(eUnit))
@@ -6801,12 +6867,7 @@ bool CvUnit::canUpgrade(UnitTypes eUnit, bool bTestVisible) const
 		}
 	}
 	
-	if (hasUpgrade(eUnit))
-	{
-		return true;
-	}
-
-	return false;
+	return true;
 }
 
 bool CvUnit::isReadyForUpgrade() const
@@ -6849,6 +6910,17 @@ bool CvUnit::hasUpgrade(UnitTypes eUnit, bool bSearch) const
 // NULL result means the upgrade is not possible
 CvCity* CvUnit::getUpgradeCity(bool bSearch) const
 {
+	PROFILE_FUNC();
+
+	// getUpgradeCity(eUnit) finds no city for a type off this unit's upgrade tree, so only
+	// the types on it are valued, in the same order. (The stock code valued every unit type.)
+	const std::vector<UnitTypes>& aeUpgradeUnits = getUpgradeUnitTypes();
+
+	if (aeUpgradeUnits.empty())
+	{
+		return NULL;
+	}
+
 	CvPlayerAI& kPlayer = GET_PLAYER(getOwnerINLINE());
 	UnitAITypes eUnitAI = AI_getUnitAIType();
 	CvArea* pArea = area();
@@ -6858,8 +6930,9 @@ CvCity* CvUnit::getUpgradeCity(bool bSearch) const
 	int iBestSearchValue = MAX_INT;
 	CvCity* pBestUpgradeCity = NULL;
 	
-	for (int iI = 0; iI < GC.getNumUnitInfos(); iI++)
+	for (size_t iUpgrade = 0; iUpgrade < aeUpgradeUnits.size(); iUpgrade++)
 	{
+		const int iI = aeUpgradeUnits[iUpgrade];
 		int iNewValue = kPlayer.AI_unitValue(((UnitTypes)iI), eUnitAI, pArea);
 		if (iNewValue > iCurrentValue)
 		{
@@ -6893,6 +6966,8 @@ CvCity* CvUnit::getUpgradeCity(bool bSearch) const
 // NULL result means the upgrade is not possible
 CvCity* CvUnit::getUpgradeCity(UnitTypes eUnit, bool bSearch, int* iSearchValue) const
 {
+	PROFILE_FUNC();
+
 	if (eUnit == NO_UNIT)
 	{
 		return false;

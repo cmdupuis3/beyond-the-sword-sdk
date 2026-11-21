@@ -258,7 +258,8 @@ public:
 
 	int upgradePrice(UnitTypes eUnit) const;																											// Exposed to Python
 	bool upgradeAvailable(UnitTypes eFromUnit, UnitClassTypes eToUnitClass, int iCount = 0) const;					// Exposed to Python
-	void getUpgradeUnitTypes(std::vector<UnitTypes>& aeUnits) const;
+	const std::vector<UnitTypes>& getUpgradeUnitTypes() const;
+	static void calculateUpgradeUnitTypes(CivilizationTypes eCivilization, UnitTypes eUnit, std::vector<UnitTypes>& aeUnits);
 	bool canUpgrade(UnitTypes eUnit, bool bTestVisible = false) const;														// Exposed to Python
 	bool isReadyForUpgrade() const;
 	bool hasUpgrade(bool bSearch = false) const;																											// Exposed to Python
