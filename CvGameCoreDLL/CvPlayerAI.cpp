@@ -7048,6 +7048,10 @@ int CvPlayerAI::AI_baseBonusVal(BonusTypes eBonus) const
 						}
 					}
 					
+					// A building this bonus does nothing for adds nothing to the value whether or not it
+					// can be built: every step below leaves a zero at zero. canConstruct() on every
+					// building class, for every bonus, was most of the cost of this function.
+					if (iTempValue != 0)
 					{
 						// determine whether we have the tech for this building
 						bool bHasTechForBuilding = true;
