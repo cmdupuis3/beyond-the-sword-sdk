@@ -208,6 +208,10 @@ private:
 
 #endif	// BRIDGED_PROFILE
 
+#ifdef BRIDGED_PGO_TRAIN
+void bridgedPgoTurn(int iGameTurn);	// call once per game turn; writes the raw profile: see CvGameCoreDLL.cpp
+#endif
+
 
 #endif //__PROFILE_H__
 

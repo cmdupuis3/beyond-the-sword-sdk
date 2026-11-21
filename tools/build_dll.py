@@ -35,11 +35,23 @@ def main():
                         help='time the SDK PROFILE scopes inside the DLL (see FProfiler.h)')
     parser.add_argument('--no-lto', dest='lto', action='store_false',
                         help='compile each SDK unit on its own, without link-time optimisation')
+    pgo = parser.add_mutually_exclusive_group()
+    pgo.add_argument('--pgo-train', action='store_true',
+                     help='build the DLL that counts what runs, for run_bench.py --pgo-train')
+    pgo.add_argument('--pgo-use', type=Path, metavar='PROFDATA',
+                     help='optimise with a profile merged by llvm-profdata from training runs')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--cmake', default='cmake')
     args = parser.parse_args()
+    if args.pgo_use is not None and not args.pgo_use.is_file():
+        parser.error(f'not found: {args.pgo_use}')
     if args.output_dir is None:
-        args.output_dir = ROOT / ('tmp/dll-build-profile' if args.profile else 'tmp/dll-build')
+        name = 'tmp/dll-build'
+        if args.pgo_train:
+            name += '-pgo-train'
+        elif args.pgo_use is not None:
+            name += '-pgo'
+        args.output_dir = ROOT / (name + ('-profile' if args.profile else ''))
     for name, path in support.dependency_paths(args.deps_dir).items():
         if getattr(args, name) is None:
             setattr(args, name, path)
@@ -94,6 +106,8 @@ def main():
                      '-DCMAKE_BUILD_TYPE=Release', '-DPython3_EXECUTABLE=' + Path(sys.executable).as_posix(),
                      '-DBRIDGED_PROFILE=' + ('ON' if args.profile else 'OFF'),
                      '-DBRIDGED_LTO=' + ('ON' if args.lto else 'OFF'),
+                     '-DBRIDGED_PGO=' + ('TRAIN' if args.pgo_train else 'USE' if args.pgo_use else 'OFF'),
+                     '-DBRIDGED_PGO_PROFILE=' + (args.pgo_use.resolve().as_posix() if args.pgo_use else ''),
                      '-DBRIDGED_LLVM_BIN=' + args.llvm_bin.resolve().as_posix(),
                      '-DBRIDGED_VC71=' + args.vc71.resolve().as_posix(),
                      '-DBRIDGED_WINDOWS_SDK=' + args.windows_sdk.resolve().as_posix()]
@@ -193,11 +207,19 @@ def main():
         if args.lto:
             # the one object the linker made of the SDK units, kept by /lldsavetemps:prelink
             lto_object = output / 'CvGameCoreDLL.dll.lto.obj'
-            if not lto_object.exists() or lto_object.read_bytes()[:2] != b'\x4c\x01':
+            # A training build has a counter section for every function, which is more
+            # sections than a plain COFF object can hold, so its object is a "big object"
+            # (0000 FFFF, then the machine at offset 6). eh_metadata.py does not read that
+            # form. The training DLL is only ever run to collect a profile, and the DLL
+            # built from the profile is checked as usual.
+            magic = lto_object.read_bytes()[:8] if lto_object.exists() else b''
+            big_object = args.pgo_train and magic[:4] == b'\x00\x00\xff\xff' and magic[6:8] == b'\x4c\x01'
+            if magic[:2] != b'\x4c\x01' and not big_object:
                 raise RuntimeError(f'missing/non-i386 link-time object: {lto_object}')
             if lto_object.stat().st_mtime < binary.stat().st_mtime - 600:
                 raise RuntimeError(f'link-time object is older than the DLL: {lto_object}')
-            exception_metadata[lto_object.name] = eh_metadata.inspect_object(lto_object)
+            if not big_object:
+                exception_metadata[lto_object.name] = eh_metadata.inspect_object(lto_object)
         log = (attempt / 'build.log').read_text()
         libraries = [args.vc71 / 'lib' / name for name in ['msvcrt.lib', 'msvcprt.lib', 'oldnames.lib']]
         libraries += [args.windows_sdk / 'lib' / name for name in ['Kernel32.Lib', 'User32.Lib', 'WinMM.Lib']]
@@ -209,11 +231,15 @@ def main():
                       added_public_exports=sorted(set(image['exports']) - set(stock['exports'])),
                       units=len(expected_sources), adapter_units=len(adapter_sources),
                       link_time_optimisation=args.lto,
+                      profile_guided_optimisation=('train' if args.pgo_train else 'use' if args.pgo_use else 'off'),
+                      pgo_profile_sha256=(support.digest(args.pgo_use) if args.pgo_use else None),
                       exception_route='Static Clang EH3 to VC7.1 frame adapter; no supplemental CRT DLL',
                       legacy_eh_imports=legacy_eh_imports, provider_hashes=provider_hashes,
                       exception_metadata=exception_metadata,
                       exception_funcinfo_count=sum(row['funcinfo_count'] for row in exception_metadata.values()),
-                      maximum_catch_clauses=max(row['max_catch_clauses'] for row in exception_metadata.values()),
+                      maximum_catch_clauses=max((row['max_catch_clauses'] for row in exception_metadata.values()),
+                                                default=0),
+                      exception_metadata_checked=bool(exception_metadata),
                       link_library_sha256={str(path): support.digest(path) for path in libraries},
                       logs={name: {'path': str(attempt / name), 'sha256': support.digest(attempt / name)}
                             for name in ['configure.log', 'build.log']},

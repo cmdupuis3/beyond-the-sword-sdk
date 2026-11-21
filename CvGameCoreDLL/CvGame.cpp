@@ -5933,6 +5933,9 @@ void CvGame::doTurn()
 #ifdef BRIDGED_PROFILE
 	bridgedProfileTurn(getGameTurn());
 #endif
+#ifdef BRIDGED_PGO_TRAIN
+	bridgedPgoTurn(getGameTurn());
+#endif
 
 	stopProfilingDLL();
 

@@ -81,6 +81,26 @@ if(BRIDGED_LTO)
   target_compile_options(CvGameCoreDLL PRIVATE -flto)
   target_link_options(CvGameCoreDLL PRIVATE /lldsavetemps:prelink)
 endif()
+# Profile-guided optimisation. TRAIN builds a DLL that counts how often each block of code
+# runs and writes the counts to the file named by the BRIDGED_PGO_RAW environment variable
+# (see CvGameCoreDLL.cpp). USE optimises with a profile made from such counts by
+# llvm-profdata merge. Value profiling is off because it needs LLVM's runtime library.
+set(BRIDGED_PGO "OFF" CACHE STRING "Profile-guided optimisation: OFF, TRAIN or USE")
+set(BRIDGED_PGO_PROFILE "" CACHE FILEPATH "Merged profile (.profdata) for BRIDGED_PGO=USE")
+if(BRIDGED_PGO STREQUAL "TRAIN")
+  target_compile_definitions(CvGameCoreDLL PRIVATE BRIDGED_PGO_TRAIN)
+  target_compile_options(CvGameCoreDLL PRIVATE -fprofile-generate "SHELL:-mllvm -disable-vp")
+elseif(BRIDGED_PGO STREQUAL "USE")
+  if(NOT EXISTS "${BRIDGED_PGO_PROFILE}")
+    message(FATAL_ERROR "Set BRIDGED_PGO_PROFILE to the merged profile")
+  endif()
+  target_compile_options(CvGameCoreDLL PRIVATE "-fprofile-use=${BRIDGED_PGO_PROFILE}"
+    "SHELL:-mllvm -disable-vp" -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${BRIDGED_PGO_PROFILE}")
+  set_property(TARGET CvGameCoreDLL APPEND PROPERTY OBJECT_DEPENDS "${BRIDGED_PGO_PROFILE}")
+elseif(NOT BRIDGED_PGO STREQUAL "OFF")
+  message(FATAL_ERROR "BRIDGED_PGO must be OFF, TRAIN or USE")
+endif()
 target_link_libraries(CvGameCoreDLL PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/CvGameCoreDLL/Python24/libs/python24.lib"
   "${CMAKE_CURRENT_SOURCE_DIR}/CvGameCoreDLL/Boost-1.32.0/libs/boost_python-vc71-mt-1_32.lib"

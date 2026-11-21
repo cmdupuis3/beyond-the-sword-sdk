@@ -233,3 +233,152 @@ void bridgedProfileTurn(int iGameTurn)
 	free(apSamples);
 }
 #endif	// BRIDGED_PROFILE
+
+#ifdef BRIDGED_PGO_TRAIN
+//
+// Training build for profile-guided optimisation (tools/build_dll.py --pgo-train).
+//
+// Clang's -fprofile-generate makes every function count how often its blocks run. The
+// counters, a record for each function and the function names go into three sections of
+// the DLL. LLVM's own runtime library would write them to a file when the program ends,
+// but it is not shipped for 32-bit Windows and it needs a modern C runtime. So the file
+// is written here instead: the raw profile format of the pinned LLVM 23.1.2
+// (INSTR_PROF_RAW_VERSION 11 in its profile/InstrProfData.inc), which llvm-profdata reads.
+//
+// Indirect-call and memory-size profiling are switched off in the build (-disable-vp):
+// they are the part that needs the runtime library.
+//
+// The file is named by the BRIDGED_PGO_RAW environment variable and rewritten every tenth
+// game turn, because the benchmark stops the game by killing it.
+//
+#include <stdio.h>
+#include <stdlib.h>
+
+// INSTR_PROF_DATA of LLVM 23.1.2 for a 32-bit target
+struct BridgedPgoData
+{
+	unsigned long long uiNameRef;
+	unsigned long long uiFuncHash;
+	unsigned int uiCounterPtr;			// from this record to its counters
+	unsigned int uiUniformCounterPtr;
+	unsigned int uiBitmapPtr;
+	unsigned int uiFunctionPointer;
+	unsigned int uiValues;
+	unsigned int uiNumCounters;
+	unsigned short ausNumValueSites[3];	// IPVK_Last + 1
+	unsigned short usOffloadDeviceWaveSize;
+	unsigned int uiNumBitmapBytes;
+};
+static_assert(sizeof(BridgedPgoData) == 56, "the function record of the raw profile is 56 bytes on i386");
+
+// The linker puts each section's parts in the order of what follows the $, so these stand
+// before and after everything the compiler put in ($M).
+#pragma section(".lprfd$A", read, write)
+#pragma section(".lprfd$Z", read, write)
+#pragma section(".lprfc$A", read, write)
+#pragma section(".lprfc$Z", read, write)
+#pragma section(".lprfn$A", read)
+#pragma section(".lprfn$Z", read)
+__declspec(allocate(".lprfd$A")) __declspec(align(8)) BridgedPgoData g_bridgedPgoDataStart = { 0 };
+__declspec(allocate(".lprfd$Z")) __declspec(align(8)) BridgedPgoData g_bridgedPgoDataEnd = { 0 };
+__declspec(allocate(".lprfc$A")) __declspec(align(8)) unsigned long long g_uiBridgedPgoCountersStart = 0;
+__declspec(allocate(".lprfc$Z")) __declspec(align(8)) unsigned long long g_uiBridgedPgoCountersEnd = 0;
+__declspec(allocate(".lprfn$A")) extern const char g_cBridgedPgoNamesStart = 1;
+__declspec(allocate(".lprfn$Z")) extern const char g_cBridgedPgoNamesEnd = 2;
+
+extern "C"
+{
+	int __llvm_profile_runtime = 0;						// instrumented code refers to it to pull the runtime in
+	// Set by the compiler in every instrumented unit: the format version and what kind of
+	// profile it is. Declared under its link name, because a declaration under its own name
+	// in a unit that is itself instrumented collides with the one the compiler adds.
+	extern unsigned long long g_uiBridgedPgoRawVersion __asm__("___llvm_profile_raw_version");
+}
+
+void bridgedPgoTurn(int iGameTurn)
+{
+	const char* szPath = getenv("BRIDGED_PGO_RAW");
+	if (szPath == NULL || (iGameTurn % 10) != 0)
+	{
+		return;
+	}
+
+	const BridgedPgoData* pDataBegin = &g_bridgedPgoDataStart + 1;
+	const BridgedPgoData* pDataEnd = &g_bridgedPgoDataEnd;
+	const unsigned long long* pCountersBegin = &g_uiBridgedPgoCountersStart + 1;
+	const unsigned long long* pCountersEnd = &g_uiBridgedPgoCountersEnd;
+	const char* pNamesBegin = &g_cBridgedPgoNamesStart + 1;
+	const char* pNamesEnd = &g_cBridgedPgoNamesEnd;
+
+	const unsigned int uiDataBytes = (unsigned int)((const char*)pDataEnd - (const char*)pDataBegin);
+	const unsigned int uiNumData = uiDataBytes / sizeof(BridgedPgoData);
+	const unsigned int uiNumCounters = (unsigned int)(pCountersEnd - pCountersBegin);
+	const unsigned int uiNamesSize = (unsigned int)(pNamesEnd - pNamesBegin);
+
+	// What this writer leaves out must not be there.
+	const char* szProblem = NULL;
+	if ((uiDataBytes % sizeof(BridgedPgoData)) != 0)
+	{
+		szProblem = "the record section is not a whole number of records";
+	}
+	for (unsigned int uiI = 0; uiI < uiNumData && szProblem == NULL; uiI++)
+	{
+		const BridgedPgoData& kData = pDataBegin[uiI];
+		if (kData.ausNumValueSites[0] != 0 || kData.ausNumValueSites[1] != 0 || kData.ausNumValueSites[2] != 0)
+		{
+			szProblem = "a function has value sites: build with -mllvm -disable-vp";
+		}
+		else if (kData.uiNumBitmapBytes != 0 || kData.uiUniformCounterPtr != 0)
+		{
+			szProblem = "a function has bitmap bytes or uniform counters";
+		}
+	}
+
+	FILE* pFile = fopen(szPath, "wb");
+	if (pFile == NULL)
+	{
+		return;
+	}
+	if (szProblem != NULL)
+	{
+		fprintf(pFile, "no profile written: %s\n", szProblem);
+		fclose(pFile);
+		return;
+	}
+
+	// INSTR_PROF_RAW_HEADER of LLVM 23.1.2. The deltas are worked out in 32 bits, as the
+	// runtime library does for a 32-bit program.
+	const unsigned long long auiHeader[19] = {
+		((unsigned long long)255 << 56) | ((unsigned long long)'l' << 48) | ((unsigned long long)'p' << 40) |
+			((unsigned long long)'r' << 32) | ((unsigned long long)'o' << 24) | ((unsigned long long)'f' << 16) |
+			((unsigned long long)'R' << 8) | (unsigned long long)129,	// Magic, 32-bit
+		g_uiBridgedPgoRawVersion,										// Version
+		0,																// BinaryIdsSize
+		uiNumData,														// NumData
+		0,																// PaddingBytesBeforeCounters
+		uiNumCounters,													// NumCounters
+		0,																// PaddingBytesAfterCounters
+		0,																// NumBitmapBytes
+		0,																// PaddingBytesAfterBitmapBytes
+		0,																// NumUniformCounters
+		0,																// PaddingBytesAfterUniformCounters
+		0,																// UniformCountersDelta
+		uiNamesSize,													// NamesSize
+		(unsigned int)((unsigned int)pCountersBegin - (unsigned int)pDataBegin),	// CountersDelta
+		0,																// BitmapDelta
+		(unsigned int)pNamesBegin,										// NamesDelta
+		0,																// NumVTables
+		0,																// VNamesSize
+		2,																// ValueKindLast
+	};
+
+	static const char acPadding[8] = { 0 };
+
+	fwrite(auiHeader, sizeof(auiHeader), 1, pFile);
+	fwrite(pDataBegin, sizeof(BridgedPgoData), uiNumData, pFile);
+	fwrite(pCountersBegin, sizeof(unsigned long long), uiNumCounters, pFile);
+	fwrite(pNamesBegin, 1, uiNamesSize, pFile);
+	fwrite(acPadding, 1, (8 - (uiNamesSize % 8)) % 8, pFile);
+	fclose(pFile);
+}
+#endif	// BRIDGED_PGO_TRAIN

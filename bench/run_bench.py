@@ -128,6 +128,8 @@ def main():
     parser.add_argument('--fullscreen', action='store_true')
     parser.add_argument('--profile', action='store_true',
                         help='for a DLL built with build_dll.py --profile: write results/<label>.profile.tsv')
+    parser.add_argument('--pgo-train', action='store_true',
+                        help='for a DLL built with build_dll.py --pgo-train: write results/<label>.profraw')
     parser.add_argument('--define', action='append', default=[], metavar='NAME=INT',
                         help='integer global define for the mod, e.g. FOUND_VALUE_REFRESH_TURNS=8; repeatable')
     args = parser.parse_args()
@@ -178,6 +180,12 @@ def main():
         profile = RESULTS / f'{args.label}.profile.tsv'
         profile.unlink(missing_ok=True)
         env['BRIDGED_PROFILE_LOG'] = str(profile)
+
+    env.pop('BRIDGED_PGO_RAW', None)
+    if args.pgo_train:
+        raw = RESULTS / f'{args.label}.profraw'
+        raw.unlink(missing_ok=True)
+        env['BRIDGED_PGO_RAW'] = str(raw)
 
     started = time.monotonic()
     process = subprocess.Popen([str(exe), f'/ALTROOT={ALTROOT}'], cwd=str(args.bts_dir), env=env)
