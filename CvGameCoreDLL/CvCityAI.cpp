@@ -3,6 +3,7 @@
 #include "CvGameCoreDLL.h"
 #include "CvGlobals.h"
 #include "CvGameCoreUtils.h"
+#include "CvInfoTables.h"
 #include "CvCityAI.h"
 #include "CvGameAI.h"
 #include "CvPlot.h"
@@ -7845,9 +7846,13 @@ void CvCityAI::AI_bestPlotBuild(CvPlot* pPlot, int* piBestValue, BuildTypes* peB
 				}
 				else
 				{
-					for (iJ = 0; iJ < GC.getNumBuildInfos(); iJ++)
+					// the builds that make this improvement (see CvInfoTables.h), where stock went
+					// through every build for every improvement; the test below is now always true
+					const std::vector<BuildTypes>& aeImprovementBuilds = CvInfoTables::improvementBuilds(eImprovement);
+
+					for (iJ = 0; iJ < (int)aeImprovementBuilds.size(); iJ++)
 					{
-						eBuild = ((BuildTypes)iJ);
+						eBuild = aeImprovementBuilds[iJ];
 
 						if (GC.getBuildInfo(eBuild).getImprovement() == eImprovement)
 						{

@@ -194,6 +194,7 @@ public:
 
 	int getBuildCost(const CvPlot* pPlot, BuildTypes eBuild) const;
 	bool canBuild(const CvPlot* pPlot, BuildTypes eBuild, bool bTestEra = false, bool bTestVisible = false) const;	// Exposed to Python
+	RouteTypes getBestRouteEveryBuild(CvPlot* pPlot) const;
 	RouteTypes getBestRoute(CvPlot* pPlot = NULL) const;																						// Exposed to Python
 	int getImprovementUpgradeRate() const;																													// Exposed to Python
 

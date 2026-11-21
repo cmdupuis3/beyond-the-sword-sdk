@@ -4,6 +4,7 @@
 #include "CvPlayerAI.h"
 #include "CvDefines.h"
 #include "CvGameCoreUtils.h"
+#include "CvInfoTables.h"
 #include "CvGlobals.h"
 #include "CvTeamAI.h"
 #include "CvPlayerAI.h"
@@ -143,6 +144,7 @@ void CvTeam::uninit()
 // Initializes data members that are serialized.
 void CvTeam::reset(TeamTypes eID, bool bConstructorCall)
 {
+	CvInfoTables::teamTechsChanged(eID);	// technologies are cleared below
 	// war status is cleared below, here and in what the other teams hold about this one: see getEnemyTeams()
 	m_iAtWarEpoch++;
 	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
@@ -4841,6 +4843,7 @@ void CvTeam::setHasTech(TechTypes eIndex, bool bNewValue, PlayerTypes ePlayer, b
 			}
 
 			m_pabHasTech[eIndex] = bNewValue;
+			CvInfoTables::teamTechsChanged(getID());
 
 			for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
 			{
@@ -6074,6 +6077,7 @@ void CvTeam::read(FDataStreamBase* pStream)
 	pStream->Read(GC.getNumVictoryInfos(), m_aiVictoryCountdown);
 
 	pStream->Read(GC.getNumTechInfos(), m_pabHasTech);
+	CvInfoTables::teamTechsChanged(NO_TEAM);	// every team: cheap, and no reliance on the ID read above
 	pStream->Read(GC.getNumTechInfos(), m_pabNoTradeTech);
 
 	for (int i = 0; i < GC.getNumImprovementInfos(); ++i)

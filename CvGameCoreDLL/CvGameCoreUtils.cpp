@@ -1,5 +1,6 @@
 #include "CvGameCoreDLL.h"
 #include "CvGameCoreUtils.h"
+#include "CvInfoTables.h"
 #include <algorithm>
 #include "CvUnit.h"
 #include "CvGameAI.h"
@@ -366,6 +367,11 @@ int getWonderScore(BuildingClassTypes eWonderClass)
 ImprovementTypes finalImprovementUpgrade(ImprovementTypes eImprovement, int iCount)
 {
 	FAssertMsg(eImprovement != NO_IMPROVEMENT, "Improvement is not assigned a valid value");
+
+	if (iCount == 0)
+	{
+		return CvInfoTables::finalImprovement(eImprovement);	// the XML alone decides it: worked out once
+	}
 
 	if (iCount > GC.getNumImprovementInfos())
 	{

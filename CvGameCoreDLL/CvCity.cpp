@@ -2,6 +2,7 @@
 
 #include "CvGameCoreDLL.h"
 #include "CvGlobals.h"
+#include "CvInfoTables.h"
 #include "CvCity.h"
 #include "CvArea.h"
 #include "CvGameAI.h"
@@ -1571,28 +1572,26 @@ UnitTypes CvCity::allUpgradesAvailable(UnitTypes eUnit, int iUpgradeCount) const
 	bUpgradeAvailable = false;
 	bUpgradeUnavailable = false;
 
-	for (iI = 0; iI < GC.getNumUnitClassInfos(); iI++)
+	// The units this one upgrades to directly, in unit class order: see CvInfoTables.h.
+	// The stock loop found them by testing every unit class, at every step of the walk.
+	const std::vector<UnitTypes>& aeUpgradeUnits = CvInfoTables::upgradeUnits(getCivilizationType(), eUnit);
+
+	for (iI = 0; iI < (int)aeUpgradeUnits.size(); iI++)
 	{
-		if (GC.getUnitInfo(eUnit).getUpgradeUnitClass(iI))
+		eLoopUnit = aeUpgradeUnits[iI];
+
+		bUpgradeFound = true;
+
+		eTempUnit = allUpgradesAvailable(eLoopUnit, (iUpgradeCount + 1));
+
+		if (eTempUnit != NO_UNIT)
 		{
-			eLoopUnit = (UnitTypes)GC.getCivilizationInfo(getCivilizationType()).getCivilizationUnits(iI);
-
-			if (eLoopUnit != NO_UNIT)
-			{
-				bUpgradeFound = true;
-
-				eTempUnit = allUpgradesAvailable(eLoopUnit, (iUpgradeCount + 1));
-
-				if (eTempUnit != NO_UNIT)
-				{
-					eUpgradeUnit = eTempUnit;
-					bUpgradeAvailable = true;
-				}
-				else
-				{
-					bUpgradeUnavailable = true;
-				}
-			}
+			eUpgradeUnit = eTempUnit;
+			bUpgradeAvailable = true;
+		}
+		else
+		{
+			bUpgradeUnavailable = true;
 		}
 	}
 
@@ -1730,6 +1729,13 @@ bool CvCity::canTrain(UnitTypes eUnit, bool bContinue, bool bTestVisible, bool b
 		}
 	}
 
+	// CvPlayer::canTrain() says no to a unit whose technologies the team lacks, whatever
+	// else is true, so one lookup answers for most of the units a city is asked about
+	if (!CvInfoTables::isUnitTech(getTeam(), eUnit))
+	{
+		return false;
+	}
+
 	if (!(GET_PLAYER(getOwnerINLINE()).canTrain(eUnit, bContinue, bTestVisible, bIgnoreCost)))
 	{
 		return false;
@@ -1823,6 +1829,12 @@ bool CvCity::canConstruct(BuildingTypes eBuilding, bool bContinue, bool bTestVis
 		{
 			return true;
 		}
+	}
+
+	// as in canTrain(): CvPlayer::canConstruct() says no without the building's technologies
+	if (!CvInfoTables::isBuildingTech(getTeam(), eBuilding))
+	{
+		return false;
 	}
 
 	if (!(GET_PLAYER(getOwnerINLINE()).canConstruct(eBuilding, bContinue, bTestVisible, bIgnoreCost)))

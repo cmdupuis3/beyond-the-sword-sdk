@@ -2,6 +2,7 @@
 
 #include "CvGameCoreDLL.h"
 #include "CvGlobals.h"
+#include "CvInfoTables.h"
 #include "CvArea.h"
 #include "CvGameAI.h"
 #include "CvMap.h"
@@ -5361,9 +5362,14 @@ bool CvPlayer::canConstruct(BuildingTypes eBuilding, bool bContinue, bool bTestV
 	}
 
 	CvCivilizationInfo &civilizationInfo = GC.getCivilizationInfo(getCivilizationType());
-	int numBuildingClassInfos = GC.getNumBuildingClassInfos();
-	for (iI = 0; iI < numBuildingClassInfos; iI++)
+	// Only the building classes this building needs some of can fail the two tests
+	// below (getBuildingClassPrereqBuilding() is 0 for the rest), and the XML says which
+	// they are: see CvInfoTables.h. Stock tested every building class, twice.
+	const std::vector<BuildingClassTypes>& aePrereqClasses = CvInfoTables::prereqBuildingClasses(eBuilding);
+	const int numPrereqClasses = (int)aePrereqClasses.size();
+	for (int iPrereq = 0; iPrereq < numPrereqClasses; iPrereq++)
 	{
+		iI = aePrereqClasses[iPrereq];
 		BuildingTypes ePrereqBuilding = (BuildingTypes)civilizationInfo.getCivilizationBuildings(iI);
 
 		if (NO_BUILDING != ePrereqBuilding && currentTeam.isObsoleteBuilding(ePrereqBuilding))
@@ -5424,8 +5430,9 @@ bool CvPlayer::canConstruct(BuildingTypes eBuilding, bool bContinue, bool bTestV
 			return false;
 		}
 
-		for (iI = 0; iI < numBuildingClassInfos; iI++)
+		for (int iPrereq = 0; iPrereq < numPrereqClasses; iPrereq++)
 		{
+			iI = aePrereqClasses[iPrereq];
 			if (getBuildingClassCount((BuildingClassTypes)iI) < getBuildingClassPrereqBuilding(eBuilding, ((BuildingClassTypes)iI), ((bContinue) ? 0 : getBuildingClassMaking(eBuildingClass))))
 			{
 				return false;
@@ -5961,6 +5968,17 @@ bool CvPlayer::canBuild(const CvPlot* pPlot, BuildTypes eBuild, bool bTestEra, b
 {
 	PROFILE_FUNC();
 
+	// Without the build's technology the answer is no whatever the plot is like, so that
+	// is asked first: one lookup, where CvPlot::canBuild() examines the plot. Not done
+	// when Python's canBuild callback is in use, which stock calls before anything else.
+	if (!bTestEra && !bTestVisible && (eBuild != NO_BUILD) && !GC.getUSE_CAN_BUILD_CALLBACK())
+	{
+		if (!CvInfoTables::isBuildTech(getTeam(), eBuild))
+		{
+			return false;
+		}
+	}
+
 	if (!(pPlot->canBuild(eBuild, getID(), bTestVisible)))
 	{
 		return false;
@@ -6012,7 +6030,57 @@ int CvPlayer::getBuildCost(const CvPlot* pPlot, BuildTypes eBuild) const
 
 
 
+// The best route the player has on the plot or can build there (with no plot: has the
+// technology for).
+//
+// The route search asks this for every plot it looks at (routeValid()). The stock loop,
+// getBestRouteEveryBuild() below, asks canBuild() about every build that lays a route and
+// keeps the route worth most, the earlier build winning a tie. CvInfoTables::routeBuilds()
+// holds those builds with the best route first and ties in build order, so the first one
+// that passes is the same answer and the rest are not asked.
+//
+// With Python's canBuild callback in use every build is still asked, as in stock.
 RouteTypes CvPlayer::getBestRoute(CvPlot* pPlot) const
+{
+	PROFILE_FUNC();
+
+	if (GC.getUSE_CAN_BUILD_CALLBACK())
+	{
+		return getBestRouteEveryBuild(pPlot);
+	}
+
+	RouteTypes eBestRoute = NO_ROUTE;
+	const std::vector<CvRouteBuild>& akRouteBuilds = CvInfoTables::routeBuilds();
+
+	for (size_t i = 0; i < akRouteBuilds.size(); i++)
+	{
+		const CvRouteBuild& kRouteBuild = akRouteBuilds[i];
+
+		if ((pPlot != NULL) ? ((pPlot->getRouteType() == kRouteBuild.eRoute) || canBuild(pPlot, kRouteBuild.eBuild)) : CvInfoTables::isBuildTech(getTeam(), kRouteBuild.eBuild))
+		{
+			eBestRoute = kRouteBuild.eRoute;
+			break;
+		}
+	}
+
+#ifdef BRIDGED_PROFILE
+	if (CvInfoTables::isVerify())
+	{
+		static BridgedProfileSample kChecked = { "info table verify: best routes checked" };
+		static BridgedProfileSample kWrong = { "info table verify: BEST ROUTE DIFFERS" };
+		bridgedProfileAdd(&kChecked, 0);
+		if (eBestRoute != getBestRouteEveryBuild(pPlot))
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
+
+	return eBestRoute;
+}
+
+
+RouteTypes CvPlayer::getBestRouteEveryBuild(CvPlot* pPlot) const
 {
 	PROFILE_FUNC();
 
