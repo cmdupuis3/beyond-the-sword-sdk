@@ -105,6 +105,7 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 		{ "path: K-Mod nodes processed" }, { "path: K-Mod open list searches; calls = thousand open nodes looked at" } };
 	static unsigned int uiProfileOpenNodesCarry = 0;	// the count is too big for the profile's 32 bits
 	bool bProfileNewTree = false;
+	const unsigned long long uiProfileRequestStart = bridgedProfileTicks();
 	s_uiProfileNodes = 0;
 	s_uiProfileOpenNodes = 0;
 	s_uiProfileOpenTicks = 0;
@@ -202,6 +203,42 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 	uiProfileOpenNodesCarry += s_uiProfileOpenNodes;
 	bridgedProfileAdd(&aSamples[4], s_uiProfileOpenTicks, uiProfileOpenNodesCarry / 1000);
 	uiProfileOpenNodesCarry %= 1000;
+
+	// the searched requests by how far the destination is and by how many turns the path
+	// takes: the time of the request, and in the "nodes" rows the nodes processed as calls
+	{
+		static BridgedProfileSample aDistanceSamples[6] = {
+			{ "path by distance: 1-2 plots" }, { "path by distance: 3-4 plots" }, { "path by distance: 5-8 plots" },
+			{ "path by distance: 9-16 plots" }, { "path by distance: 17-32 plots" }, { "path by distance: 33 plots or more" } };
+		static BridgedProfileSample aDistanceNodes[6] = {
+			{ "path nodes by distance: 1-2 plots" }, { "path nodes by distance: 3-4 plots" }, { "path nodes by distance: 5-8 plots" },
+			{ "path nodes by distance: 9-16 plots" }, { "path nodes by distance: 17-32 plots" }, { "path nodes by distance: 33 plots or more" } };
+		static BridgedProfileSample aTurnSamples[5] = {
+			{ "path by turns: 1 turn" }, { "path by turns: 2 turns" }, { "path by turns: 3-4 turns" }, { "path by turns: 5-8 turns" }, { "path by turns: 9 turns or more" } };
+		static BridgedProfileSample aTurnNodes[5] = {
+			{ "path nodes by turns: 1 turn" }, { "path nodes by turns: 2 turns" }, { "path nodes by turns: 3-4 turns" }, { "path nodes by turns: 5-8 turns" }, { "path nodes by turns: 9 turns or more" } };
+		static BridgedProfileSample aFailed[2] = { { "path: searched and found no path" }, { "path nodes: searched and found no path" } };
+
+		const unsigned long long uiRequestTicks = bridgedProfileTicks() - uiProfileRequestStart;
+
+		if (end_node && (settings.iMaxPath < 0 || end_node->m_iData2 <= settings.iMaxPath))
+		{
+			const int iDistance = stepDistance(x1, y1, x2, y2);
+			const int iDistanceBucket = ((iDistance <= 2) ? 0 : ((iDistance <= 4) ? 1 : ((iDistance <= 8) ? 2 : ((iDistance <= 16) ? 3 : ((iDistance <= 32) ? 4 : 5)))));
+			const int iTurns = end_node->m_iData2;
+			const int iTurnBucket = ((iTurns <= 1) ? 0 : ((iTurns == 2) ? 1 : ((iTurns <= 4) ? 2 : ((iTurns <= 8) ? 3 : 4))));
+
+			bridgedProfileAdd(&aDistanceSamples[iDistanceBucket], uiRequestTicks);
+			bridgedProfileAdd(&aDistanceNodes[iDistanceBucket], 0, s_uiProfileNodes);
+			bridgedProfileAdd(&aTurnSamples[iTurnBucket], uiRequestTicks);
+			bridgedProfileAdd(&aTurnNodes[iTurnBucket], 0, s_uiProfileNodes);
+		}
+		else
+		{
+			bridgedProfileAdd(&aFailed[0], uiRequestTicks);
+			bridgedProfileAdd(&aFailed[1], 0, s_uiProfileNodes);
+		}
+	}
 #endif
 
 	if (end_node && (settings.iMaxPath < 0 || end_node->m_iData2 <= settings.iMaxPath))

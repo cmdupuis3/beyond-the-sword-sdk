@@ -122,7 +122,148 @@ void CvSelectionGroupAI::AI_seperateAI(UnitAITypes eUnitAI)
 	}
 }
 // Returns true if the group has become busy...
+#ifdef BRIDGED_PROFILE
+#include <map>
+#include <stdio.h>
+
+//
+// A probe for profile builds: what each call of AI_update() for a group ready to move ended
+// in, with the time it took, by where the owner's team stands (CvTeam::getPeaceState()) and
+// by whether an enemy unit that can attack is within four plots. It changes nothing.
+//
+// The outcomes, judged by the group's head unit:
+//   gone            the unit no longer exists (it died, founded a city, was used up...)
+//   moved           it is on another plot
+//   stayed, working it is on the same plot and its group has a mission queued (a build, say)
+//   stayed, acted   same plot, no mission, but it spent moves, took damage or attacked
+//   stayed idle     same plot, no mission, nothing spent; "as last turn" when the same unit
+//                   also stayed idle on this plot on the game turn before
+//
+static bool peaceProbeUpdate(CvSelectionGroupAI* pGroup)
+{
+	enum { OUTCOME_GONE, OUTCOME_MOVED, OUTCOME_WORKING, OUTCOME_ACTED, OUTCOME_IDLE_NEW, OUTCOME_IDLE_REPEAT, NUM_OUTCOMES };
+	static const char* const aszState[NUM_PEACE_STATES] = { "peace", "preparing", "war", "barbarians and minors" };
+	static const char* const aszOutcome[NUM_OUTCOMES] = { "gone", "moved", "stayed, working", "stayed, acted", "stayed idle, first turn", "stayed idle, as last turn" };
+	static BridgedProfileSample aSamples[NUM_PEACE_STATES][2][NUM_OUTCOMES];
+	static BridgedProfileSample aIdleSamples[NUM_UNITAI_TYPES];
+	static BridgedProfileSample kNotReady = { "unit update: group not ready to move" };
+	static std::map<long long, std::pair<int, int> > aLastIdle;	// unit -> the game turn and plot of its last idle stay
+
+	CvUnit* pHeadUnit = pGroup->getHeadUnit();
+
+	if (!pGroup->AI_isControlled() || (pHeadUnit == NULL) || !(pGroup->readyToMove() || pGroup->isForceUpdate()))
+	{
+		const unsigned long long uiStart = bridgedProfileTicks();
+		const bool bResult = pGroup->AI_updateGroup();
+		bridgedProfileAdd(&kNotReady, bridgedProfileTicks() - uiStart);
+		return bResult;
+	}
+
+	const PlayerTypes eOwner = pGroup->getOwnerINLINE();
+	const CvTeam& kTeam = GET_TEAM(pGroup->getTeam());
+	const int iState = kTeam.getPeaceState();
+	const CvPlot* pPlot = pGroup->plot();
+	const int iUnit = pHeadUnit->getID();
+	const UnitAITypes eUnitAI = pHeadUnit->AI_getUnitAIType();
+	const int iMoves = pHeadUnit->getMoves();
+	const int iDamage = pHeadUnit->getDamage();
+	const bool bMadeAttack = pHeadUnit->isMadeAttack();
+	const int iHostile = (GC.getMapINLINE().isTeamAttackerNear(pPlot, 4, kTeam.getEnemyTeams(), false) ? 1 : 0);
+	const int iGameTurn = GC.getGameINLINE().getGameTurn();
+	const int iPlot = GC.getMapINLINE().plotNumINLINE(pPlot->getX_INLINE(), pPlot->getY_INLINE());
+	const long long iKey = (((long long)eOwner) << 32) | (unsigned int)iUnit;
+
+	const unsigned long long uiStart = bridgedProfileTicks();
+	const bool bResult = pGroup->AI_updateGroup();	// pGroup may not exist after this
+	const unsigned long long uiTicks = bridgedProfileTicks() - uiStart;
+
+	pHeadUnit = GET_PLAYER(eOwner).getUnit(iUnit);
+
+	int iOutcome;
+
+	if ((pHeadUnit == NULL) || pHeadUnit->isDelayedDeath())
+	{
+		iOutcome = OUTCOME_GONE;
+	}
+	else if (pHeadUnit->plot() != pPlot)
+	{
+		iOutcome = OUTCOME_MOVED;
+	}
+	else if (pHeadUnit->getGroup()->getLengthMissionQueue() > 0)
+	{
+		iOutcome = OUTCOME_WORKING;
+	}
+	else if ((pHeadUnit->getMoves() != iMoves) || (pHeadUnit->getDamage() != iDamage) || (pHeadUnit->isMadeAttack() != bMadeAttack))
+	{
+		iOutcome = OUTCOME_ACTED;
+	}
+	else
+	{
+		std::map<long long, std::pair<int, int> >::iterator it = aLastIdle.find(iKey);
+
+		if ((it != aLastIdle.end()) && (it->second.first == iGameTurn))
+		{
+			// a second call for the unit in the same turn: leave it as it was first judged
+			iOutcome = OUTCOME_IDLE_NEW;
+		}
+		else
+		{
+			iOutcome = (((it != aLastIdle.end()) && (it->second.first == (iGameTurn - 1)) && (it->second.second == iPlot)) ? OUTCOME_IDLE_REPEAT : OUTCOME_IDLE_NEW);
+			aLastIdle[iKey] = std::make_pair(iGameTurn, iPlot);
+		}
+	}
+
+	if ((iOutcome != OUTCOME_IDLE_NEW) && (iOutcome != OUTCOME_IDLE_REPEAT))
+	{
+		aLastIdle.erase(iKey);
+	}
+
+	BridgedProfileSample& kSample = aSamples[iState][iHostile][iOutcome];
+
+	if (!kSample.bRegistered)
+	{
+		char szName[64];
+		_snprintf(szName, sizeof(szName) - 1, "unit %s, %s: %s", aszState[iState], ((iHostile != 0) ? "enemy near" : "quiet"), aszOutcome[iOutcome]);
+		szName[sizeof(szName) - 1] = '\0';
+		kSample.szName = szName;
+		bridgedProfileRegister(&kSample);
+	}
+
+	bridgedProfileAdd(&kSample, uiTicks);
+
+	// the repeated idle stays with nothing near, by the kind of unit, for every team but the background ones
+	if ((iOutcome == OUTCOME_IDLE_REPEAT) && (iHostile == 0) && (iState != PEACE_STATE_BACKGROUND) && (eUnitAI >= 0) && (eUnitAI < NUM_UNITAI_TYPES))
+	{
+		BridgedProfileSample& kIdleSample = aIdleSamples[eUnitAI];
+
+		if (!kIdleSample.bRegistered)
+		{
+			char szName[64];
+			_snprintf(szName, sizeof(szName) - 1, "idle as last turn, quiet: %s", GC.getUnitAIInfo(eUnitAI).getType());
+			szName[sizeof(szName) - 1] = '\0';
+			kIdleSample.szName = szName;
+			bridgedProfileRegister(&kIdleSample);
+		}
+
+		bridgedProfileAdd(&kIdleSample, uiTicks);
+	}
+
+	return bResult;
+}
+#endif
+
+
 bool CvSelectionGroupAI::AI_update()
+{
+#ifdef BRIDGED_PROFILE
+	return peaceProbeUpdate(this);
+#else
+	return AI_updateGroup();
+#endif
+}
+
+
+bool CvSelectionGroupAI::AI_updateGroup()
 {
 	CLLNode<IDInfo>* pEntityNode;
 	CvUnit* pLoopUnit;

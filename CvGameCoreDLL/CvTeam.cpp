@@ -2502,6 +2502,55 @@ bool CvTeam::isBarbarian() const
 }
 
 
+//
+// A team every other team is at war with as a matter of course, so that being at war with it
+// says nothing about how a team stands: the barbarians and the minor civilizations. A mod
+// with other teams of that kind (independent cities, say) adds them here.
+//
+bool CvTeam::isBackgroundEnemy() const
+{
+	return (isBarbarian() || isMinorCiv());
+}
+
+
+//
+// Whether the team is at peace, preparing for a war or at war, leaving the background enemies
+// out of it.
+//
+PeaceStateTypes CvTeam::getPeaceState() const
+{
+	if (isBackgroundEnemy())
+	{
+		return PEACE_STATE_BACKGROUND;
+	}
+
+	bool bPreparing = false;
+
+	for (int iI = 0; iI < MAX_TEAMS; iI++)
+	{
+		if (iI != getID())
+		{
+			const CvTeam& kLoopTeam = GET_TEAM((TeamTypes)iI);
+
+			if (kLoopTeam.isAlive() && !kLoopTeam.isBackgroundEnemy())
+			{
+				if (isAtWar((TeamTypes)iI))
+				{
+					return PEACE_STATE_WAR;
+				}
+
+				if (AI_getWarPlan((TeamTypes)iI) != NO_WARPLAN)
+				{
+					bPreparing = true;
+				}
+			}
+		}
+	}
+
+	return (bPreparing ? PEACE_STATE_PREPARING : PEACE_STATE_PEACE);
+}
+
+
 bool CvTeam::isMinorCiv() const
 {
 	bool bValid;

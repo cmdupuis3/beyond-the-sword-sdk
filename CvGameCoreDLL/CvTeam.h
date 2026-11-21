@@ -9,6 +9,16 @@
 
 class CvArea;
 
+// Where a team stands with the teams that matter to it: see CvTeam::getPeaceState()
+enum PeaceStateTypes
+{
+	PEACE_STATE_PEACE,			// no war and no war plan
+	PEACE_STATE_PREPARING,		// a war plan, but no war yet
+	PEACE_STATE_WAR,
+	PEACE_STATE_BACKGROUND,		// the team is itself a background enemy
+	NUM_PEACE_STATES
+};
+
 class CvTeam
 {
 
@@ -93,6 +103,8 @@ public:
 
 	bool isHuman() const;																																// Exposed to Python
 	bool isBarbarian() const;																														// Exposed to Python
+	bool isBackgroundEnemy() const;
+	PeaceStateTypes getPeaceState() const;
 	bool isMinorCiv() const;																														// Exposed to Python
 	PlayerTypes getLeaderID() const;																										// Exposed to Python
 	PlayerTypes getSecretaryID() const;																									// Exposed to Python

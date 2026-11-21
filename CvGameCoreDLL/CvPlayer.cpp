@@ -2473,6 +2473,13 @@ const TCHAR* CvPlayer::getUnitButton(UnitTypes eUnit) const
 
 void CvPlayer::doTurn()
 {
+#ifdef BRIDGED_PROFILE
+	// the time this takes, by where the player's team stands: see CvTeam::getPeaceState()
+	static BridgedProfileSample aPeaceStateSamples[NUM_PEACE_STATES] = {
+		{ "player turn, at peace: end of turn, cities and player" }, { "player turn, preparing for war: end of turn, cities and player" }, { "player turn, at war: end of turn, cities and player" }, { "player turn, barbarians and minors: end of turn, cities and player" } };
+	BridgedProfileManual kPeaceStateTimer(&aPeaceStateSamples[GET_TEAM(getTeam()).getPeaceState()]);
+#endif
+
 	PROFILE_FUNC();
 
 	CvCity* pLoopCity;
@@ -2557,6 +2564,13 @@ void CvPlayer::doTurn()
 
 void CvPlayer::doTurnUnits()
 {
+#ifdef BRIDGED_PROFILE
+	// the time this takes, by where the player's team stands: see CvTeam::getPeaceState()
+	static BridgedProfileSample aPeaceStateSamples[NUM_PEACE_STATES] = {
+		{ "player turn, at peace: start of turn, units" }, { "player turn, preparing for war: start of turn, units" }, { "player turn, at war: start of turn, units" }, { "player turn, barbarians and minors: start of turn, units" } };
+	BridgedProfileManual kPeaceStateTimer(&aPeaceStateSamples[GET_TEAM(getTeam()).getPeaceState()]);
+#endif
+
 	PROFILE_FUNC();
 
 	CvSelectionGroup* pLoopSelectionGroup;

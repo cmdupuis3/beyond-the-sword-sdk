@@ -1498,6 +1498,13 @@ int CvPlayerAI::AI_movementPriority(CvSelectionGroup* pGroup) const
 
 void CvPlayerAI::AI_unitUpdate()
 {
+#ifdef BRIDGED_PROFILE
+	// the time this takes, by where the player's team stands: see CvTeam::getPeaceState()
+	static BridgedProfileSample aPeaceStateSamples[NUM_PEACE_STATES] = {
+		{ "player turn, at peace: unit moves" }, { "player turn, preparing for war: unit moves" }, { "player turn, at war: unit moves" }, { "player turn, barbarians and minors: unit moves" } };
+	BridgedProfileManual kPeaceStateTimer(&aPeaceStateSamples[GET_TEAM(getTeam()).getPeaceState()]);
+#endif
+
 	PROFILE_FUNC();
 
 	CLLNode<int>* pCurrUnitNode;

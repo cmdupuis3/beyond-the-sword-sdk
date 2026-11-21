@@ -132,6 +132,19 @@ inline void bridgedProfileAdd(BridgedProfileSample* pSample, unsigned long long 
 	pSample->uiTicks += uiTicks;
 	pSample->uiCalls += uiCalls;
 }
+// Times a stretch of code into a sample chosen at run time. Unlike a scope it does not take
+// part in the parent and child bookkeeping, so the time also stays in whatever scope is open.
+class BridgedProfileManual
+{
+public:
+	BridgedProfileManual(BridgedProfileSample* pSample) : m_pSample(pSample), m_uiStart(bridgedProfileTicks()) {}
+	~BridgedProfileManual() { bridgedProfileAdd(m_pSample, bridgedProfileTicks() - m_uiStart); }
+
+private:
+	BridgedProfileSample* m_pSample;
+	unsigned long long m_uiStart;
+};
+
 class BridgedProfileScope
 {
 public:

@@ -24,6 +24,7 @@ public:
 	void AI_seperateAI(UnitAITypes eUnitAI);
 
 	bool AI_update();
+	bool AI_updateGroup();
 
 	int AI_attackOdds(const CvPlot* pPlot, bool bPotentialEnemy) const;
 	CvUnit* AI_getBestGroupAttacker(const CvPlot* pPlot, bool bPotentialEnemy, int& iUnitOdds, bool bForce = false, bool bNoBlitz = false) const;
