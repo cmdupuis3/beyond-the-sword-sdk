@@ -1369,8 +1369,224 @@ int pathHeuristic(int iFromX, int iFromY, int iToX, int iToY)
 }
 
 
+//
+// The path functions for KmodPathFinder with what it has looked up for the request
+// (CvPathKept). They are pathCost() and pathAdd() below, term for term; only where the values
+// come from differs:
+//  - the units, and what a step's cost reads of them, are taken from the list made once for
+//    the request instead of through the group's unit list for every step;
+//  - what each unit pays to move along a step is asked once and used by both functions, which
+//    the pathfinder calls one after the other for the same step;
+//  - the defence modifier of the plot a turn would end on is asked once per plot instead of
+//    once for each of the plot's neighbours.
+// A change to pathCost() or pathAdd() has to be made here as well. Profile builds check the
+// pairing with the PATH_VERIFY define, which compares every answer with the exe's pathfinder,
+// and that one uses the functions below.
+//
+static const int* pathStepMovementCosts(CvPathKept& kKept, const CvPlot* pFromPlot, const CvPlot* pToPlot)
+{
+	if ((kKept.pStepFromPlot != pFromPlot) || (kKept.pStepToPlot != pToPlot))
+	{
+		for (size_t i = 0; i < kKept.aUnits.size(); i++)
+		{
+			kKept.aiStepMovementCost[i] = pToPlot->movementCost(kKept.aUnits[i].pUnit, pFromPlot);
+		}
+
+		kKept.pStepFromPlot = pFromPlot;
+		kKept.pStepToPlot = pToPlot;
+	}
+
+	return (kKept.aiStepMovementCost.empty() ? NULL : &kKept.aiStepMovementCost[0]);
+}
+
+static int pathDefenseModifier(CvPathKept& kKept, const CvPlot* pPlot, TeamTypes eTeam)
+{
+	if (eTeam != kKept.eDefenseTeam)
+	{
+		return pPlot->defenseModifier(eTeam, false);
+	}
+
+	const int iPlot = GC.getMapINLINE().plotNumINLINE(pPlot->getX_INLINE(), pPlot->getY_INLINE());
+
+	if (kKept.auiDefenseStamp[iPlot] != kKept.uiDefenseStamp)
+	{
+		kKept.aiDefenseModifier[iPlot] = pPlot->defenseModifier(eTeam, false);
+		kKept.auiDefenseStamp[iPlot] = kKept.uiDefenseStamp;
+	}
+
+	return kKept.aiDefenseModifier[iPlot];
+}
+
+static int pathCostKept(FAStarNode* parent, FAStarNode* node, const CvPathSettings& kSettings)
+{
+	CvPathKept& kKept = *kSettings.pKept;
+	int iWorstCost;
+	int iCost;
+	int iWorstMovesLeft;
+	int iMovesLeft;
+	int iWorstMax;
+	int iMax;
+
+	CvPlot* pFromPlot = GC.getMapINLINE().plotSorenINLINE(parent->m_iX, parent->m_iY);
+	FAssert(pFromPlot != NULL);
+	CvPlot* pToPlot = GC.getMapINLINE().plotSorenINLINE(node->m_iX, node->m_iY);
+	FAssert(pToPlot != NULL);
+
+	const int* aiMovementCost = pathStepMovementCosts(kKept, pFromPlot, pToPlot);
+
+	iWorstCost = MAX_INT;
+	iWorstMovesLeft = MAX_INT;
+	iWorstMax = MAX_INT;
+
+	for (size_t i = 0; i < kKept.aUnits.size(); i++)
+	{
+		const CvPathUnit& kUnit = kKept.aUnits[i];
+
+		if (parent->m_iData1 > 0)
+		{
+			iMax = parent->m_iData1;
+		}
+		else
+		{
+			iMax = kUnit.iMaxMoves;
+		}
+
+		iCost = aiMovementCost[i];
+
+		iMovesLeft = std::max(0, (iMax - iCost));
+
+		if (iMovesLeft <= iWorstMovesLeft)
+		{
+			if ((iMovesLeft < iWorstMovesLeft) || (iMax <= iWorstMax))
+			{
+				if (iMovesLeft == 0)
+				{
+					iCost = (PATH_MOVEMENT_WEIGHT * iMax);
+
+					if (pToPlot->getTeam() != kUnit.eTeam)
+					{
+						iCost += PATH_TERRITORY_WEIGHT;
+					}
+
+					// Damage caused by features (mods)
+					if (0 != GC.getPATH_DAMAGE_WEIGHT())
+					{
+						if (pToPlot->getFeatureType() != NO_FEATURE)
+						{
+							iCost += (GC.getPATH_DAMAGE_WEIGHT() * std::max(0, GC.getFeatureInfo(pToPlot->getFeatureType()).getTurnDamage())) / GC.getMAX_HIT_POINTS();
+						}
+
+						if (pToPlot->getExtraMovePathCost() > 0)
+						{
+							iCost += (PATH_MOVEMENT_WEIGHT * pToPlot->getExtraMovePathCost());
+						}
+					}
+				}
+				else
+				{
+					iCost = (PATH_MOVEMENT_WEIGHT * iCost);
+				}
+
+				if (kUnit.bCanFight)
+				{
+					if (iMovesLeft == 0)
+					{
+						iCost += (PATH_DEFENSE_WEIGHT * std::max(0, (200 - ((kUnit.bNoDefensiveBonus) ? 0 : pathDefenseModifier(kKept, pToPlot, kUnit.eTeam)))));
+					}
+
+					if (kKept.bAIControlled)
+					{
+						if (kUnit.bCanAttack)
+						{
+							if ((kSettings.iDestX == pToPlot->getX_INLINE()) && (kSettings.iDestY == pToPlot->getY_INLINE()))
+							{
+								if (pToPlot->isVisibleEnemyDefender(kUnit.pUnit))
+								{
+									iCost += (PATH_DEFENSE_WEIGHT * std::max(0, (200 - ((kUnit.bNoDefensiveBonus) ? 0 : pFromPlot->defenseModifier(kUnit.eTeam, false)))));
+
+									if (!(pFromPlot->isCity()))
+									{
+										iCost += PATH_CITY_WEIGHT;
+									}
+
+									if (pFromPlot->isRiverCrossing(directionXY(pFromPlot, pToPlot)))
+									{
+										if (!(kUnit.bRiver))
+										{
+											iCost += (PATH_RIVER_WEIGHT * -(GC.getRIVER_ATTACK_MODIFIER()));
+											iCost += (PATH_MOVEMENT_WEIGHT * iMovesLeft);
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+
+				if (iCost < iWorstCost)
+				{
+					iWorstCost = iCost;
+					iWorstMovesLeft = iMovesLeft;
+					iWorstMax = iMax;
+				}
+			}
+		}
+	}
+
+	FAssert(iWorstCost != MAX_INT);
+
+	iWorstCost += PATH_STEP_WEIGHT;
+
+	if ((pFromPlot->getX_INLINE() != pToPlot->getX_INLINE()) && (pFromPlot->getY_INLINE() != pToPlot->getY_INLINE()))
+	{
+		iWorstCost += PATH_STRAIGHT_WEIGHT;
+	}
+
+	FAssert(iWorstCost > 0);
+
+	return iWorstCost;
+}
+
+static void pathAddKept(FAStarNode* parent, FAStarNode* node, const CvPathSettings& kSettings)
+{
+	CvPathKept& kKept = *kSettings.pKept;
+
+	CvPlot* pFromPlot = GC.getMapINLINE().plotSorenINLINE(parent->m_iX, parent->m_iY);
+	FAssertMsg(pFromPlot != NULL, "FromPlot is not assigned a valid value");
+	CvPlot* pToPlot = GC.getMapINLINE().plotSorenINLINE(node->m_iX, node->m_iY);
+	FAssertMsg(pToPlot != NULL, "ToPlot is not assigned a valid value");
+
+	const int* aiMovementCost = pathStepMovementCosts(kKept, pFromPlot, pToPlot);
+
+	int iMoves = MAX_INT;
+	int iStartMoves = parent->m_iData1;
+	int iTurns = parent->m_iData2;
+	if (iStartMoves == 0)
+	{
+		iTurns++;
+	}
+
+	for (size_t i = 0; i < kKept.aUnits.size(); i++)
+	{
+		int iUnitMoves = (iStartMoves == 0 ? kKept.aUnits[i].iMaxMoves : iStartMoves);
+		iUnitMoves -= aiMovementCost[i];
+		iUnitMoves = std::max(iUnitMoves, 0);
+		iMoves = std::min(iMoves, iUnitMoves);
+	}
+
+	FAssertMsg(iMoves >= 0, "iMoves is expected to be non-negative (invalid Index)");
+	node->m_iData1 = iMoves;
+	node->m_iData2 = iTurns;
+}
+
+
 int pathCost(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder)
 {
+	if ((finder == NULL) && (((const CvPathSettings *)pointer)->pKept != NULL))
+	{
+		return pathCostKept(parent, node, *((const CvPathSettings *)pointer));
+	}
+
 	CLLNode<IDInfo>* pUnitNode;
 	CvSelectionGroup* pSelectionGroup;
 	CvUnit* pLoopUnit;
@@ -1685,6 +1901,12 @@ int pathValid(FAStarNode* parent, FAStarNode* node, int data, const void* pointe
 int pathAdd(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder)
 {
 	PROFILE_FUNC();
+
+	if ((finder == NULL) && (data != ASNC_INITIALADD) && (((const CvPathSettings *)pointer)->pKept != NULL))
+	{
+		pathAddKept(parent, node, *((const CvPathSettings *)pointer));
+		return 1;
+	}
 
 	CvSelectionGroup* pSelectionGroup = pathGroup(pointer, finder);
 	FAssert(pSelectionGroup->getNumUnits() > 0);

@@ -5,6 +5,7 @@
 #include "CvMap.h"
 #include "CvPlot.h"
 #include "CvSelectionGroup.h"
+#include "CvUnit.h"
 #include "CvInitCore.h"
 #include "FProfiler.h"
 
@@ -18,7 +19,7 @@ static unsigned long long s_uiProfileOpenTicks = 0;
 
 CvPathSettings::CvPathSettings(const CvSelectionGroup* pGroup, int iFlags, int iMaxPath, int iHW)
 	: pGroup(const_cast<CvSelectionGroup*>(pGroup)), iFlags(iFlags), iMaxPath(iMaxPath), iHeuristicWeight(iHW),
-	iDestX(INVALID_PLOT_COORD), iDestY(INVALID_PLOT_COORD)
+	iDestX(INVALID_PLOT_COORD), iDestY(INVALID_PLOT_COORD), pKept(NULL)
 // I'm really sorry about the const_cast. I can't fix the const-correctness of all the relevant functions,
 // because some of them are dllexports. The original code essentially does the same thing anyway, with void* casts.
 {
@@ -85,9 +86,58 @@ bool KmodPathFinder::ValidateNodeMap()
 	return true;
 }
 
+//
+// Looks up, once for the request, what the path functions would otherwise look up for every
+// step: the group's units and the things about them that a step's cost and moves depend on.
+// None of it can change while a request is being served.
+//
+void KmodPathFinder::PrepareKept()
+{
+	kept.aUnits.clear();
+	kept.bAIControlled = settings.pGroup->AI_isControlled();
+	kept.eDefenseTeam = settings.pGroup->getTeam();
+
+	for (CLLNode<IDInfo>* pUnitNode = settings.pGroup->headUnitNode(); pUnitNode != NULL; pUnitNode = settings.pGroup->nextUnitNode(pUnitNode))
+	{
+		CvPathUnit kUnit;
+		kUnit.pUnit = ::getUnit(pUnitNode->m_data);
+		kUnit.iMaxMoves = kUnit.pUnit->maxMoves();
+		kUnit.eTeam = kUnit.pUnit->getTeam();
+		kUnit.bCanFight = kUnit.pUnit->canFight();
+		kUnit.bCanAttack = kUnit.pUnit->canAttack();
+		kUnit.bNoDefensiveBonus = kUnit.pUnit->noDefensiveBonus();
+		kUnit.bRiver = kUnit.pUnit->isRiver();
+		kept.aUnits.push_back(kUnit);
+	}
+
+	kept.pStepFromPlot = NULL;
+	kept.pStepToPlot = NULL;
+	kept.aiStepMovementCost.resize(kept.aUnits.size());
+
+	// a new stamp makes every defence modifier kept from earlier requests out of date
+	if ((int)kept.auiDefenseStamp.size() != (map_width * map_height))
+	{
+		kept.auiDefenseStamp.assign(map_width * map_height, 0);
+		kept.aiDefenseModifier.assign(map_width * map_height, 0);
+		kept.uiDefenseStamp = 0;
+	}
+
+	kept.uiDefenseStamp++;
+
+	if (kept.uiDefenseStamp == 0)
+	{
+		kept.auiDefenseStamp.assign(map_width * map_height, 0);
+		kept.uiDefenseStamp = 1;
+	}
+}
+
+
 bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 {
 	PROFILE_FUNC();
+
+	// only while this request is served: see the end of the function
+	settings.pKept = NULL;
 
 	FASSERT_BOUNDS(0, map_width , x1, "GeneratePath");
 	FASSERT_BOUNDS(0, map_height, y1, "GeneratePath");
@@ -117,6 +167,19 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 		bridgedProfileAdd(&aSamples[0], 0);
 #endif
 		return false;
+	}
+
+	// PATH_STOCK_STEPS is a global define that leaves the path functions looking everything
+	// up for every step, as the stock code does. The paths are the same either way.
+	static int iStockSteps = -1;
+	if (iStockSteps == -1)
+	{
+		iStockSteps = ((GC.getDefineINT("PATH_STOCK_STEPS") != 0) ? 1 : 0);
+	}
+	if (iStockSteps == 0)
+	{
+		PrepareKept();
+		settings.pKept = &kept;
 	}
 
 	if (x1 != start_x || y1 != start_y)
@@ -240,6 +303,9 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 		}
 	}
 #endif
+
+	// what was looked up for this request is not to be used by anything that asks later
+	settings.pKept = NULL;
 
 	if (end_node && (settings.iMaxPath < 0 || end_node->m_iData2 <= settings.iMaxPath))
 		return true;

@@ -22,6 +22,39 @@
 
 class CvSelectionGroup;
 class CvPlot;
+class CvUnit;
+
+//
+// What KmodPathFinder looks up once for the request in hand, so that the path functions do
+// not look it up again for every step: see pathCostKept() in CvGameCoreUtils.cpp.
+//
+struct CvPathUnit
+{
+	CvUnit* pUnit;
+	int iMaxMoves;
+	TeamTypes eTeam;
+	bool bCanFight;
+	bool bCanAttack;
+	bool bNoDefensiveBonus;
+	bool bRiver;
+};
+
+struct CvPathKept
+{
+	std::vector<CvPathUnit> aUnits;				// the group's units, in the group's order
+	bool bAIControlled;
+
+	// what each unit pays to move along the step last asked about
+	const CvPlot* pStepFromPlot;
+	const CvPlot* pStepToPlot;
+	std::vector<int> aiStepMovementCost;
+
+	// the defence modifier of each plot asked about during this request, for eDefenseTeam
+	TeamTypes eDefenseTeam;
+	unsigned int uiDefenseStamp;
+	std::vector<unsigned int> auiDefenseStamp;	// per plot: equal to uiDefenseStamp where aiDefenseModifier holds the value
+	std::vector<int> aiDefenseModifier;
+};
 
 struct CvPathSettings
 {
@@ -37,6 +70,10 @@ struct CvPathSettings
 	// the destination.
 	int iDestX;
 	int iDestY;
+
+	// Set by KmodPathFinder::GeneratePath for the length of a request; NULL otherwise, and
+	// the path functions then look everything up as the stock code does.
+	CvPathKept* pKept;
 };
 
 class FAStarNode;
@@ -79,5 +116,7 @@ protected:
 	bool dest_cost; // stock cost model: pathCostUsesDest was true for dest_x, dest_y when the tree was last used
 	FAStarNode* end_node;
 	CvPathSettings settings;
+	CvPathKept kept;
+	void PrepareKept();
 	int map_width, map_height;
 };
