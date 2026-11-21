@@ -1456,6 +1456,58 @@ unsigned long long CvMap::calculatePlotUnitTeams(const CvPlot* pPlot, unsigned l
 }
 
 
+//
+// Every plot eTeam owns, found from the blocks the team index says it owns plots in rather
+// than by looking at the whole map. The order is by block, not by plot index.
+//
+void CvMap::getTeamOwnedPlots(TeamTypes eTeam, std::vector<CvPlot*>& apPlots) const
+{
+	apPlots.clear();
+
+	if ((eTeam < 0) || (eTeam >= MAX_TEAMS))
+	{
+		return;
+	}
+
+	if (m_bTeamIndexDirty)
+	{
+		rebuildTeamIndex();
+	}
+
+	const unsigned long long uiTeam = (1ULL << eTeam);
+	const int iBlockSize = (1 << TEAM_BLOCK_SHIFT);
+	const int iGridWidth = getGridWidthINLINE();
+	const int iGridHeight = getGridHeightINLINE();
+	const int iNumBlocks = (int)m_aiBlockOwnerTeams.size();
+
+	for (int iBlock = 0; iBlock < iNumBlocks; iBlock++)
+	{
+		if ((m_aiBlockOwnerTeams[iBlock] & uiTeam) == 0)
+		{
+			continue;
+		}
+
+		const int iStartX = (iBlock % m_iTeamBlocksWide) * iBlockSize;
+		const int iStartY = (iBlock / m_iTeamBlocksWide) * iBlockSize;
+		const int iEndX = std::min(iStartX + iBlockSize, iGridWidth);
+		const int iEndY = std::min(iStartY + iBlockSize, iGridHeight);
+
+		for (int iY = iStartY; iY < iEndY; iY++)
+		{
+			CvPlot* pRow = &m_pMapPlots[iY * iGridWidth];
+
+			for (int iX = iStartX; iX < iEndX; iX++)
+			{
+				if (pRow[iX].getTeam() == eTeam)
+				{
+					apPlots.push_back(&pRow[iX]);
+				}
+			}
+		}
+	}
+}
+
+
 void CvMap::rebuildTeamIndex() const
 {
 	FAssert(MAX_TEAMS <= 64);	// one bit per team

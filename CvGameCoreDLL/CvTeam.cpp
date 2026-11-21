@@ -145,6 +145,7 @@ void CvTeam::reset(TeamTypes eID, bool bConstructorCall)
 {
 	// war status is cleared below, here and in what the other teams hold about this one: see getEnemyTeams()
 	m_iAtWarEpoch++;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	m_iEnemyTeamsEpoch = -1;
 
 	int iI, iJ;
@@ -154,6 +155,7 @@ void CvTeam::reset(TeamTypes eID, bool bConstructorCall)
 	uninit();
 
 	m_iNumMembers = 0;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	m_iAliveCount = 0;
 	m_iEverAliveCount = 0;
 	m_iNumCities = 0;
@@ -180,6 +182,7 @@ void CvTeam::reset(TeamTypes eID, bool bConstructorCall)
 
 	m_bMapCentering = false;
 	m_bCapitulated = false;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 	m_eID = eID;
 
@@ -2637,6 +2640,7 @@ int CvTeam::getNumMembers() const
 void CvTeam::changeNumMembers(int iChange)
 {
 	m_iNumMembers += iChange;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(getNumMembers() >= 0);
 }
 
@@ -2656,6 +2660,7 @@ int CvTeam::isAlive() const
 void CvTeam::changeAliveCount(int iChange)
 {
 	m_iAliveCount += iChange;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(getAliveCount() >= 0);
 
 	// free vassals
@@ -3328,6 +3333,7 @@ void CvTeam::makeHasMet(TeamTypes eIndex, bool bNewDiplo)
 	if (!isHasMet(eIndex))
 	{
 		m_abHasMet[eIndex] = true;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 		updateTechShare();
 
@@ -3461,6 +3467,7 @@ void CvTeam::setAtWar(TeamTypes eIndex, bool bNewValue)
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_abAtWar[eIndex] = bNewValue;
 	m_iAtWarEpoch++;	// see getEnemyTeams()
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 	// War and peace change whose territory and whose units block a group. A search tree the
 	// K-Mod pathfinder has kept was made under the old terms.
@@ -3564,6 +3571,7 @@ void CvTeam::setDefensivePact(TeamTypes eIndex, bool bNewValue)
 	if (isDefensivePact(eIndex) != bNewValue)
 	{
 		m_abDefensivePact[eIndex] = bNewValue;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 		if ((getID() == GC.getGameINLINE().getActiveTeam()) || (eIndex == GC.getGameINLINE().getActiveTeam()))
 		{
@@ -3669,6 +3677,7 @@ void CvTeam::setVassal(TeamTypes eIndex, bool bNewValue, bool bCapitulated)
 		}
 
 		m_abVassal[eIndex] = bNewValue;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 		for (int iPlayer = 0; iPlayer < MAX_PLAYERS; ++iPlayer)
 		{
@@ -3710,6 +3719,7 @@ void CvTeam::setVassal(TeamTypes eIndex, bool bNewValue, bool bCapitulated)
 		if (isVassal(eIndex))
 		{
 			m_bCapitulated = bCapitulated;
+			invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 			CvDeal* pLoopDeal;
 			int iLoop;
@@ -3896,6 +3906,7 @@ void CvTeam::setVassal(TeamTypes eIndex, bool bNewValue, bool bCapitulated)
 			}
 
 			m_bCapitulated = false;
+			invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 		}
 
 		for (int iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
@@ -5938,6 +5949,7 @@ void CvTeam::read(FDataStreamBase* pStream)
 	pStream->Read(&uiFlag);	// flags for expansion
 
 	pStream->Read(&m_iNumMembers);
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	pStream->Read(&m_iAliveCount);
 	pStream->Read(&m_iEverAliveCount);
 	pStream->Read(&m_iNumCities);
@@ -5980,6 +5992,7 @@ void CvTeam::read(FDataStreamBase* pStream)
 	pStream->Read(MAX_TEAMS, m_abHasMet);
 	pStream->Read(MAX_TEAMS, m_abAtWar);
 	m_iAtWarEpoch++;	// see getEnemyTeams()
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	pStream->Read(MAX_TEAMS, m_abPermanentWarPeace);
 	pStream->Read(MAX_TEAMS, m_abOpenBorders);
 	pStream->Read(MAX_TEAMS, m_abDefensivePact);

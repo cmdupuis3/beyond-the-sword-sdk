@@ -269,6 +269,7 @@ public:
 
 	// Which teams have attacking units or territory where: see the team index in CvMap.cpp
 	bool isTeamAttackerNear(const CvPlot* pPlot, int iRange, unsigned long long uiTeams, bool bTestMoves) const;
+	void getTeamOwnedPlots(TeamTypes eTeam, std::vector<CvPlot*>& apPlots) const;
 	bool isTeamBorderNear(const CvPlot* pPlot, int iRange, unsigned long long uiTeams) const;
 	void changeBlockUnits(int iX, int iY, TeamTypes eTeam, int iChange);
 	void changeBlockOwnedPlots(int iX, int iY, TeamTypes eTeam, int iChange);

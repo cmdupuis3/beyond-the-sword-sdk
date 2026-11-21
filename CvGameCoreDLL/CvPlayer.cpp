@@ -447,6 +447,7 @@ void CvPlayer::reset(PlayerTypes eID, bool bConstructorCall)
 	m_iRevolutionTimer = 0;
 	m_iConversionTimer = 0;
 	m_iStateReligionCount = 0;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	m_iNoNonStateReligionSpreadCount = 0;
 	m_iStateReligionHappiness = 0;
 	m_iNonStateReligionHappiness = 0;
@@ -2232,6 +2233,8 @@ bool CvPlayer::isHuman() const
 
 void CvPlayer::updateHuman()
 {
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
+
 	if (getID() == NO_PLAYER)
 	{
 		m_bHuman = false;
@@ -8993,6 +8996,7 @@ void CvPlayer::changeStateReligionCount(int iChange)
 		//GC.getGameINLINE().updateCitySight(false, true);
 
 		m_iStateReligionCount = (m_iStateReligionCount + iChange);
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 		FAssert(getStateReligionCount() >= 0);
 
 		// religion visibility now part of espionage
@@ -9230,6 +9234,7 @@ int CvPlayer::getPower() const
 void CvPlayer::changePower(int iChange)
 {
 	m_iPower = (m_iPower + iChange);
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(getPower() >= 0);
 }
 
@@ -9504,6 +9509,7 @@ void CvPlayer::setAlive(bool bNewValue)
 	if (isAlive() != bNewValue)
 	{
 		m_bAlive = bNewValue;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 		GET_TEAM(getTeam()).changeAliveCount((isAlive()) ? 1 : -1);
 
@@ -9515,6 +9521,7 @@ void CvPlayer::setAlive(bool bNewValue)
 			if (!isEverAlive())
 			{
 				m_bEverAlive = true;
+				invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 				GET_TEAM(getTeam()).changeEverAliveCount(1);
 			}
@@ -9981,6 +9988,7 @@ LeaderHeadTypes CvPlayer::getPersonalityType() const
 void CvPlayer::setPersonalityType(LeaderHeadTypes eNewValue)
 {
 	m_ePersonalityType = eNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 }
 
 
@@ -10086,6 +10094,7 @@ void CvPlayer::setLastStateReligion(ReligionTypes eNewValue)
 
 		eOldReligion = getLastStateReligion();
 		m_eLastStateReligion = eNewValue;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 		// religion visibility now part of espionage
 		//GC.getGameINLINE().updateCitySight(true, true);
@@ -10142,6 +10151,7 @@ PlayerTypes CvPlayer::getParent() const
 void CvPlayer::setParent(PlayerTypes eParent)
 {
 	m_eParent = eParent;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 }
 
 TeamTypes CvPlayer::getTeam() const
@@ -10151,6 +10161,8 @@ TeamTypes CvPlayer::getTeam() const
 
 void CvPlayer::updateTeamType()
 {
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
+
 	if(getID() == NO_PLAYER)
 	{
 		m_eTeamType = NO_TEAM;
@@ -11521,6 +11533,7 @@ void CvPlayer::setCivics(CivicOptionTypes eIndex, CivicTypes eNewValue)
 	if (eOldCivic != eNewValue)
 	{
 		m_paeCivics[eIndex] = eNewValue;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 		if (eOldCivic != NO_CIVIC)
 		{
@@ -15655,6 +15668,7 @@ void CvPlayer::read(FDataStreamBase* pStream)
 	pStream->Read(&m_iRevolutionTimer);
 	pStream->Read(&m_iConversionTimer);
 	pStream->Read(&m_iStateReligionCount);
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	pStream->Read(&m_iNoNonStateReligionSpreadCount);
 	pStream->Read(&m_iStateReligionHappiness);
 	pStream->Read(&m_iNonStateReligionHappiness);

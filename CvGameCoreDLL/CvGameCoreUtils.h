@@ -320,6 +320,11 @@ bool PUF_isFiniteRange(const CvUnit* pUnit, int iData1 = -1, int iData2 = -1);
 int potentialIrrigation(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder);
 int checkFreshWater(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder);
 int changeIrrigated(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder);
+// Counts the changes to anything an AI attitude is worked out from: see CvPlayerAI::AI_getAttitudeVal().
+// Every write to such a value must call invalidateAttitudeCache().
+extern int g_iAttitudeEpoch;
+inline void invalidateAttitudeCache() { g_iAttitudeEpoch++; }
+
 int pathDestValid(int iToX, int iToY, const void* pointer, FAStar* finder);
 int pathHeuristic(int iFromX, int iFromY, int iToX, int iToY);
 int pathCost(FAStarNode* parent, FAStarNode* node, int data, const void* pointer, FAStar* finder);

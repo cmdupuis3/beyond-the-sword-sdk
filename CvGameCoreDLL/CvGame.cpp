@@ -461,6 +461,7 @@ void CvGame::reset(HandicapTypes eHandicap, bool bConstructorCall)
 	{
 		m_aiRankPlayer[iI] = 0;
 		m_aiPlayerRank[iI] = 0;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 		m_aiPlayerScore[iI] = 0;
 	}
 
@@ -4756,6 +4757,7 @@ void CvGame::setPlayerRank(PlayerTypes ePlayer, int iRank)
 	FAssertMsg(ePlayer >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(ePlayer < MAX_PLAYERS, "ePlayer is expected to be within maximum bounds (invalid Index)");
 	m_aiPlayerRank[ePlayer] = iRank;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(getPlayerRank(ePlayer) >= 0);
 }
 
@@ -5278,6 +5280,8 @@ CvCity* CvGame::getHolyCity(ReligionTypes eIndex)
 
 void CvGame::setHolyCity(ReligionTypes eIndex, CvCity* pNewValue, bool bAnnounce)
 {
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
+
 	CvWString szBuffer;
 	CvCity* pOldValue;
 	CvCity* pHolyCity;
@@ -7563,6 +7567,7 @@ void CvGame::read(FDataStreamBase* pStream)
 	}
 	pStream->Read(MAX_PLAYERS, m_aiRankPlayer);
 	pStream->Read(MAX_PLAYERS, m_aiPlayerRank);
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	pStream->Read(MAX_PLAYERS, m_aiPlayerScore);
 	pStream->Read(MAX_TEAMS, m_aiRankTeam);
 	pStream->Read(MAX_TEAMS, m_aiTeamRank);

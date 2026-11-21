@@ -103,6 +103,7 @@ public:
 
 	AttitudeTypes AI_getAttitude(PlayerTypes ePlayer, bool bForced = true) const;
 	int AI_getAttitudeVal(PlayerTypes ePlayer, bool bForced = true) const;
+	int AI_calculateAttitudeVal(PlayerTypes ePlayer, bool bForced) const;
 	static AttitudeTypes AI_getAttitudeFromValue(int iAttitudeVal);
 
 	int AI_calculateStolenCityRadiusPlots(PlayerTypes ePlayer) const;
@@ -388,6 +389,10 @@ protected:
 	int* m_aiUnitCombatWeights;
 
 	mutable int* m_aiCloseBordersAttitudeCache;
+
+	// see AI_getAttitudeVal(); [the other player][bForced]; not saved
+	mutable int m_aaiAttitudeVal[MAX_PLAYERS][2];
+	mutable int m_aaiAttitudeValEpoch[MAX_PLAYERS][2];
 
 
 	bool* m_abFirstContact;

@@ -95,6 +95,8 @@ void CvTeamAI::AI_uninit()
 
 void CvTeamAI::AI_reset(bool bConstructor)
 {
+	invalidateAttitudeCache();	// the counters below are cleared: see CvPlayerAI::AI_getAttitudeVal()
+
 	AI_uninit();
 
 	m_eWorstEnemy = NO_TEAM;
@@ -528,28 +530,60 @@ AreaAITypes CvTeamAI::AI_calculateAreaAIType(CvArea* pArea, bool bPreparingTotal
 	return AREAAI_NEUTRAL;
 }
 
+// The plots of eTeam for the two functions below, which used to look at every plot of the map.
+static std::vector<CvPlot*> s_apTeamOwnedPlots;
+
 int CvTeamAI::AI_calculateAdjacentLandPlots(TeamTypes eTeam) const
 {
-	CvPlot* pLoopPlot;
+	PROFILE_FUNC();
+
 	int iCount;
-	int iI;
 
 	FAssertMsg(eTeam != getID(), "shouldn't call this function on ourselves");
 
 	iCount = 0;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	GC.getMapINLINE().getTeamOwnedPlots(eTeam, s_apTeamOwnedPlots);
+
+	for (size_t i = 0; i < s_apTeamOwnedPlots.size(); i++)
 	{
-		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+		const CvPlot* pLoopPlot = s_apTeamOwnedPlots[i];
 
 		if (!(pLoopPlot->isWater()))
 		{
-			if ((pLoopPlot->getTeam() == eTeam) && pLoopPlot->isAdjacentTeam(getID(), true))
+			if (pLoopPlot->isAdjacentTeam(getID(), true))
 			{
 				iCount++;
 			}
 		}
 	}
+
+#ifdef BRIDGED_PROFILE
+	// ATTITUDE_VERIFY: a global define for profile builds. Set, the plots are also counted
+	// the stock way, over the whole map.
+	static BridgedProfileSample kWrong = { "adjacent land verify: COUNT DIFFERS FROM THE WHOLE-MAP COUNT" };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("ATTITUDE_VERIFY") != 0) ? 1 : 0;
+	}
+	if (iVerify != 0)
+	{
+		int iStockCount = 0;
+		for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+		{
+			const CvPlot* pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+			if (!(pLoopPlot->isWater()) && (pLoopPlot->getTeam() == eTeam) && pLoopPlot->isAdjacentTeam(getID(), true))
+			{
+				iStockCount++;
+			}
+		}
+		if (iStockCount != iCount)
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
 
 	return iCount;
 }
@@ -559,26 +593,61 @@ int CvTeamAI::AI_calculatePlotWarValue(TeamTypes eTeam) const
 {
 	FAssert(eTeam != getID());
 
+	PROFILE_FUNC();
+
 	int iValue = 0;
 
-	for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	GC.getMapINLINE().getTeamOwnedPlots(eTeam, s_apTeamOwnedPlots);
+
+	for (size_t i = 0; i < s_apTeamOwnedPlots.size(); i++)
 	{
-		CvPlot* pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+		const CvPlot* pLoopPlot = s_apTeamOwnedPlots[i];
 
-		if (pLoopPlot->getTeam() == eTeam)
+		if (!pLoopPlot->isWater() && pLoopPlot->isAdjacentTeam(getID(), true))
 		{
-			if (!pLoopPlot->isWater() && pLoopPlot->isAdjacentTeam(getID(), true))
-			{
-				iValue += 4;
-			}
+			iValue += 4;
+		}
 
-			BonusTypes eBonus = pLoopPlot->getBonusType(getID());
-			if (NO_BONUS != eBonus)
-			{
-				iValue += 40 * GC.getBonusInfo(eBonus).getAIObjective();
-			}
+		BonusTypes eBonus = pLoopPlot->getBonusType(getID());
+		if (NO_BONUS != eBonus)
+		{
+			iValue += 40 * GC.getBonusInfo(eBonus).getAIObjective();
 		}
 	}
+
+#ifdef BRIDGED_PROFILE
+	// ATTITUDE_VERIFY also works the value out the stock way, over the whole map.
+	static BridgedProfileSample kWrong = { "plot war value verify: VALUE DIFFERS FROM THE WHOLE-MAP VALUE" };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("ATTITUDE_VERIFY") != 0) ? 1 : 0;
+	}
+	if (iVerify != 0)
+	{
+		int iStockValue = 0;
+		for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+		{
+			const CvPlot* pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+			if (pLoopPlot->getTeam() == eTeam)
+			{
+				if (!pLoopPlot->isWater() && pLoopPlot->isAdjacentTeam(getID(), true))
+				{
+					iStockValue += 4;
+				}
+				BonusTypes eBonus = pLoopPlot->getBonusType(getID());
+				if (NO_BONUS != eBonus)
+				{
+					iStockValue += 40 * GC.getBonusInfo(eBonus).getAIObjective();
+				}
+			}
+		}
+		if (iStockValue != iValue)
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
 
 	return iValue;
 }
@@ -2415,6 +2484,7 @@ void CvTeamAI::AI_setAtWarCounter(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiAtWarCounter[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getAtWarCounter(eIndex) >= 0);
 }
 
@@ -2438,6 +2508,7 @@ void CvTeamAI::AI_setAtPeaceCounter(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiAtPeaceCounter[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getAtPeaceCounter(eIndex) >= 0);
 }
 
@@ -2461,6 +2532,7 @@ void CvTeamAI::AI_setHasMetCounter(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiHasMetCounter[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getHasMetCounter(eIndex) >= 0);
 }
 
@@ -2484,6 +2556,7 @@ void CvTeamAI::AI_setOpenBordersCounter(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiOpenBordersCounter[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getOpenBordersCounter(eIndex) >= 0);
 }
 
@@ -2507,6 +2580,7 @@ void CvTeamAI::AI_setDefensivePactCounter(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiDefensivePactCounter[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getDefensivePactCounter(eIndex) >= 0);
 }
 
@@ -2530,6 +2604,7 @@ void CvTeamAI::AI_setShareWarCounter(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiShareWarCounter[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getShareWarCounter(eIndex) >= 0);
 }
 
@@ -2553,6 +2628,7 @@ void CvTeamAI::AI_setWarSuccess(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiWarSuccess[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getWarSuccess(eIndex) >= 0);
 }
 
@@ -2576,6 +2652,7 @@ void CvTeamAI::AI_setEnemyPeacetimeTradeValue(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiEnemyPeacetimeTradeValue[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getEnemyPeacetimeTradeValue(eIndex) >= 0);
 }
 
@@ -2599,6 +2676,7 @@ void CvTeamAI::AI_setEnemyPeacetimeGrantValue(TeamTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiEnemyPeacetimeGrantValue[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	FAssert(AI_getEnemyPeacetimeGrantValue(eIndex) >= 0);
 }
 
@@ -2732,6 +2810,7 @@ void CvTeamAI::read(FDataStreamBase* pStream)
 
 	pStream->Read(MAX_TEAMS, m_aiWarPlanStateCounter);
 	pStream->Read(MAX_TEAMS, m_aiAtWarCounter);
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	pStream->Read(MAX_TEAMS, m_aiAtPeaceCounter);
 	pStream->Read(MAX_TEAMS, m_aiHasMetCounter);
 	pStream->Read(MAX_TEAMS, m_aiOpenBordersCounter);

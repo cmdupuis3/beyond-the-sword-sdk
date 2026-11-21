@@ -396,6 +396,7 @@ void CvInitCore::reassignPlayer(PlayerTypes eOldID, PlayerTypes eNewID)
 		// New civ flags
 		m_abPlayableCiv[eOldID] = bPlayableCiv;
 		m_abMinorNationCiv[eOldID] = bMinorNationCiv;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 		// New unsaved player data
 		m_aiNetID[eOldID] = iNetID;
 		m_abReady[eOldID] = bReady;
@@ -657,6 +658,7 @@ void CvInitCore::resetPlayer(PlayerTypes eID)
 		// Civ flags
 		m_abPlayableCiv[eID] = false;
 		m_abMinorNationCiv[eID] = false;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 		// Unsaved player data
 		m_aiNetID[eID] = -1;
@@ -1587,6 +1589,7 @@ void CvInitCore::setHandicap(PlayerTypes eID, HandicapTypes eHandicap)
 	if ( checkBounds(eID, 0, MAX_PLAYERS) )
 	{
 		m_aeHandicap[eID] = eHandicap;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	}
 }
 
@@ -1766,6 +1769,7 @@ void CvInitCore::setMinorNationCiv(PlayerTypes eID, bool bMinorNationCiv)
 	if ( checkBounds(eID, 0, MAX_PLAYERS) )
 	{
 		m_abMinorNationCiv[eID] = bMinorNationCiv;
+		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 	}
 }
 
@@ -1969,6 +1973,7 @@ void CvInitCore::read(FDataStreamBase* pStream)
 
 	pStream->Read(MAX_PLAYERS, m_abPlayableCiv);
 	pStream->Read(MAX_PLAYERS, m_abMinorNationCiv);
+	invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 	if(CvPlayerAI::areStaticsInitialized())
 	{

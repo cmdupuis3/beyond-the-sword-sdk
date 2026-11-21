@@ -167,6 +167,14 @@ void CvPlayerAI::AI_uninit()
 
 void CvPlayerAI::AI_reset(bool bConstructor)
 {
+	// what this player thinks of the others and they of it is cleared below: see AI_getAttitudeVal()
+	invalidateAttitudeCache();
+	for (int iAttitudePlayer = 0; iAttitudePlayer < MAX_PLAYERS; iAttitudePlayer++)
+	{
+		m_aaiAttitudeValEpoch[iAttitudePlayer][0] = -1;
+		m_aaiAttitudeValEpoch[iAttitudePlayer][1] = -1;
+	}
+
 	int iI;
 
 	AI_uninit();
@@ -5262,10 +5270,73 @@ AttitudeTypes CvPlayerAI::AI_getAttitude(PlayerTypes ePlayer, bool bForced) cons
 }
 
 
+//
+// What this player thinks of ePlayer, as a number.
+//
+// The value is worked out by AI_calculateAttitudeVal() from some forty stored values of the
+// two players, their teams and the game. The AI asks for it over and over while it weighs
+// trades, and between two questions those values have mostly not changed. So the answer is
+// kept, with the count of changes (g_iAttitudeEpoch) at the time, and given again while the
+// count stands. Every write to a value an attitude is worked out from calls
+// invalidateAttitudeCache(), which advances the count; anything added to
+// AI_calculateAttitudeVal() must do the same wherever it changes.
+//
+// The close borders part has a cache of its own, filled when first asked for after
+// AI_invalidateCloseBordersAttitudeCache(). That call advances the count as well, so the
+// part is still filled at the moment it used to be.
+//
+// The first call after a change writes to this player, so it is not safe from several
+// threads at once.
+//
 int CvPlayerAI::AI_getAttitudeVal(PlayerTypes ePlayer, bool bForced) const
 {
 	PROFILE_FUNC();
 
+	FAssertMsg(ePlayer != getID(), "shouldn't call this function on ourselves");
+	FAssertMsg(ePlayer >= 0 && ePlayer < MAX_PLAYERS, "ePlayer is expected to be a player");
+
+	const int iSlot = (bForced ? 1 : 0);
+
+	if (m_aaiAttitudeValEpoch[ePlayer][iSlot] == g_iAttitudeEpoch)
+	{
+#ifdef BRIDGED_PROFILE
+		// ATTITUDE_VERIFY: a global define for profile builds. Set, every kept value is also
+		// worked out afresh and the ones that differ are counted.
+		static BridgedProfileSample aSamples[2] = { { "attitude cache: value kept" }, { "attitude cache verify: KEPT VALUE WAS STALE" } };
+		static int iVerify = -1;
+		if (iVerify == -1)
+		{
+			iVerify = (GC.getDefineINT("ATTITUDE_VERIFY") != 0) ? 1 : 0;
+		}
+		bridgedProfileAdd(&aSamples[0], 0);
+		if ((iVerify != 0) && (m_aaiAttitudeVal[ePlayer][iSlot] != AI_calculateAttitudeVal(ePlayer, bForced)))
+		{
+			bridgedProfileAdd(&aSamples[1], 0);
+		}
+#endif
+		return m_aaiAttitudeVal[ePlayer][iSlot];
+	}
+
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample kWorkedOut = { "attitude cache: value worked out" };
+	bridgedProfileAdd(&kWorkedOut, 0);
+#endif
+
+	// the count is read first: working the value out can fill the close borders cache, but
+	// nothing in it may advance the count
+	const int iEpoch = g_iAttitudeEpoch;
+	const int iAttitude = AI_calculateAttitudeVal(ePlayer, bForced);
+	FAssert(iEpoch == g_iAttitudeEpoch);
+
+	m_aaiAttitudeVal[ePlayer][iSlot] = iAttitude;
+	m_aaiAttitudeValEpoch[ePlayer][iSlot] = iEpoch;
+
+	return iAttitude;
+}
+
+
+int CvPlayerAI::AI_calculateAttitudeVal(PlayerTypes ePlayer, bool bForced) const
+{
 	int iRankDifference;
 	int iAttitude;
 	int iI;
@@ -5354,30 +5425,85 @@ int CvPlayerAI::AI_getAttitudeVal(PlayerTypes ePlayer, bool bForced) const
 }
 
 
+//
+// The number of plots ePlayer owns that are in the radius of one of this player's cities.
+//
+// The stock code looked at every plot of the map for this. A plot is in the radius of one of
+// a player's cities exactly when isPlayerCityRadius() says so (CvPlot::setPlotCity() keeps
+// that count from the same NUM_CITY_PLOTS around each city), so the plots are found from
+// this player's cities instead. A plot two cities share is counted once.
+//
 int CvPlayerAI::AI_calculateStolenCityRadiusPlots(PlayerTypes ePlayer) const
 {
 	PROFILE_FUNC();
 
-	CvPlot* pLoopPlot;
-	int iCount;
-	int iI;
+	// one mark per plot of the map, all clear between calls
+	static std::vector<unsigned char> abCounted;
+	static std::vector<int> aiCounted;
 
 	FAssert(ePlayer != getID());
 
-	iCount = 0;
+	const CvMap& kMap = GC.getMapINLINE();
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	if ((int)abCounted.size() != kMap.numPlotsINLINE())
 	{
-		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+		abCounted.assign(kMap.numPlotsINLINE(), 0);
+	}
 
-		if (pLoopPlot->getOwnerINLINE() == ePlayer)
+	aiCounted.clear();
+
+	int iLoop;
+	for (CvCity* pLoopCity = firstCity(&iLoop); pLoopCity != NULL; pLoopCity = nextCity(&iLoop))
+	{
+		for (int iI = 0; iI < NUM_CITY_PLOTS; iI++)
 		{
-			if (pLoopPlot->isPlayerCityRadius(getID()))
+			const CvPlot* pLoopPlot = pLoopCity->getCityIndexPlot(iI);
+
+			if ((pLoopPlot != NULL) && (pLoopPlot->getOwnerINLINE() == ePlayer))
 			{
-				iCount++;
+				const int iPlot = kMap.plotNumINLINE(pLoopPlot->getX_INLINE(), pLoopPlot->getY_INLINE());
+
+				if (abCounted[iPlot] == 0)
+				{
+					abCounted[iPlot] = 1;
+					aiCounted.push_back(iPlot);
+				}
 			}
 		}
 	}
+
+	const int iCount = (int)aiCounted.size();
+
+	for (int iI = 0; iI < iCount; iI++)
+	{
+		abCounted[aiCounted[iI]] = 0;
+	}
+
+#ifdef BRIDGED_PROFILE
+	// ATTITUDE_VERIFY also counts the plots the stock way and compares.
+	static BridgedProfileSample kWrong = { "stolen plots verify: COUNT DIFFERS FROM THE WHOLE-MAP COUNT" };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("ATTITUDE_VERIFY") != 0) ? 1 : 0;
+	}
+	if (iVerify != 0)
+	{
+		int iStockCount = 0;
+		for (int iI = 0; iI < kMap.numPlotsINLINE(); iI++)
+		{
+			const CvPlot* pLoopPlot = kMap.plotByIndexINLINE(iI);
+			if ((pLoopPlot->getOwnerINLINE() == ePlayer) && pLoopPlot->isPlayerCityRadius(getID()))
+			{
+				iStockCount++;
+			}
+		}
+		if (iStockCount != iCount)
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
 
 	return iCount;
 }
@@ -7911,6 +8037,8 @@ int CvPlayerAI::AI_unitImpassableCount(UnitTypes eUnit) const
 
 int CvPlayerAI::AI_unitValue(UnitTypes eUnit, UnitAITypes eUnitAI, CvArea* pArea) const
 {
+	PROFILE_FUNC();
+
 	bool bValid;
 	int iNeededMissionaries;
 	int iCombatValue;
@@ -10521,6 +10649,7 @@ int CvPlayerAI::AI_getPeaceWeight() const
 void CvPlayerAI::AI_setPeaceWeight(int iNewValue)
 {
 	m_iPeaceWeight = iNewValue;
+	invalidateAttitudeCache();	// see AI_getAttitudeVal()
 }
 
 int CvPlayerAI::AI_getEspionageWeight() const
@@ -10644,6 +10773,7 @@ void CvPlayerAI::AI_changeSameReligionCounter(PlayerTypes eIndex, int iChange)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiSameReligionCounter[eIndex] = (m_aiSameReligionCounter[eIndex] + iChange);
+	invalidateAttitudeCache();	// see AI_getAttitudeVal()
 	FAssert(AI_getSameReligionCounter(eIndex) >= 0);
 }
 
@@ -10661,6 +10791,7 @@ void CvPlayerAI::AI_changeDifferentReligionCounter(PlayerTypes eIndex, int iChan
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiDifferentReligionCounter[eIndex] = (m_aiDifferentReligionCounter[eIndex] + iChange);
+	invalidateAttitudeCache();	// see AI_getAttitudeVal()
 	FAssert(AI_getDifferentReligionCounter(eIndex) >= 0);
 }
 
@@ -10678,6 +10809,7 @@ void CvPlayerAI::AI_changeFavoriteCivicCounter(PlayerTypes eIndex, int iChange)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiFavoriteCivicCounter[eIndex] = (m_aiFavoriteCivicCounter[eIndex] + iChange);
+	invalidateAttitudeCache();	// see AI_getAttitudeVal()
 	FAssert(AI_getFavoriteCivicCounter(eIndex) >= 0);
 }
 
@@ -10695,6 +10827,7 @@ void CvPlayerAI::AI_changeBonusTradeCounter(PlayerTypes eIndex, int iChange)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiBonusTradeCounter[eIndex] = (m_aiBonusTradeCounter[eIndex] + iChange);
+	invalidateAttitudeCache();	// see AI_getAttitudeVal()
 	FAssert(AI_getBonusTradeCounter(eIndex) >= 0);
 }
 
@@ -10719,6 +10852,7 @@ void CvPlayerAI::AI_changePeacetimeTradeValue(PlayerTypes eIndex, int iChange)
 	if (iChange != 0)
 	{
 		m_aiPeacetimeTradeValue[eIndex] = (m_aiPeacetimeTradeValue[eIndex] + iChange);
+		invalidateAttitudeCache();	// see AI_getAttitudeVal()
 		FAssert(AI_getPeacetimeTradeValue(eIndex) >= 0);
 
 		FAssert(iChange > 0);
@@ -10763,6 +10897,7 @@ void CvPlayerAI::AI_changePeacetimeGrantValue(PlayerTypes eIndex, int iChange)
 	if (iChange != 0)
 	{
 		m_aiPeacetimeGrantValue[eIndex] = (m_aiPeacetimeGrantValue[eIndex] + iChange);
+		invalidateAttitudeCache();	// see AI_getAttitudeVal()
 		FAssert(AI_getPeacetimeGrantValue(eIndex) >= 0);
 
 		FAssert(iChange > 0);
@@ -10817,6 +10952,7 @@ void CvPlayerAI::AI_setAttitudeExtra(PlayerTypes eIndex, int iNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_aiAttitudeExtra[eIndex] = iNewValue;
+	invalidateAttitudeCache();	// see AI_getAttitudeVal()
 }
 
 
@@ -10880,6 +11016,7 @@ void CvPlayerAI::AI_changeMemoryCount(PlayerTypes eIndex1, MemoryTypes eIndex2, 
 	FAssertMsg(eIndex2 >= 0, "eIndex2 is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex2 < NUM_MEMORY_TYPES, "eIndex2 is expected to be within maximum bounds (invalid Index)");
 	m_aaiMemoryCount[eIndex1][eIndex2] += iChange;
+	invalidateAttitudeCache();	// see AI_getAttitudeVal()
 	FAssert(AI_getMemoryCount(eIndex1, eIndex2) >= 0);
 }
 
@@ -12925,6 +13062,7 @@ void CvPlayerAI::read(FDataStreamBase* pStream)
 	pStream->Read(&uiFlag);	// flags for expansion
 
 	pStream->Read(&m_iPeaceWeight);
+	invalidateAttitudeCache();	// see AI_getAttitudeVal()
 	pStream->Read(&m_iEspionageWeight);
 	pStream->Read(&m_iAttackOddsChange);
 	pStream->Read(&m_iCivicTimer);
@@ -17417,6 +17555,8 @@ int CvPlayerAI::AI_getHealthWeight(int iHealth, int iExtraPop) const
 	
 void CvPlayerAI::AI_invalidateCloseBordersAttitudeCache()
 {
+	invalidateAttitudeCache();	// the close borders part of an attitude is worked out anew: see AI_getAttitudeVal()
+
 	for (int i = 0; i < MAX_PLAYERS; ++i)
 	{
 		m_aiCloseBordersAttitudeCache[i] = MAX_INT;

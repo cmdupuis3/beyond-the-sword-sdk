@@ -1247,6 +1247,9 @@ static bool pathIsDest(const void* pointer, FAStar* finder, int iX, int iY)
 }
 
 
+int g_iAttitudeEpoch = 0;
+
+
 int pathDestValid(int iToX, int iToY, const void* pointer, FAStar* finder)
 {
 	PROFILE_FUNC();

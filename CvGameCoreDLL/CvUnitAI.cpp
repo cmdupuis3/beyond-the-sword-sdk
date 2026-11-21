@@ -517,6 +517,13 @@ void CvUnitAI::AI_promote()
 {
 	PROFILE_FUNC();
 
+	// With no leader unit, canPromote() is false for every promotion unless the unit is ready
+	// for one, so there is nothing to look through. (As K-Mod does.)
+	if (!isPromotionReady())
+	{
+		return;
+	}
+
 	PromotionTypes eBestPromotion;
 	int iValue;
 	int iBestValue;
