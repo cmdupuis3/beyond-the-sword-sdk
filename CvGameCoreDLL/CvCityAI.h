@@ -123,6 +123,26 @@ protected:
 	int m_iEmphasizeGreatPeopleCount;
 
 	bool m_bAssignWorkDirty;
+	// City-wide values AI_yieldValue() needs, kept while AI_assignWorkingPlots() runs: see AI_assignCached()
+	enum AssignCacheTypes
+	{
+		ASSIGN_CACHE_FOOD_DIFFERENCE,
+		ASSIGN_CACHE_HEALTH_LEVEL,
+		ASSIGN_CACHE_HAPPINESS_LEVEL,
+		ASSIGN_CACHE_BEST_FOOD_YIELD,
+		ASSIGN_CACHE_GOOD_TILES,
+		ASSIGN_CACHE_GOOD_TILES_HEALTHY,
+		ASSIGN_CACHE_GOOD_SPECIALISTS,
+		ASSIGN_CACHE_GOOD_SPECIALISTS_HEALTHY,
+		NUM_ASSIGN_CACHE_TYPES
+	};
+	bool m_bAssignCacheActive;
+	int m_iAssignCacheChangeCount;
+	bool m_abAssignCacheValid[NUM_ASSIGN_CACHE_TYPES];
+	int m_aiAssignCacheValue[NUM_ASSIGN_CACHE_TYPES];
+
+	int AI_assignCached(AssignCacheTypes eType);
+	int AI_calculateAssignCached(AssignCacheTypes eType);
 	bool m_bChooseProductionDirty;
 
 	IDInfo m_routeToCity;

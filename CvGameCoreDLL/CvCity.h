@@ -778,6 +778,7 @@ public:
 	bool isWorkingPlot(int iIndex) const;													// Exposed to Python
 	bool isWorkingPlot(const CvPlot* pPlot) const;													// Exposed to Python
 	void setWorkingPlot(int iIndex, bool bNewValue);
+	int getAssignChangeCount() const { return m_iAssignChangeCount; }
 	void setWorkingPlot(CvPlot* pPlot, bool bNewValue);
 	void alterWorkingPlot(int iIndex);																			// Exposed to Python
 
@@ -1114,6 +1115,7 @@ protected:
 	bool*	m_abYieldRankValid;
 	int*	m_aiCommerceRank;
 	bool*	m_abCommerceRankValid;
+	int m_iAssignChangeCount;	// advances whenever a worked plot or a specialist count changes; not saved
 
 	void doGrowth();
 	void doCulture();

@@ -521,6 +521,7 @@ void CvCity::reset(int iID, PlayerTypes eOwner, int iX, int iY, bool bConstructo
 	m_szScriptData = "";
 
 	m_bPopulationRankValid = false;
+	m_iAssignChangeCount = 0;
 	m_iPopulationRank = -1;
 
 	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
@@ -9371,6 +9372,7 @@ void CvCity::setSpecialistCount(SpecialistTypes eIndex, int iNewValue)
 	if (iOldValue != iNewValue)
 	{
 		m_paiSpecialistCount[eIndex] = iNewValue;
+		m_iAssignChangeCount++;
 		FAssert(getSpecialistCount(eIndex) >= 0);
 
 		changeSpecialistPopulation(iNewValue - iOldValue);
@@ -9778,6 +9780,7 @@ void CvCity::setWorkingPlot(int iIndex, bool bNewValue)
 	if (isWorkingPlot(iIndex) != bNewValue)
 	{
 		m_pabWorkingPlot[iIndex] = bNewValue;
+		m_iAssignChangeCount++;
 
 		pPlot = getCityIndexPlot(iIndex);
 

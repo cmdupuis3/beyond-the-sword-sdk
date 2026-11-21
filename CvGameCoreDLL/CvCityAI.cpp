@@ -99,6 +99,8 @@ void CvCityAI::AI_reset()
 	m_bForceEmphasizeCulture = false;
 
 	m_bAssignWorkDirty = false;
+	m_bAssignCacheActive = false;
+	m_iAssignCacheChangeCount = -1;
 	m_bChooseProductionDirty = false;
 
 	m_routeToCity.reset();
@@ -205,6 +207,17 @@ void CvCityAI::AI_assignWorkingPlots()
 	{
 		return;
 	}
+
+	// From here to the end, the city-wide values AI_yieldValue() works from are kept from
+	// one change of the assignment to the next: see AI_assignCached().
+	struct AssignCacheScope
+	{
+		bool& bActive;
+		~AssignCacheScope() { bActive = false; }
+	} kAssignCacheScope = { m_bAssignCacheActive };
+
+	m_bAssignCacheActive = true;
+	m_iAssignCacheChangeCount = -1;
 
 	// remove all assigned plots if we automated
 	if (!isHuman() || isCitizensAutomated())
@@ -346,6 +359,89 @@ void CvCityAI::AI_assignWorkingPlots()
 	{
 		gDLL->getInterfaceIFace()->setDirty(CitizenButtons_DIRTY_BIT, true);
 	}
+}
+
+
+int CvCityAI::AI_calculateAssignCached(AssignCacheTypes eType)
+{
+	switch (eType)
+	{
+	case ASSIGN_CACHE_FOOD_DIFFERENCE:
+		return foodDifference(false);
+	case ASSIGN_CACHE_HEALTH_LEVEL:
+		return goodHealth() - badHealth(/*bNoAngry*/ false, 0);
+	case ASSIGN_CACHE_HAPPINESS_LEVEL:
+		return happyLevel() - unhappyLevel(0);
+	case ASSIGN_CACHE_BEST_FOOD_YIELD:
+		return getBestYieldAvailable(YIELD_FOOD);
+	case ASSIGN_CACHE_GOOD_TILES:
+		return AI_countGoodTiles(false, true, 50, true);
+	case ASSIGN_CACHE_GOOD_TILES_HEALTHY:
+		return AI_countGoodTiles(true, true, 50, true);
+	case ASSIGN_CACHE_GOOD_SPECIALISTS:
+		return AI_countGoodSpecialists(false);
+	case ASSIGN_CACHE_GOOD_SPECIALISTS_HEALTHY:
+		return AI_countGoodSpecialists(true);
+	default:
+		FAssert(false);
+		return 0;
+	}
+}
+
+
+//
+// One of the city-wide values AI_yieldValue() works from.
+//
+// AI_assignWorkingPlots() rebuilds a city's assignment one citizen at a time, and for each
+// citizen it has AI_yieldValue() value every plot and specialist the city could use. Every
+// one of those calls used to work out afresh how happy and healthy the city is, its food
+// surplus, and how many good plots and specialists it has left, the last by valuing every
+// plot in the city again. None of that depends on the plot being valued, only on what the
+// city is working now. So while AI_assignWorkingPlots() runs, each value is worked out
+// once and kept until a worked plot or a specialist count changes, which
+// CvCity::getAssignChangeCount() reports. Outside AI_assignWorkingPlots() nothing is kept.
+//
+int CvCityAI::AI_assignCached(AssignCacheTypes eType)
+{
+	if (!m_bAssignCacheActive)
+	{
+		return AI_calculateAssignCached(eType);
+	}
+
+	if (m_iAssignCacheChangeCount != getAssignChangeCount())
+	{
+		for (int iI = 0; iI < NUM_ASSIGN_CACHE_TYPES; iI++)
+		{
+			m_abAssignCacheValid[iI] = false;
+		}
+
+		m_iAssignCacheChangeCount = getAssignChangeCount();
+	}
+
+#ifdef BRIDGED_PROFILE
+	// ASSIGN_VERIFY: a global define for profile builds. Set, every kept value is also
+	// worked out afresh and the ones that differ are counted.
+	static BridgedProfileSample aSamples[3] = {
+		{ "assign cache: value kept" }, { "assign cache: value worked out" }, { "assign cache verify: KEPT VALUE WAS STALE" } };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("ASSIGN_VERIFY") != 0) ? 1 : 0;
+	}
+	bridgedProfileAdd(&aSamples[m_abAssignCacheValid[eType] ? 0 : 1], 0);
+	if (m_abAssignCacheValid[eType] && (iVerify != 0) && (m_aiAssignCacheValue[eType] != AI_calculateAssignCached(eType)))
+	{
+		bridgedProfileAdd(&aSamples[2], 0);
+	}
+#endif
+
+	if (!m_abAssignCacheValid[eType])
+	{
+		m_aiAssignCacheValue[eType] = AI_calculateAssignCached(eType);
+		m_abAssignCacheValid[eType] = true;
+	}
+
+	return m_aiAssignCacheValue[eType];
 }
 
 
@@ -6858,11 +6954,11 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 		// we still prefer more food if everything else is equal
 		iValue += (aiYields[YIELD_FOOD] * 1);
 
-		int iFoodPerTurn = (foodDifference(false) - ((bRemove) ? aiYields[YIELD_FOOD] : 0));
+		int iFoodPerTurn = (AI_assignCached(ASSIGN_CACHE_FOOD_DIFFERENCE) - ((bRemove) ? aiYields[YIELD_FOOD] : 0));
 		int iFoodLevel = getFood();
 		int iFoodToGrow = growthThreshold();
-		int iHealthLevel = goodHealth() - badHealth(/*bNoAngry*/ false, 0);
-		int iHappinessLevel = (isNoUnhappiness() ? std::max(3, iHealthLevel + 5) : happyLevel() - unhappyLevel(0));
+		int iHealthLevel = AI_assignCached(ASSIGN_CACHE_HEALTH_LEVEL);
+		int iHappinessLevel = (isNoUnhappiness() ? std::max(3, iHealthLevel + 5) : AI_assignCached(ASSIGN_CACHE_HAPPINESS_LEVEL));
 		int iPopulation = getPopulation();
 		int	iExtraPopulationThatCanWork = std::min(iPopulation - range(-iHappinessLevel, 0, iPopulation) + std::min(0, extraFreeSpecialists()) , NUM_CITY_PLOTS) - getWorkingPopulation() + ((bRemove) ? 1 : 0);
 		int iConsumtionPerPop = GC.getFOOD_CONSUMPTION_PER_POPULATION();
@@ -6890,7 +6986,7 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 				if (std::max(0, iExtraPopulationThatCanWork * aiYields[YIELD_FOOD]) >= -iFoodPerTurn)
 				{
 					// if this is high food, then we want to pick it first, this will allow us to pick some great non-food later
-					int iHighFoodThreshold = std::min(getBestYieldAvailable(YIELD_FOOD), iConsumtionPerPop + 1);				
+					int iHighFoodThreshold = std::min(AI_assignCached(ASSIGN_CACHE_BEST_FOOD_YIELD), iConsumtionPerPop + 1);				
 					if (iFoodPerTurn <= (AI_isEmphasizeGreatPeople() ? 0 : -iHighFoodThreshold) && aiYields[YIELD_FOOD] >= iHighFoodThreshold)
 					{
 						// value all the food that will contribute to not starving
@@ -7000,8 +7096,8 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 					bool bBarFull = (iFoodLevel + iFoodPerTurn /*+ aiYields[YIELD_FOOD]*/ > ((90 * iFoodToGrow) / 100));
 
 					int iPopToGrow = std::max(0, iHappinessLevel);
-					int iGoodTiles = AI_countGoodTiles(iHealthLevel > 0, true, 50, true);
-					iGoodTiles += AI_countGoodSpecialists(iHealthLevel > 0);
+					int iGoodTiles = AI_assignCached((iHealthLevel > 0) ? ASSIGN_CACHE_GOOD_TILES_HEALTHY : ASSIGN_CACHE_GOOD_TILES);
+					iGoodTiles += AI_assignCached((iHealthLevel > 0) ? ASSIGN_CACHE_GOOD_SPECIALISTS_HEALTHY : ASSIGN_CACHE_GOOD_SPECIALISTS);
 					iGoodTiles += bBarFull ? 0 : 1;
 
 					if (!bEmphasizeFood)
