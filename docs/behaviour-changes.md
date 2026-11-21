@@ -227,17 +227,29 @@ stock game.
 
 ### What it does, measured
 
-Seeded standard game, 150 turns, all players AI. Profile builds have rows for the time the
-exe keeps between calls and for why each pass did or did not wait.
+Seeded games, all players AI. Profile builds have rows for the time the exe keeps between
+calls and for why each pass did or did not wait.
 
-| | stock pacing | passes run at once |
-| --- | ---: | ---: |
-| calls of `CvGame::update()` | 302 | about 10 |
-| time between calls, in the exe | 63.2 s | 1.7 s |
-| time for the 150 turns | 81.8 s | 8.7 s |
+| | standard, 150 turns, stock pacing | the same, passes run at once | huge, 250 turns, stock pacing | the same, passes run at once |
+| --- | ---: | ---: | ---: | ---: |
+| calls of `CvGame::update()` | 302 | about 10 | 1,271 | 58 |
+| time between calls, in the exe | 63.2 s | 1.7 s | about 394 s | 30.6 s |
+| time inside `CvGame::update()` | 17.4 s | 9.4 s | 214.6 s | 72.9 s |
+| time for the turns | 81.8 s | 8.7 s | 590.9 s | 106.2 s |
 
-The first two rows are from profile builds and the last from release builds. The exe keeps
-about 0.2 s between two calls however long the call before took.
+The standard game's last row is from release builds; everything else is from profile builds.
+The huge game has the same state hash on all 251 turns. Its stock-pacing column is the run
+made before this change, on another day.
+
+The exe keeps about 0.2 s between two calls on the standard map and about 0.5 s on the huge
+one, however long the call before took.
+
+The time inside `CvGame::update()` falls as well, though the same work is done: every scope
+is called the same number of times and each takes less (the pathfinder 4.5 microseconds a
+request with stock pacing and 2.1 without, in the standard games run one after the other).
+The likely reason is that the passes now run back to back, where before the exe drew frames
+between them. How much of the huge game's fall is that and how much is the machine having
+been busier on the day of the earlier run was not measured.
 
 Benchmark times from before this change include those waits and are not comparable with
 times from after it. The state hashes are.
