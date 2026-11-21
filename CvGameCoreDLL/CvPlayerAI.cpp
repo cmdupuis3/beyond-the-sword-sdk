@@ -15272,12 +15272,16 @@ int CvPlayerAI::AI_goldToUpgradeAllUnits(int iExpThreshold) const
 		CvArea* pUnitArea = pLoopUnit->area();
 		int iUnitValue = AI_unitValue(eUnitType, eUnitAIType, pUnitArea);
 
+		// upgradeAvailable() below holds for exactly the types on the unit's upgrade list, so
+		// only those are valued. (The stock code valued the unit of every class first.)
+		const std::vector<UnitTypes>& aeUpgradeUnits = pLoopUnit->getUpgradeUnitTypes();
+
 		for (int iI = 0; iI < GC.getNumUnitClassInfos(); iI++)
 		{
 			UnitClassTypes eUpgradeUnitClassType = (UnitClassTypes) iI;
 			UnitTypes eUpgradeUnitType = (UnitTypes)(kCivilizationInfo.getCivilizationUnits(iI));
 
-			if (NO_UNIT != eUpgradeUnitType)
+			if ((NO_UNIT != eUpgradeUnitType) && std::binary_search(aeUpgradeUnits.begin(), aeUpgradeUnits.end(), eUpgradeUnitType))
 			{
 				// is it better?
 				int iUpgradeValue = AI_unitValue(eUpgradeUnitType, eUnitAIType, pUnitArea);
