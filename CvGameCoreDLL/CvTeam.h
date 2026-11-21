@@ -212,6 +212,7 @@ public:
 	void makeHasMet(TeamTypes eIndex, bool bNewDiplo);
 
 	DllExport bool isAtWar(TeamTypes eIndex) const;																			// Exposed to Python
+	unsigned long long getEnemyTeams() const;
 	DllExport void setAtWar(TeamTypes eIndex, bool bNewValue);
 
 	bool isPermanentWarPeace(TeamTypes eIndex) const;																		// Exposed to Python
@@ -404,6 +405,12 @@ protected:
 	int* m_aiForceTeamVoteEligibilityCount;
 
 	bool* m_abAtWar;
+
+	// see getEnemyTeams()
+	mutable unsigned long long m_uiEnemyTeams;
+	mutable int m_iEnemyTeamsEpoch;
+	static int m_iAtWarEpoch;
+
 	bool* m_abHasMet;
 	bool* m_abPermanentWarPeace;
 	bool* m_abOpenBorders;

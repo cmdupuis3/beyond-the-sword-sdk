@@ -1633,6 +1633,27 @@ bool CvMap::isTeamInBlocks(const std::vector<unsigned long long>& aiBlockTeams, 
 
 
 //
+// For a window of plots within iRange of (iX, iY): the map column of each column of the
+// window and the index of the first plot of each row, or -1 where the window runs off a
+// map edge that does not wrap. Both arrays need (2 * iRange) + 1 entries.
+//
+void CvMap::getWindowCoords(int iX, int iY, int iRange, int* aiMapX, int* aiRowStart) const
+{
+	const int iGridWidth = getGridWidthINLINE();
+	const int iGridHeight = getGridHeightINLINE();
+
+	for (int iD = -iRange; iD <= iRange; iD++)
+	{
+		const int iMapX = coordRange(iX + iD, iGridWidth, isWrapXINLINE());
+		aiMapX[iD + iRange] = (((iMapX >= 0) && (iMapX < iGridWidth)) ? iMapX : -1);
+
+		const int iMapY = coordRange(iY + iD, iGridHeight, isWrapYINLINE());
+		aiRowStart[iD + iRange] = (((iMapY >= 0) && (iMapY < iGridHeight)) ? (iMapY * iGridWidth) : -1);
+	}
+}
+
+
+//
 // False only if AI_getPlotDanger() would count no unit for this plot and range, taking
 // uiTeams (a bit per team) as the enemy teams: no unit of theirs that can attack stands in
 // the plot's area within iRange and, when bTestMoves, close enough for its reach.
@@ -1641,11 +1662,6 @@ bool CvMap::isTeamInBlocks(const std::vector<unsigned long long>& aiBlockTeams, 
 //
 bool CvMap::isTeamAttackerNear(const CvPlot* pPlot, int iRange, unsigned long long uiTeams, bool bTestMoves) const
 {
-	const int iX = pPlot->getX_INLINE();
-	const int iY = pPlot->getY_INLINE();
-	const int iGridWidth = getGridWidthINLINE();
-	const int iGridHeight = getGridHeightINLINE();
-
 #ifdef BRIDGED_PROFILE
 	static BridgedProfileSample aSamples[3] = {
 		{ "team index: no attacker in the blocks" }, { "team index: no attacker that counts on the plots" }, { "team index: attacker in reach" } };
@@ -1656,12 +1672,17 @@ bool CvMap::isTeamAttackerNear(const CvPlot* pPlot, int iRange, unsigned long lo
 		return false;
 	}
 
+	if (iRange > TEAM_INDEX_MAX_RANGE)
+	{
+		return true;
+	}
+
 	if (m_bTeamIndexDirty)
 	{
 		rebuildTeamIndex();
 	}
 
-	if (!isTeamInBlocks(m_aiBlockUnitTeams, iX, iY, iRange, uiTeams))
+	if (!isTeamInBlocks(m_aiBlockUnitTeams, pPlot->getX_INLINE(), pPlot->getY_INLINE(), iRange, uiTeams))
 	{
 #ifdef BRIDGED_PROFILE
 		bridgedProfileAdd(&aSamples[0], 0);
@@ -1669,38 +1690,41 @@ bool CvMap::isTeamAttackerNear(const CvPlot* pPlot, int iRange, unsigned long lo
 		return false;
 	}
 
+	int aiMapX[(2 * TEAM_INDEX_MAX_RANGE) + 1];
+	int aiRowStart[(2 * TEAM_INDEX_MAX_RANGE) + 1];
+	getWindowCoords(pPlot->getX_INLINE(), pPlot->getY_INLINE(), iRange, aiMapX, aiRowStart);
+
 	const int iArea = pPlot->getArea();
+	const int iWidth = (2 * iRange) + 1;
 
-	for (int iDY = -iRange; iDY <= iRange; iDY++)
+	for (int iRow = 0; iRow < iWidth; iRow++)
 	{
-		const int iMapY = coordRange(iY + iDY, iGridHeight, isWrapYINLINE());
-
-		if ((iMapY < 0) || (iMapY >= iGridHeight))
+		if (aiRowStart[iRow] < 0)
 		{
 			continue;
 		}
 
-		for (int iDX = -iRange; iDX <= iRange; iDX++)
-		{
-			const int iMapX = coordRange(iX + iDX, iGridWidth, isWrapXINLINE());
+		const int iRowDistance = abs(iRow - iRange);
 
-			if ((iMapX < 0) || (iMapX >= iGridWidth) || ((iDX == 0) && (iDY == 0)))
+		for (int iColumn = 0; iColumn < iWidth; iColumn++)
+		{
+			if (aiMapX[iColumn] < 0)
 			{
 				continue;
 			}
 
-			const int iPlot = (iMapY * iGridWidth) + iMapX;
+			const int iPlot = aiRowStart[iRow] + aiMapX[iColumn];
+			const int iDistance = std::max(iRowDistance, abs(iColumn - iRange));
 			unsigned long long uiPlotTeams;
 
 			if (bTestMoves)
 			{
 				// a unit this many plots away counts only if its reach covers the distance
-				const int iDistance = std::max(abs(iDX), abs(iDY));
-				uiPlotTeams = m_aiPlotReachTeams[(iPlot * TEAM_REACH_WORDS) + std::min(iDistance, (int)TEAM_REACH_WORDS) - 1];
+				uiPlotTeams = ((iDistance > 0) ? m_aiPlotReachTeams[(iPlot * TEAM_REACH_WORDS) + std::min(iDistance, (int)TEAM_REACH_WORDS) - 1] : 0);
 			}
 			else
 			{
-				uiPlotTeams = m_aiPlotUnitTeams[iPlot];
+				uiPlotTeams = ((iDistance > 0) ? m_aiPlotUnitTeams[iPlot] : 0);
 			}
 
 			if (((uiPlotTeams & uiTeams) != 0) && (m_pMapPlots[iPlot].getArea() == iArea))
@@ -1727,11 +1751,6 @@ bool CvMap::isTeamAttackerNear(const CvPlot* pPlot, int iRange, unsigned long lo
 //
 bool CvMap::isTeamBorderNear(const CvPlot* pPlot, int iRange, unsigned long long uiTeams) const
 {
-	const int iX = pPlot->getX_INLINE();
-	const int iY = pPlot->getY_INLINE();
-	const int iGridWidth = getGridWidthINLINE();
-	const int iGridHeight = getGridHeightINLINE();
-
 	iRange = std::min(iRange, 2);
 
 	if ((uiTeams == 0) || (iRange <= 0))
@@ -1744,38 +1763,42 @@ bool CvMap::isTeamBorderNear(const CvPlot* pPlot, int iRange, unsigned long long
 		rebuildTeamIndex();
 	}
 
-	if (!isTeamInBlocks(m_aiBlockOwnerTeams, iX, iY, iRange, uiTeams))
+	if (!isTeamInBlocks(m_aiBlockOwnerTeams, pPlot->getX_INLINE(), pPlot->getY_INLINE(), iRange, uiTeams))
 	{
 		return false;
 	}
 
+	int aiMapX[5];
+	int aiRowStart[5];
+	getWindowCoords(pPlot->getX_INLINE(), pPlot->getY_INLINE(), iRange, aiMapX, aiRowStart);
+
 	const int iArea = pPlot->getArea();
+	const int iWidth = (2 * iRange) + 1;
 
-	for (int iDY = -iRange; iDY <= iRange; iDY++)
+	for (int iRow = 0; iRow < iWidth; iRow++)
 	{
-		const int iMapY = coordRange(iY + iDY, iGridHeight, isWrapYINLINE());
-
-		if ((iMapY < 0) || (iMapY >= iGridHeight))
+		if (aiRowStart[iRow] < 0)
 		{
 			continue;
 		}
 
-		for (int iDX = -iRange; iDX <= iRange; iDX++)
-		{
-			const int iMapX = coordRange(iX + iDX, iGridWidth, isWrapXINLINE());
+		const int iRowDistance = abs(iRow - iRange);
 
-			if ((iMapX < 0) || (iMapX >= iGridWidth) || ((iDX == 0) && (iDY == 0)))
+		for (int iColumn = 0; iColumn < iWidth; iColumn++)
+		{
+			if (aiMapX[iColumn] < 0)
 			{
 				continue;
 			}
 
-			const int iPlot = (iMapY * iGridWidth) + iMapX;
+			const int iPlot = aiRowStart[iRow] + aiMapX[iColumn];
 
 			if ((m_aiPlotOwnerTeams[iPlot] & uiTeams) != 0)
 			{
+				const int iDistance = std::max(iRowDistance, abs(iColumn - iRange));
 				const CvPlot& kLoopPlot = m_pMapPlots[iPlot];
 
-				if ((kLoopPlot.getArea() == iArea) && ((std::max(abs(iDX), abs(iDY)) == 1) || kLoopPlot.isRoute()))
+				if ((iDistance > 0) && (kLoopPlot.getArea() == iArea) && ((iDistance == 1) || kLoopPlot.isRoute()))
 				{
 					return true;
 				}

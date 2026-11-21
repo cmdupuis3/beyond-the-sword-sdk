@@ -143,6 +143,10 @@ void CvTeam::uninit()
 // Initializes data members that are serialized.
 void CvTeam::reset(TeamTypes eID, bool bConstructorCall)
 {
+	// war status is cleared below, here and in what the other teams hold about this one: see getEnemyTeams()
+	m_iAtWarEpoch++;
+	m_iEnemyTeamsEpoch = -1;
+
 	int iI, iJ;
 
 	//--------------------------------
@@ -3410,6 +3414,39 @@ void CvTeam::makeHasMet(TeamTypes eIndex, bool bNewDiplo)
 }
 
 
+int CvTeam::m_iAtWarEpoch = 0;
+
+//
+// A bit for each team at war with this one, as atWar(that team, this team) reports it.
+//
+// The word is worked out when first asked for after any team's war status has changed,
+// which m_iAtWarEpoch counts: every write to an m_abAtWar array must advance it. The first
+// call after a change writes to this team, so it is not safe from several threads at once
+// until it has been made once.
+//
+unsigned long long CvTeam::getEnemyTeams() const
+{
+	if (m_iEnemyTeamsEpoch != m_iAtWarEpoch)
+	{
+		FAssert(MAX_TEAMS <= 64);
+
+		m_uiEnemyTeams = 0;
+
+		for (int iI = 0; iI < MAX_TEAMS; iI++)
+		{
+			if (GET_TEAM((TeamTypes)iI).isAtWar(getID()))
+			{
+				m_uiEnemyTeams |= (1ULL << iI);
+			}
+		}
+
+		m_iEnemyTeamsEpoch = m_iAtWarEpoch;
+	}
+
+	return m_uiEnemyTeams;
+}
+
+
 bool CvTeam::isAtWar(TeamTypes eIndex) const
 {
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
@@ -3423,6 +3460,7 @@ void CvTeam::setAtWar(TeamTypes eIndex, bool bNewValue)
 	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
 	FAssertMsg(eIndex < MAX_TEAMS, "eIndex is expected to be within maximum bounds (invalid Index)");
 	m_abAtWar[eIndex] = bNewValue;
+	m_iAtWarEpoch++;	// see getEnemyTeams()
 }
 
 
@@ -5937,6 +5975,7 @@ void CvTeam::read(FDataStreamBase* pStream)
 
 	pStream->Read(MAX_TEAMS, m_abHasMet);
 	pStream->Read(MAX_TEAMS, m_abAtWar);
+	m_iAtWarEpoch++;	// see getEnemyTeams()
 	pStream->Read(MAX_TEAMS, m_abPermanentWarPeace);
 	pStream->Read(MAX_TEAMS, m_abOpenBorders);
 	pStream->Read(MAX_TEAMS, m_abDefensivePact);

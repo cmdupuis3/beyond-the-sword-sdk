@@ -295,6 +295,7 @@ protected:
 	FFreeListTrashArray<CvArea> m_areas;
 	enum { TEAM_BLOCK_SHIFT = 3 };										// blocks of 8 x 8 plots
 	enum { TEAM_REACH_WORDS = 4 };										// reach of 1, 2, 3 and 4 or more plots
+	enum { TEAM_INDEX_MAX_RANGE = 12 };									// beyond this the questions are not answered from the index
 	mutable bool m_bTeamIndexDirty;
 	mutable int m_iTeamBlocksWide;
 	mutable std::vector<unsigned short> m_aiBlockTeamUnits;				// per block and team: attacking units there
@@ -309,6 +310,7 @@ protected:
 	unsigned long long calculatePlotUnitTeams(const CvPlot* pPlot, unsigned long long* puiReachTeams) const;
 	void changeBlockTeamCount(std::vector<unsigned short>& aiCounts, std::vector<unsigned long long>& aiBlockTeams, int iX, int iY, TeamTypes eTeam, int iChange);
 	bool isTeamInBlocks(const std::vector<unsigned long long>& aiBlockTeams, int iX, int iY, int iRange, unsigned long long uiTeams) const;
+	void getWindowCoords(int iX, int iY, int iRange, int* aiMapX, int* aiRowStart) const;
 
 	void calculateAreas();
 

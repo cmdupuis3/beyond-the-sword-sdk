@@ -3159,15 +3159,7 @@ int CvPlayerAI::AI_getPlotDanger(CvPlot* pPlot, int iRange, bool bTestMoves) con
 	// moves are tested, are near enough for their reach; plus, for the AI outside its
 	// cities, the border danger. The index answers both exactly enough to skip the scan
 	// whenever the count would be 0 for want of any such unit or border.
-	unsigned long long uiEnemyTeams = 0;
-
-	for (int iTeam = 0; iTeam < MAX_TEAMS; iTeam++)
-	{
-		if (atWar((TeamTypes)iTeam, getTeam()))
-		{
-			uiEnemyTeams |= (1ULL << iTeam);
-		}
-	}
+	const unsigned long long uiEnemyTeams = GET_TEAM(getTeam()).getEnemyTeams();
 
 	bool bNothingNear = !GC.getMapINLINE().isTeamAttackerNear(pPlot, iRange, uiEnemyTeams, bTestMoves);
 
