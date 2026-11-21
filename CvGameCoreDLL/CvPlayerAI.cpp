@@ -167,6 +167,8 @@ void CvPlayerAI::AI_uninit()
 
 void CvPlayerAI::AI_reset(bool bConstructor)
 {
+	m_bMissionTargetsDirty = true;	// the groups are about to go, or to be loaded: see AI_plotTargetMissionAIs()
+
 	// what this player thinks of the others and they of it is cleared below: see AI_getAttitudeVal()
 	invalidateAttitudeCache();
 	for (int iAttitudePlayer = 0; iAttitudePlayer < MAX_PLAYERS; iAttitudePlayer++)
@@ -9868,12 +9870,117 @@ int CvPlayerAI::AI_plotTargetMissionAIs(CvPlot* pPlot, MissionAITypes eMissionAI
 	return AI_plotTargetMissionAIs(pPlot, &eMissionAI, 1, iClosestTargetRange, pSkipSelectionGroup, iRange);
 }
 
+//
+// The player's count of the groups whose mission plot each plot is, kept by
+// CvSelectionGroupAI::AI_setMissionAI() and CvSelectionGroup::kill(). Anything else that
+// changes a group's mission plot or removes groups has to set m_bMissionTargetsDirty, and
+// the counts are then taken afresh from the groups when next needed. A count may be too
+// high (a group with no units still counts), never too low.
+//
+void CvPlayerAI::AI_changeMissionTargetGroups(const CvPlot* pPlot, int iChange)
+{
+	if (m_bMissionTargetsDirty || ((int)m_aiMissionTargetGroups.size() != GC.getMapINLINE().numPlotsINLINE()))
+	{
+		m_bMissionTargetsDirty = true;
+		return;
+	}
+
+	const int iPlot = GC.getMapINLINE().plotNumINLINE(pPlot->getX_INLINE(), pPlot->getY_INLINE());
+
+	if (((int)m_aiMissionTargetGroups[iPlot] + iChange) < 0)
+	{
+		FAssertMsg(false, "more groups have left a mission plot than were heading for it");
+		m_bMissionTargetsDirty = true;
+		return;
+	}
+
+	m_aiMissionTargetGroups[iPlot] = (unsigned short)(m_aiMissionTargetGroups[iPlot] + iChange);
+}
+
+
+// False only if no group of this player has a mission plot within iRange of pPlot.
+bool CvPlayerAI::AI_isMissionTargetNear(const CvPlot* pPlot, int iRange) const
+{
+	if ((iRange < 0) || (iRange > 4))
+	{
+		return true;	// not worth looking through that many plots
+	}
+
+	const CvMap& kMap = GC.getMapINLINE();
+
+	if (m_bMissionTargetsDirty || ((int)m_aiMissionTargetGroups.size() != kMap.numPlotsINLINE()))
+	{
+		m_aiMissionTargetGroups.assign(kMap.numPlotsINLINE(), 0);
+
+		int iLoop;
+		for (CvSelectionGroup* pLoopSelectionGroup = firstSelectionGroup(&iLoop); pLoopSelectionGroup; pLoopSelectionGroup = nextSelectionGroup(&iLoop))
+		{
+			const CvPlot* pMissionPlot = pLoopSelectionGroup->AI_getMissionAIPlot();
+
+			if (pMissionPlot != NULL)
+			{
+				m_aiMissionTargetGroups[kMap.plotNumINLINE(pMissionPlot->getX_INLINE(), pMissionPlot->getY_INLINE())]++;
+			}
+		}
+
+		m_bMissionTargetsDirty = false;
+	}
+
+	for (int iDX = -iRange; iDX <= iRange; iDX++)
+	{
+		for (int iDY = -iRange; iDY <= iRange; iDY++)
+		{
+			const CvPlot* pLoopPlot = plotXY(pPlot->getX_INLINE(), pPlot->getY_INLINE(), iDX, iDY);
+
+			if ((pLoopPlot != NULL) && (m_aiMissionTargetGroups[kMap.plotNumINLINE(pLoopPlot->getX_INLINE(), pLoopPlot->getY_INLINE())] > 0))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+
 int CvPlayerAI::AI_plotTargetMissionAIs(CvPlot* pPlot, MissionAITypes* aeMissionAI, int iMissionAICount, int& iClosestTargetRange, CvSelectionGroup* pSkipSelectionGroup, int iRange) const
 {
 	PROFILE_FUNC();
 
 	int iCount = 0;
 	iClosestTargetRange = MAX_INT;
+
+	// Most questions are about plots that no group is heading for, and for those the groups
+	// need not be looked through: the player keeps count of the groups whose mission plot
+	// each plot is.
+	if (!AI_isMissionTargetNear(pPlot, iRange))
+	{
+#ifdef BRIDGED_PROFILE
+		// TARGET_VERIFY: a global define for profile builds. Set, the groups are looked
+		// through all the same, and a group found within range is counted as a miss.
+		static BridgedProfileSample aSamples[2] = { { "mission targets: no group near, groups not looked through" }, { "mission targets verify: A GROUP WAS NEAR" } };
+		static int iVerify = -1;
+		if (iVerify == -1)
+		{
+			iVerify = (GC.getDefineINT("TARGET_VERIFY") != 0) ? 1 : 0;
+		}
+		bridgedProfileAdd(&aSamples[0], 0);
+		if (iVerify != 0)
+		{
+			int iVerifyLoop;
+			for (CvSelectionGroup* pVerifyGroup = firstSelectionGroup(&iVerifyLoop); pVerifyGroup; pVerifyGroup = nextSelectionGroup(&iVerifyLoop))
+			{
+				const CvPlot* pVerifyPlot = pVerifyGroup->AI_getMissionAIPlot();
+				if ((pVerifyPlot != NULL) && (stepDistance(pPlot->getX_INLINE(), pPlot->getY_INLINE(), pVerifyPlot->getX_INLINE(), pVerifyPlot->getY_INLINE()) <= iRange))
+				{
+					bridgedProfileAdd(&aSamples[1], 0);
+					break;
+				}
+			}
+		}
+#endif
+		return 0;
+	}
 
 	int iLoop;
 	for(CvSelectionGroup* pLoopSelectionGroup = firstSelectionGroup(&iLoop); pLoopSelectionGroup; pLoopSelectionGroup = nextSelectionGroup(&iLoop))

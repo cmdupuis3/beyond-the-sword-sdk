@@ -321,6 +321,9 @@ void CvSelectionGroup::kill()
 	FAssertMsg(getID() != FFreeList::INVALID_INDEX, "getID() is not expected to be equal with FFreeList::INVALID_INDEX");
 	FAssertMsg(getNumUnits() == 0, "The number of units is expected to be 0");
 
+	// the group no longer heads anywhere: see CvPlayerAI::AI_plotTargetMissionAIs()
+	AI_setMissionAI(NO_MISSIONAI, NULL, NULL);
+
 	GET_PLAYER(getOwnerINLINE()).removeGroupCycle(getID());
 
 	GET_PLAYER(getOwnerINLINE()).deleteSelectionGroup(getID());

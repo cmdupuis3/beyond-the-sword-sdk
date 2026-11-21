@@ -803,6 +803,25 @@ MissionAITypes CvSelectionGroupAI::AI_getMissionAIType()
 
 void CvSelectionGroupAI::AI_setMissionAI(MissionAITypes eNewMissionAI, CvPlot* pNewPlot, CvUnit* pNewUnit)
 {
+	// the owner keeps count of the groups heading for each plot: see CvPlayerAI::AI_plotTargetMissionAIs()
+	if (getOwnerINLINE() != NO_PLAYER)
+	{
+		CvPlot* pOldPlot = AI_getMissionAIPlot();
+
+		if (pOldPlot != pNewPlot)
+		{
+			if (pOldPlot != NULL)
+			{
+				GET_PLAYER(getOwnerINLINE()).AI_changeMissionTargetGroups(pOldPlot, -1);
+			}
+
+			if (pNewPlot != NULL)
+			{
+				GET_PLAYER(getOwnerINLINE()).AI_changeMissionTargetGroups(pNewPlot, 1);
+			}
+		}
+	}
+
 	m_eMissionAIType = eNewMissionAI;
 
 	if (pNewPlot != NULL)

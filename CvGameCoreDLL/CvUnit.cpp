@@ -6373,7 +6373,32 @@ bool CvUnit::build(BuildTypes eBuild)
 
 	GET_PLAYER(getOwnerINLINE()).changeGold(-(GET_PLAYER(getOwnerINLINE()).getBuildCost(plot(), eBuild)));
 
+#ifdef BRIDGED_PROFILE
+	// how the workers spend their turns
+	static BridgedProfileSample aWorkSamples[3] = {
+		{ "worker: turns of building" }, { "worker: builds finished" }, { "worker: build begun on a plot with another build unfinished" } };
+	bridgedProfileAdd(&aWorkSamples[0], 0);
+	if (plot()->getBuildProgress(eBuild) == 0)
+	{
+		for (int iOtherBuild = 0; iOtherBuild < GC.getNumBuildInfos(); iOtherBuild++)
+		{
+			if ((iOtherBuild != eBuild) && (plot()->getBuildProgress((BuildTypes)iOtherBuild) > 0))
+			{
+				bridgedProfileAdd(&aWorkSamples[2], 0);
+				break;
+			}
+		}
+	}
+#endif
+
 	bFinished = plot()->changeBuildProgress(eBuild, workRate(false), getTeam());
+
+#ifdef BRIDGED_PROFILE
+	if (bFinished)
+	{
+		bridgedProfileAdd(&aWorkSamples[1], 0);
+	}
+#endif
 
 	finishMoves(); // needs to be at bottom because movesLeft() can affect workRate()...
 
@@ -9196,6 +9221,14 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
 	FAssert(!isFighting());
 	FAssert((iX == INVALID_PLOT_COORD) || (GC.getMapINLINE().plotINLINE(iX, iY)->getX_INLINE() == iX));
 	FAssert((iY == INVALID_PLOT_COORD) || (GC.getMapINLINE().plotINLINE(iX, iY)->getY_INLINE() == iY));
+
+#ifdef BRIDGED_PROFILE
+	if ((AI_getUnitAIType() == UNITAI_WORKER) && (plot() != NULL) && (iX != INVALID_PLOT_COORD))
+	{
+		static BridgedProfileSample kWorkerMoves = { "worker: moves; calls = plots moved" };
+		bridgedProfileAdd(&kWorkerMoves, 0, stepDistance(getX_INLINE(), getY_INLINE(), iX, iY));
+	}
+#endif
 
 	// A unit arriving on a plot or leaving one (this is also how units appear and die) changes
 	// where groups can go, what they would have to attack and where they are in danger. A
