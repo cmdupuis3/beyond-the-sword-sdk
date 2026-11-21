@@ -87,7 +87,9 @@ python tools/build_dll.py --bts-dir "$BtsDir" --llvm-bin "C:/LLVM-23.1.2/bin" --
 ```
 
 The result is `tmp/dll-build-pgo/CvGameCoreDLL.dll`. Several `.profraw` files can be given
-to one `llvm-profdata merge`.
+to one `llvm-profdata merge`, and it pays to train on more than one game: a profile from
+the standard game alone does little for a huge map (see the table below). For the huge
+game add `--turns 250 --world-size WORLDSIZE_HUGE --timeout 2400` to the training run.
 
 The training DLL writes the profile itself (`bridgedPgoTurn()` in `CvGameCoreDLL.cpp`),
 every tenth game turn, to the file named by the `BRIDGED_PGO_RAW` environment variable.
@@ -104,16 +106,24 @@ from the profile is checked like any other. A profile goes stale as the source c
 functions that no longer match are optimised without it, so collect a new one after
 larger changes.
 
-Measured on the seeded standard game, 150 turns, trained on that same game: the same
-state hash on all 151 turns with the training DLL and with the optimised one. Eight runs
-of each DLL, taken in turn; the times are the sum over the 150 turns of each turn's
-fastest run, because whole runs differ from one another by more than the gain.
+Measured on the seeded games, all players AI. Every DLL, the training one included, plays
+the same game: the same state hash on all 151 turns of the standard game and all 251 of
+the huge one. The DLLs were run in turn, five runs each of the standard game and three of
+the huge one. The times are the sum over the turns of each turn's fastest run, because
+whole runs differ from one another by more than the gain; they include the time the exe
+takes to draw between calls, which is the same for every DLL and about half a second a
+turn late in the huge game.
 
-| | time | against the normal build |
-| --- | ---: | ---: |
-| normal build | 7.00 s | |
-| optimised, profile without call targets and copy sizes | 6.88 s | 1.8% less |
-| optimised, full profile | 6.57 s | 6.2% less |
+| | standard, 150 turns | | huge, 250 turns | |
+| --- | ---: | ---: | ---: | ---: |
+| normal build | 5.00 s | | 53.9 s | |
+| trained on the standard game | 4.85 s | 3.0% less | 52.4 s | 2.9% less |
+| trained on the standard and the huge game | 4.67 s | 6.7% less | 47.4 s | 12.1% less |
 
-The optimised DLL is 0.8 MB smaller. Not measured: the huge map, and a game other than
-the one the profile was collected on.
+These figures move by a few percent from one set of runs to the next: an earlier set of
+eight runs of the standard game gave 6.2% less for the DLL trained on that game, and 1.8%
+less for one whose profile left out call targets and copy sizes. The first 75 turns of the
+huge game, which take 3.4 s in all, were slightly slower with both profiles.
+
+The optimised DLL is 0.8 MB smaller. Not measured: a game the profile was not collected
+on, other than the huge game with the standard game's profile.
