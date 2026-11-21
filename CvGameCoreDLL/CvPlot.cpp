@@ -5886,6 +5886,344 @@ int CvPlot::calculateImprovementYieldChange(ImprovementTypes eImprovement, Yield
 }
 
 
+// The three yields at once
+//
+// The AI and updateYield() ask the yield functions about food, production and commerce
+// one after another, and each call looks up the same facts about the plot again: hills,
+// lake, river, the bonus the team can see, whether it is beside a river or can be
+// irrigated (four and up to eight neighbouring plots). The functions below look them up
+// once and then do each yield's sums exactly as the one-yield function does.
+//
+// YIELD_VERIFY: a global define for profile builds. Set, every answer is checked against
+// the one-yield function.
+
+namespace
+{
+	bool isYieldVerify()
+	{
+#ifdef BRIDGED_PROFILE
+		static int iVerify = -1;
+		if (iVerify == -1)
+		{
+			iVerify = (GC.getDefineINT("YIELD_VERIFY") != 0) ? 1 : 0;
+		}
+		return (iVerify != 0);
+#else
+		return false;
+#endif
+	}
+
+	void verifyYields(const int* aiYields, const int* aiExpected)
+	{
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample kChecked = { "yield verify: answers checked" };
+		static BridgedProfileSample kWrong = { "yield verify: YIELD DIFFERS" };
+		for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			bridgedProfileAdd(&kChecked, 0);
+			if (aiYields[iI] != aiExpected[iI])
+			{
+				bridgedProfileAdd(&kWrong, 0);
+			}
+		}
+#endif
+	}
+}
+
+
+void CvPlot::calculateNatureYields(int* aiYields, TeamTypes eTeam, bool bIgnoreFeature) const
+{
+	int iI;
+
+	if (isImpassable())
+	{
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			aiYields[iI] = 0;
+		}
+		return;
+	}
+
+	FAssertMsg(getTerrainType() != NO_TERRAIN, "TerrainType is not assigned a valid value");
+
+	CvTerrainInfo& kTerrain = GC.getTerrainInfo(getTerrainType());
+	const bool bHills = isHills();
+	const bool bPeak = isPeak();
+	const bool bLake = isLake();
+	const bool bRiver = isRiver();
+	const FeatureTypes eFeature = getFeatureType();
+	const BonusTypes eBonus = (eTeam != NO_TEAM) ? getBonusType(eTeam) : NO_BONUS;
+	const bool bTerrainChanges = (bIgnoreFeature || (eFeature == NO_FEATURE));
+
+	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	{
+		const YieldTypes eYield = (YieldTypes)iI;
+		int iYield = kTerrain.getYield(eYield);
+
+		if (bHills)
+		{
+			iYield += GC.getYieldInfo(eYield).getHillsChange();
+		}
+
+		if (bPeak)
+		{
+			iYield += GC.getYieldInfo(eYield).getPeakChange();
+		}
+
+		if (bLake)
+		{
+			iYield += GC.getYieldInfo(eYield).getLakeChange();
+		}
+
+		if (eBonus != NO_BONUS)
+		{
+			iYield += GC.getBonusInfo(eBonus).getYieldChange(eYield);
+		}
+
+		if (bRiver)
+		{
+			iYield += (bTerrainChanges ? kTerrain.getRiverYieldChange(eYield) : GC.getFeatureInfo(eFeature).getRiverYieldChange(eYield));
+		}
+
+		if (bHills)
+		{
+			iYield += (bTerrainChanges ? kTerrain.getHillsYieldChange(eYield) : GC.getFeatureInfo(eFeature).getHillsYieldChange(eYield));
+		}
+
+		if (!bIgnoreFeature && (eFeature != NO_FEATURE))
+		{
+			iYield += GC.getFeatureInfo(eFeature).getYieldChange(eYield);
+		}
+
+		aiYields[iI] = std::max(0, iYield);
+	}
+
+	if (isYieldVerify())
+	{
+		int aiExpected[NUM_YIELD_TYPES];
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			aiExpected[iI] = calculateNatureYield((YieldTypes)iI, eTeam, bIgnoreFeature);
+		}
+		verifyYields(aiYields, aiExpected);
+	}
+}
+
+
+void CvPlot::calculateImprovementYieldChanges(int* aiYields, ImprovementTypes eImprovement, PlayerTypes ePlayer, bool bOptimal) const
+{
+	PROFILE_FUNC();
+
+	int iI, iJ;
+
+	CvImprovementInfo& kImprovement = GC.getImprovementInfo(eImprovement);
+	const bool bRiverSide = isRiverSide();
+	const bool bHills = isHills();
+	const bool bIrrigated = (bOptimal || isIrrigationAvailable());
+	const RouteTypes eRoute = getRouteType();
+	const BonusTypes eBonus = (ePlayer != NO_PLAYER) ? getBonusType(GET_PLAYER(ePlayer).getTeam()) : NO_BONUS;
+
+	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	{
+		const YieldTypes eYield = (YieldTypes)iI;
+		int iYield = kImprovement.getYieldChange(eYield);
+
+		if (bRiverSide)
+		{
+			iYield += kImprovement.getRiverSideYieldChange(eYield);
+		}
+
+		if (bHills)
+		{
+			iYield += kImprovement.getHillsYieldChange(eYield);
+		}
+
+		if (bIrrigated)
+		{
+			iYield += kImprovement.getIrrigatedYieldChange(eYield);
+		}
+
+		if (bOptimal)
+		{
+			int iBestYield = 0;
+
+			for (iJ = 0; iJ < GC.getNumRouteInfos(); ++iJ)
+			{
+				iBestYield = std::max(iBestYield, kImprovement.getRouteYieldChanges(iJ, eYield));
+			}
+
+			iYield += iBestYield;
+		}
+		else if (eRoute != NO_ROUTE)
+		{
+			iYield += kImprovement.getRouteYieldChanges(eRoute, eYield);
+		}
+
+		if (bOptimal || (ePlayer == NO_PLAYER))
+		{
+			for (iJ = 0; iJ < GC.getNumTechInfos(); ++iJ)
+			{
+				iYield += kImprovement.getTechYieldChanges(iJ, eYield);
+			}
+
+			for (iJ = 0; iJ < GC.getNumCivicInfos(); ++iJ)
+			{
+				iYield += GC.getCivicInfo((CivicTypes)iJ).getImprovementYieldChanges(eImprovement, eYield);
+			}
+		}
+		else
+		{
+			iYield += GET_PLAYER(ePlayer).getImprovementYieldChange(eImprovement, eYield);
+			iYield += GET_TEAM(GET_PLAYER(ePlayer).getTeam()).getImprovementYieldChange(eImprovement, eYield);
+		}
+
+		if (eBonus != NO_BONUS)
+		{
+			iYield += kImprovement.getImprovementBonusYield(eBonus, eYield);
+		}
+
+		aiYields[iI] = iYield;
+	}
+
+	if (isYieldVerify())
+	{
+		int aiExpected[NUM_YIELD_TYPES];
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			aiExpected[iI] = calculateImprovementYieldChange(eImprovement, (YieldTypes)iI, ePlayer, bOptimal);
+		}
+		verifyYields(aiYields, aiExpected);
+	}
+}
+
+
+void CvPlot::calculateYields(int* aiYields) const
+{
+	int iI;
+
+	if ((getTerrainType() == NO_TERRAIN) || !isPotentialCityWork())
+	{
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			aiYields[iI] = 0;
+		}
+		return;
+	}
+
+	const PlayerTypes ePlayer = getOwnerINLINE();
+	const ImprovementTypes eImprovement = getImprovementType();
+	const RouteTypes eRoute = getRouteType();
+
+	calculateNatureYields(aiYields, ((ePlayer != NO_PLAYER) ? GET_PLAYER(ePlayer).getTeam() : NO_TEAM));
+
+	if (eImprovement != NO_IMPROVEMENT)
+	{
+		int aiImprovementYields[NUM_YIELD_TYPES];
+		calculateImprovementYieldChanges(aiImprovementYields, eImprovement, ePlayer);
+
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			aiYields[iI] += aiImprovementYields[iI];
+		}
+	}
+
+	CvPlayer* pPlayer = NULL;
+	CvCity* pCity = NULL;
+	CvCity* pWorkingCity = NULL;
+	bool bSea = false;
+	bool bRiver = false;
+
+	if (ePlayer != NO_PLAYER)
+	{
+		pPlayer = &GET_PLAYER(ePlayer);
+		pCity = getPlotCity();
+		bSea = (isWater() && !isImpassable());
+		bRiver = (isRiver() && !isImpassable());
+
+		if (bSea || bRiver)
+		{
+			pWorkingCity = getWorkingCity();
+		}
+	}
+
+	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	{
+		const YieldTypes eYield = (YieldTypes)iI;
+		int iYield = aiYields[iI];
+
+		if (eRoute != NO_ROUTE)
+		{
+			iYield += GC.getRouteInfo(eRoute).getYieldChange(eYield);
+		}
+
+		if (pPlayer != NULL)
+		{
+			if (pCity != NULL)
+			{
+				iYield += GC.getYieldInfo(eYield).getCityChange();
+				if (GC.getYieldInfo(eYield).getPopulationChangeDivisor() != 0)
+				{
+					iYield += ((pCity->getPopulation() + GC.getYieldInfo(eYield).getPopulationChangeOffset()) / GC.getYieldInfo(eYield).getPopulationChangeDivisor());
+				}
+			}
+
+			if (bSea)
+			{
+				iYield += pPlayer->getSeaPlotYield(eYield);
+
+				if (pWorkingCity != NULL)
+				{
+					iYield += pWorkingCity->getSeaPlotYield(eYield);
+				}
+			}
+
+			if (bRiver && (pWorkingCity != NULL))
+			{
+				iYield += pWorkingCity->getRiverPlotYield(eYield);
+			}
+		}
+
+		if (pCity != NULL)
+		{
+			iYield = std::max(iYield, GC.getYieldInfo(eYield).getMinCity());
+		}
+
+		iYield += GC.getGameINLINE().getPlotExtraYield(m_iX, m_iY, eYield);
+
+		if (pPlayer != NULL)
+		{
+			if (pPlayer->getExtraYieldThreshold(eYield) > 0)
+			{
+				if (iYield >= pPlayer->getExtraYieldThreshold(eYield))
+				{
+					iYield += GC.getDefineINT("EXTRA_YIELD");
+				}
+			}
+
+			if (pPlayer->isGoldenAge())
+			{
+				if (iYield >= GC.getYieldInfo(eYield).getGoldenAgeYieldThreshold())
+				{
+					iYield += GC.getYieldInfo(eYield).getGoldenAgeYield();
+				}
+			}
+		}
+
+		aiYields[iI] = std::max(0, iYield);
+	}
+
+	if (isYieldVerify())
+	{
+		int aiExpected[NUM_YIELD_TYPES];
+		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+		{
+			aiExpected[iI] = calculateYield((YieldTypes)iI);
+		}
+		verifyYields(aiYields, aiExpected);
+	}
+}
+
+
 int CvPlot::calculateYield(YieldTypes eYield, bool bDisplay) const
 {
 	CvCity* pCity;
@@ -6056,9 +6394,12 @@ void CvPlot::updateYield()
 
 	bChange = false;
 
+	int aiNewYields[NUM_YIELD_TYPES];
+	calculateYields(aiNewYields);	// each as calculateYield(): it reads nothing the loop below changes
+
 	for (iI = 0; iI < NUM_YIELD_TYPES; ++iI)
 	{
-		iNewYield = calculateYield((YieldTypes)iI);
+		iNewYield = aiNewYields[iI];
 
 		if (getYield((YieldTypes)iI) != iNewYield)
 		{

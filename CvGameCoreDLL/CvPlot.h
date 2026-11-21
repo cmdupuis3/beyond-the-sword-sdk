@@ -337,6 +337,10 @@ public:
 	int calculateBestNatureYield(YieldTypes eIndex, TeamTypes eTeam) const;															// Exposed to Python
 	int calculateTotalBestNatureYield(TeamTypes eTeam) const;																						// Exposed to Python
 	int calculateImprovementYieldChange(ImprovementTypes eImprovement, YieldTypes eYield, PlayerTypes ePlayer, bool bOptimal = false) const;	// Exposed to Python
+	// the three yields at once, each equal to the one-yield function's answer: see CvPlot.cpp
+	void calculateNatureYields(int* aiYields, TeamTypes eTeam, bool bIgnoreFeature = false) const;
+	void calculateImprovementYieldChanges(int* aiYields, ImprovementTypes eImprovement, PlayerTypes ePlayer, bool bOptimal = false) const;
+	void calculateYields(int* aiYields) const;	// calculateYield(eYield, false)
 	int calculateYield(YieldTypes eIndex, bool bDisplay = false) const;												// Exposed to Python
 	bool hasYield() const;																																		// Exposed to Python
 	void updateYield();

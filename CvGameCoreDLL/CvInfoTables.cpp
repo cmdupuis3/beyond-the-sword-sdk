@@ -22,6 +22,7 @@ namespace
 		COUNT_BUILDINGS,
 		COUNT_BUILDING_CLASSES,
 		COUNT_TECHS,
+		COUNT_BONUSES,
 		NUM_COUNTS
 	};
 
@@ -41,6 +42,7 @@ namespace
 		std::vector<unsigned char> abBuild;
 		std::vector<unsigned char> abUnit;
 		std::vector<unsigned char> abBuilding;
+		std::vector<int> aiDiscoverableBonuses;	// per improvement
 	};
 
 	Tables s_kTables;
@@ -58,6 +60,7 @@ namespace
 		aiCounts[COUNT_BUILDINGS] = GC.getNumBuildingInfos();
 		aiCounts[COUNT_BUILDING_CLASSES] = GC.getNumBuildingClassInfos();
 		aiCounts[COUNT_TECHS] = GC.getNumTechInfos();
+		aiCounts[COUNT_BONUSES] = GC.getNumBonusInfos();
 	}
 
 	bool betterRoute(const CvRouteBuild& kFirst, const CvRouteBuild& kSecond)
@@ -240,6 +243,24 @@ namespace
 		return true;
 	}
 
+	int calculateDiscoverableBonusCount(const CvTeam& kTeam, ImprovementTypes eImprovement)
+	{
+		int iCount = 0;
+
+		for (int iI = 0; iI < GC.getNumBonusInfos(); iI++)
+		{
+			if (kTeam.isHasTech((TechTypes)GC.getBonusInfo((BonusTypes)iI).getTechReveal()))
+			{
+				if (GC.getImprovementInfo(eImprovement).getImprovementBonusDiscoverRand(iI) > 0)
+				{
+					iCount++;
+				}
+			}
+		}
+
+		return iCount;
+	}
+
 	const TeamTechs& teamTechs(TeamTypes eTeam)
 	{
 		const Tables& kTables = tables();	// first: a fresh set of tables makes every team's masks stale
@@ -266,6 +287,12 @@ namespace
 			for (iI = 0; iI < kTables.aiCounts[COUNT_BUILDINGS]; iI++)
 			{
 				kTechs.abBuilding[iI] = calculateBuildingTech(kTeam, (BuildingTypes)iI) ? 1 : 0;
+			}
+
+			kTechs.aiDiscoverableBonuses.resize(kTables.aiCounts[COUNT_IMPROVEMENTS]);
+			for (iI = 0; iI < kTables.aiCounts[COUNT_IMPROVEMENTS]; iI++)
+			{
+				kTechs.aiDiscoverableBonuses[iI] = calculateDiscoverableBonusCount(kTeam, (ImprovementTypes)iI);
 			}
 
 			kTechs.bValid = true;
@@ -377,6 +404,30 @@ bool CvInfoTables::isBuildingTech(TeamTypes eTeam, BuildingTypes eBuilding)
 #endif
 
 	return bTech;
+}
+
+
+int CvInfoTables::discoverableBonusCount(TeamTypes eTeam, ImprovementTypes eImprovement)
+{
+	FAssert(eTeam >= 0 && eTeam < MAX_TEAMS);
+	FAssert(eImprovement >= 0 && eImprovement < GC.getNumImprovementInfos());
+
+	const int iCount = teamTechs(eTeam).aiDiscoverableBonuses[eImprovement];
+
+#ifdef BRIDGED_PROFILE
+	if (isVerify())
+	{
+		static BridgedProfileSample kChecked = { "info table verify: discoverable bonus counts checked" };
+		static BridgedProfileSample kWrong = { "info table verify: DISCOVERABLE BONUS COUNT DIFFERS" };
+		bridgedProfileAdd(&kChecked, 0);
+		if (iCount != calculateDiscoverableBonusCount(GET_TEAM(eTeam), eImprovement))
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
+
+	return iCount;
 }
 
 

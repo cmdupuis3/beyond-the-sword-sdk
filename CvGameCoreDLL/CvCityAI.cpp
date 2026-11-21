@@ -5184,9 +5184,12 @@ void CvCityAI::AI_updateBestBuild()
 								
 
 							bUseBaseValue = false;
+							int aiImprovementYields[NUM_YIELD_TYPES];
+							pLoopPlot->calculateNatureYields(aiFinalYields, getTeam(), bIgnoreFeature);
+							pLoopPlot->calculateImprovementYieldChanges(aiImprovementYields, eImprovement, getOwnerINLINE(), false);
 							for (iJ = 0; iJ < NUM_YIELD_TYPES; iJ++)
 							{
-								aiFinalYields[iJ] = (pLoopPlot->calculateNatureYield(((YieldTypes)iJ), getTeam(), bIgnoreFeature) + pLoopPlot->calculateImprovementYieldChange(eImprovement, ((YieldTypes)iJ), getOwnerINLINE(), false));
+								aiFinalYields[iJ] += aiImprovementYields[iJ];
 							}
 						}
 					}
@@ -6989,6 +6992,8 @@ bool CvCityAI::AI_foodAvailable(int iExtra)
 
 int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoidGrowth, bool bRemove, bool bIgnoreFood, bool bIgnoreGrowth, bool bIgnoreStarvation, bool bWorkerOptimization)
 {
+	PROFILE_FUNC();
+
 	const int iBaseProductionValue = 15;
 	const int iBaseCommerceValue = 7;
 	
@@ -7539,9 +7544,13 @@ int CvCityAI::AI_plotValue(CvPlot* pPlot, bool bAvoidGrowth, bool bRemove, bool 
 
 	if (eFinalImprovement != NO_IMPROVEMENT)
 	{
+		int aiFinalYields[NUM_YIELD_TYPES];
+		int aiCurrentYields[NUM_YIELD_TYPES];
+		pPlot->calculateImprovementYieldChanges(aiFinalYields, eFinalImprovement, getOwnerINLINE());
+		pPlot->calculateImprovementYieldChanges(aiCurrentYields, eCurrentImprovement, getOwnerINLINE());
 		for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
 		{
-			iYieldDiff = (pPlot->calculateImprovementYieldChange(eFinalImprovement, ((YieldTypes)iI), getOwnerINLINE()) - pPlot->calculateImprovementYieldChange(eCurrentImprovement, ((YieldTypes)iI), getOwnerINLINE()));
+			iYieldDiff = (aiFinalYields[iI] - aiCurrentYields[iI]);
 			aiYields[iI] += iYieldDiff;
 		}
 		int iFinalYieldValue = (AI_yieldValue(aiYields, NULL, bAvoidGrowth, bRemove, bIgnoreFood, bIgnoreGrowth, bIgnoreStarvation) * 100);
@@ -7567,16 +7576,9 @@ int CvCityAI::AI_plotValue(CvPlot* pPlot, bool bAvoidGrowth, bool bRemove, bool 
 	{
 		if (pPlot->getBonusType(getTeam()) == NO_BONUS) // XXX double-check CvGame::doFeature that the checks are the same...
 		{
-			for (iI = 0; iI < GC.getNumBonusInfos(); iI++)
-			{
-				if (GET_TEAM(getTeam()).isHasTech((TechTypes)(GC.getBonusInfo((BonusTypes) iI).getTechReveal())))
-				{
-					if (GC.getImprovementInfo(eCurrentImprovement).getImprovementBonusDiscoverRand(iI) > 0)
-					{
-						iValue += 35;
-					}
-				}
-			}
+			// 35 for each bonus the improvement can discover that the team can see: the
+			// count depends on the XML and the team's technologies only (see CvInfoTables.h)
+			iValue += 35 * CvInfoTables::discoverableBonusCount(getTeam(), eCurrentImprovement);
 		}
 	}
 
@@ -7695,6 +7697,10 @@ void CvCityAI::AI_bestPlotBuild(CvPlot* pPlot, int* piBestValue, BuildTypes* peB
 	{
 		aiBestDiffYields[iJ] = 0;
 	}
+
+	// filled when first needed (-1: not yet): see the improvement loop below
+	int aiNatureYieldsFeature[NUM_YIELD_TYPES] = { -1, -1, -1 };
+	int aiNatureYieldsNoFeature[NUM_YIELD_TYPES] = { -1, -1, -1 };
 
 	BuildTypes eForcedBuild = NO_BUILD;
 	
@@ -7962,12 +7968,29 @@ void CvCityAI::AI_bestPlotBuild(CvPlot* pPlot, int* piBestValue, BuildTypes* peB
 				if (iValue >= 0)
 				{
 
-                    iValue *= 2;
+					iValue *= 2;
+
+					// the plot's yields without improvement, with and without its feature, are
+					// the same for every improvement: worked out at most once each per plot
+					int* aiNatureYields = (bIgnoreFeature ? aiNatureYieldsNoFeature : aiNatureYieldsFeature);
+					if (aiNatureYields[0] < 0)
+					{
+						pPlot->calculateNatureYields(aiNatureYields, getTeam(), bIgnoreFeature);
+					}
+
+					int aiImprovementYields[NUM_YIELD_TYPES];
+					int aiFinalImprovementYields[NUM_YIELD_TYPES];
+					pPlot->calculateImprovementYieldChanges(aiImprovementYields, eImprovement, getOwnerINLINE(), false);
+					if (eFinalImprovement != eImprovement)
+					{
+						pPlot->calculateImprovementYieldChanges(aiFinalImprovementYields, eFinalImprovement, getOwnerINLINE(), false);
+					}
+
 					for (iJ = 0; iJ < NUM_YIELD_TYPES; iJ++)
 					{
-						aiFinalYields[iJ] = 2*(pPlot->calculateNatureYield(((YieldTypes)iJ), getTeam(), bIgnoreFeature));
-						aiFinalYields[iJ] += (pPlot->calculateImprovementYieldChange(eFinalImprovement, ((YieldTypes)iJ), getOwnerINLINE(), false));
-						aiFinalYields[iJ] += (pPlot->calculateImprovementYieldChange(eImprovement, ((YieldTypes)iJ), getOwnerINLINE(), false));
+						aiFinalYields[iJ] = 2*(aiNatureYields[iJ]);
+						aiFinalYields[iJ] += ((eFinalImprovement != eImprovement) ? aiFinalImprovementYields[iJ] : aiImprovementYields[iJ]);
+						aiFinalYields[iJ] += aiImprovementYields[iJ];
 						if (bIgnoreFeature && pPlot->getFeatureType() != NO_FEATURE)
 						{
 							aiFinalYields[iJ] -= 2 * GC.getFeatureInfo(pPlot->getFeatureType()).getYieldChange((YieldTypes)iJ);							

@@ -50,6 +50,10 @@ namespace CvInfoTables
 	// the team has every technology the building needs, its special building type's included
 	bool isBuildingTech(TeamTypes eTeam, BuildingTypes eBuilding);
 
+	// the bonuses the improvement can discover (getImprovementBonusDiscoverRand() above 0)
+	// whose reveal technology the team has
+	int discoverableBonusCount(TeamTypes eTeam, ImprovementTypes eImprovement);
+
 	// a team gained or lost a technology, or was reset or loaded
 	void teamTechsChanged(TeamTypes eTeam);
 
