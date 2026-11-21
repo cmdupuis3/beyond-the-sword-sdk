@@ -101,6 +101,8 @@ void CvCityAI::AI_reset()
 
 	m_bAssignWorkDirty = false;
 	m_bAssignCacheActive = false;
+	m_iYieldValueContextDepth = 0;
+	m_bYieldValueContextValid = false;
 	m_bBuildingValueContextActive = false;
 	m_bBuildingValueContextValid = false;
 	m_iAssignCacheChangeCount = -1;
@@ -210,6 +212,14 @@ void CvCityAI::AI_assignWorkingPlots()
 	{
 		return;
 	}
+
+	// the city-wide inputs of AI_yieldValue() are kept until this function returns
+	AI_beginYieldValueContext();
+	struct YieldValueContextScope
+	{
+		int& iDepth;
+		~YieldValueContextScope() { iDepth--; }
+	} kYieldValueContextScope = { m_iYieldValueContextDepth };
 
 	// From here to the end, the city-wide values AI_yieldValue() works from are kept from
 	// one change of the assignment to the next: see AI_assignCached().
@@ -4908,6 +4918,7 @@ void CvCityAI::AI_setEmphasize(EmphasizeTypes eIndex, bool bNewValue)
 	if (AI_isEmphasize(eIndex) != bNewValue)
 	{
 		m_pbEmphasize[eIndex] = bNewValue;
+		m_bYieldValueContextValid = false;	// see AI_yieldValueContext()
 
 		if (GC.getEmphasizeInfo(eIndex).isAvoidGrowth())
 		{
@@ -5112,6 +5123,14 @@ int CvCityAI::AI_countBestBuilds(CvArea* pArea)
 void CvCityAI::AI_updateBestBuild()
 {
 	PROFILE_FUNC();
+
+	// the city-wide inputs of AI_yieldValue() are kept until this function returns
+	AI_beginYieldValueContext();
+	struct YieldValueContextScope
+	{
+		int& iDepth;
+		~YieldValueContextScope() { iDepth--; }
+	} kYieldValueContextScope = { m_iYieldValueContextDepth };
 	
 	
 	CvPlot* pLoopPlot;
@@ -6990,9 +7009,152 @@ bool CvCityAI::AI_foodAvailable(int iExtra)
 }
 
 
+//
+// AI_yieldValue() is asked to value every plot and specialist a city could use, many
+// times over while AI_assignWorkingPlots() fills the city one citizen at a time, and
+// while the worker AI and AI_countGoodTiles() go over the city's plots. Every call read
+// the city's yield and commerce modifiers, its production modifier (a loop over every
+// bonus), its owner's commerce weights (a loop over the teams for espionage), the growth
+// threshold and anger lengths (five getDefineINT() lookups by name) and more, none of it
+// depending on the plot or on which plots are worked.
+//
+// So these functions open a scope (AI_beginYieldValueContext()) in which the values are
+// worked out at the first call and kept. What does change as plots are worked (the
+// city's base yields, its working population, free specialists and the values
+// AI_assignCached() keeps) is still read each time. AI_updateSpecialYieldMultiplier()
+// and AI_setEmphasize() change kept values, so they make the next use work them out
+// again. Outside a scope every call works them out, as before.
+//
+// YIELD_VALUE_VERIFY: a global define for profile builds. Set, every use of a kept
+// context also works one out afresh and counts the ones that differ.
+//
+void CvCityAI::AI_beginYieldValueContext()
+{
+	if (m_iYieldValueContextDepth++ == 0)
+	{
+		m_bYieldValueContextValid = false;
+	}
+}
+
+
+void CvCityAI::AI_calculateYieldValueContext(YieldValueContext& kContext)
+{
+	int iI;
+
+	memset(&kContext, 0, sizeof(kContext));	// so that two contexts compare with memcmp()
+
+	CvPlayerAI& kOwner = GET_PLAYER(getOwnerINLINE());
+
+	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
+	{
+		kContext.aiBaseYieldRateModifier[iI] = getBaseYieldRateModifier((YieldTypes)iI);
+		kContext.aiAverageYieldMultiplier[iI] = kOwner.AI_averageYieldMultiplier((YieldTypes)iI);
+		kContext.aiSpecialYieldMultiplier[iI] = AI_specialYieldMultiplier((YieldTypes)iI);
+		kContext.abEmphasizeYield[iI] = AI_isEmphasizeYield((YieldTypes)iI) ? 1 : 0;
+	}
+
+	kContext.iProductionModifier = getProductionModifier();
+	kContext.bProductionProcess = isProductionProcess() ? 1 : 0;
+
+	for (iI = 0; iI < NUM_COMMERCE_TYPES; iI++)
+	{
+		kContext.aiTotalCommerceRateModifier[iI] = getTotalCommerceRateModifier((CommerceTypes)iI);
+		kContext.aiCommercePercent[iI] = kOwner.getCommercePercent((CommerceTypes)iI);
+
+		if (kContext.bProductionProcess)
+		{
+			kContext.aiProcessCommerceModifier[iI] = GC.getProcessInfo(getProductionProcess()).getProductionToCommerceModifier(iI);
+		}
+
+		int iCommerceWeight = kOwner.AI_commerceWeight((CommerceTypes)iI);
+		if (AI_isEmphasizeCommerce((CommerceTypes)iI))
+		{
+			iCommerceWeight *= 200;
+			iCommerceWeight /= 100;
+		}
+		kContext.aiCommerceWeight[iI] = iCommerceWeight;
+		kContext.aiAverageCommerceExchange[iI] = kOwner.AI_averageCommerceExchange((CommerceTypes)iI);
+	}
+
+	kContext.iFood = getFood();
+	kContext.iGrowthThreshold = growthThreshold();
+	kContext.iPopulation = getPopulation();
+	kContext.iMilitaryHappinessUnits = getMilitaryHappinessUnits();
+	kContext.iNumCities = kOwner.getNumCities();
+	kContext.iNoMilitaryPercentAnger = GC.getDefineINT("NO_MILITARY_PERCENT_ANGER");
+	kContext.iHurryAngerTimer = getHurryAngerTimer();
+	kContext.iFlatHurryAngerLength = flatHurryAngerLength();
+	kContext.iConscriptAngerTimer = getConscriptAngerTimer();
+	kContext.iFlatConscriptAngerLength = flatConscriptAngerLength();
+	kContext.iDefyResolutionAngerTimer = getDefyResolutionAngerTimer();
+	kContext.iFlatDefyResolutionAngerLength = flatDefyResolutionAngerLength();
+	kContext.iMaxFoodKeptPercent = getMaxFoodKeptPercent();
+	kContext.iHurryCostModifier = getHurryCostModifier(true);
+	kContext.bEmphasizeGreatPeople = AI_isEmphasizeGreatPeople() ? 1 : 0;
+	kContext.bFoodIsProduction = isFoodProduction() ? 1 : 0;
+	kContext.bCanPopRush = kOwner.canPopRush() ? 1 : 0;
+	kContext.bProduction = isProduction() ? 1 : 0;
+	kContext.bNoUnhappiness = isNoUnhappiness() ? 1 : 0;
+	kContext.bHuman = isHuman() ? 1 : 0;
+	kContext.bLowCultureLevel = (getCultureLevel() <= (CultureLevelTypes)1) ? 1 : 0;
+}
+
+
+const CvCityAI::YieldValueContext& CvCityAI::AI_yieldValueContext(YieldValueContext& kLocal)
+{
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample aSamples[4] = {
+		{ "yield value context: kept" }, { "yield value context: worked out in a scope" },
+		{ "yield value context: worked out outside a scope" }, { "yield value context verify: KEPT CONTEXT WAS STALE" } };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("YIELD_VALUE_VERIFY") != 0) ? 1 : 0;
+	}
+#endif
+
+	if (m_iYieldValueContextDepth <= 0)
+	{
+#ifdef BRIDGED_PROFILE
+		bridgedProfileAdd(&aSamples[2], 0);
+#endif
+		AI_calculateYieldValueContext(kLocal);
+		return kLocal;
+	}
+
+	if (!m_bYieldValueContextValid)
+	{
+#ifdef BRIDGED_PROFILE
+		bridgedProfileAdd(&aSamples[1], 0);
+#endif
+		AI_calculateYieldValueContext(m_kYieldValueContext);
+		m_bYieldValueContextValid = true;
+	}
+#ifdef BRIDGED_PROFILE
+	else
+	{
+		bridgedProfileAdd(&aSamples[0], 0);
+		if (iVerify != 0)
+		{
+			AI_calculateYieldValueContext(kLocal);
+			if (memcmp(&kLocal, &m_kYieldValueContext, sizeof(kLocal)) != 0)
+			{
+				bridgedProfileAdd(&aSamples[3], 0);
+			}
+		}
+	}
+#endif
+
+	return m_kYieldValueContext;
+}
+
+
 int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoidGrowth, bool bRemove, bool bIgnoreFood, bool bIgnoreGrowth, bool bIgnoreStarvation, bool bWorkerOptimization)
 {
 	PROFILE_FUNC();
+
+	YieldValueContext kLocalContext;
+	const YieldValueContext& kContext = AI_yieldValueContext(kLocalContext);
 
 	const int iBaseProductionValue = 15;
 	const int iBaseCommerceValue = 7;
@@ -7005,9 +7167,9 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 	int iExtraProductionModifier = 0;
 	int iBaseProductionModifier = 100;
 	
-	bool bEmphasizeFood = AI_isEmphasizeYield(YIELD_FOOD);
-	bool bFoodIsProduction = isFoodProduction();
-	bool bCanPopRush = GET_PLAYER(getOwnerINLINE()).canPopRush();
+	bool bEmphasizeFood = (kContext.abEmphasizeYield[YIELD_FOOD] != 0);
+	bool bFoodIsProduction = (kContext.bFoodIsProduction != 0);
+	bool bCanPopRush = (kContext.bCanPopRush != 0);
 	
 	for (int iJ = 0; iJ < NUM_COMMERCE_TYPES; iJ++)
 	{
@@ -7025,11 +7187,11 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 			// Get yield for city after adding/removing the citizen in question
 			int iOldCityYield = getBaseYieldRate((YieldTypes)iI);
 			int iNewCityYield = (bRemove ? (iOldCityYield - piYields[iI]) : (iOldCityYield + piYields[iI]));
-			int iModifier = getBaseYieldRateModifier((YieldTypes)iI);
+			int iModifier = kContext.aiBaseYieldRateModifier[iI];
 			if (iI == YIELD_PRODUCTION)
 			{
 				iBaseProductionModifier = iModifier;
-				iExtraProductionModifier = getProductionModifier();
+				iExtraProductionModifier = kContext.iProductionModifier;
 				iModifier += iExtraProductionModifier;
 			}
 
@@ -7044,9 +7206,9 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 			
 	for (int iJ = 0; iJ < NUM_COMMERCE_TYPES; iJ++)
 	{
-		int iModifier = getTotalCommerceRateModifier((CommerceTypes)iJ);
+		int iModifier = kContext.aiTotalCommerceRateModifier[iJ];
 				    
-		int iCommerceTimes100 = aiYields[YIELD_COMMERCE] * GET_PLAYER(getOwnerINLINE()).getCommercePercent((CommerceTypes)iJ);
+		int iCommerceTimes100 = aiYields[YIELD_COMMERCE] * kContext.aiCommercePercent[iJ];
 		if (piCommerceYields != NULL)
 		{
 			iCommerceTimes100 += piCommerceYields[iJ] * 100;
@@ -7054,11 +7216,11 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 		aiCommerceYieldsTimes100[iJ] += (iCommerceTimes100 * iModifier) / 100;
 	}
 
-	if (isProductionProcess() && !bWorkerOptimization)
+	if (kContext.bProductionProcess && !bWorkerOptimization)
 	{
 		for (int iJ = 0; iJ < NUM_COMMERCE_TYPES; iJ++)
 		{
-			aiCommerceYieldsTimes100[iJ] += GC.getProcessInfo(getProductionProcess()).getProductionToCommerceModifier(iJ) * aiYields[YIELD_PRODUCTION];
+			aiCommerceYieldsTimes100[iJ] += kContext.aiProcessCommerceModifier[iJ] * aiYields[YIELD_PRODUCTION];
 		}
 
 		aiYields[YIELD_PRODUCTION] = 0;
@@ -7084,21 +7246,21 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 		iValue += (aiYields[YIELD_FOOD] * 1);
 
 		int iFoodPerTurn = (AI_assignCached(ASSIGN_CACHE_FOOD_DIFFERENCE) - ((bRemove) ? aiYields[YIELD_FOOD] : 0));
-		int iFoodLevel = getFood();
-		int iFoodToGrow = growthThreshold();
+		int iFoodLevel = kContext.iFood;
+		int iFoodToGrow = kContext.iGrowthThreshold;
 		int iHealthLevel = AI_assignCached(ASSIGN_CACHE_HEALTH_LEVEL);
-		int iHappinessLevel = (isNoUnhappiness() ? std::max(3, iHealthLevel + 5) : AI_assignCached(ASSIGN_CACHE_HAPPINESS_LEVEL));
-		int iPopulation = getPopulation();
+		int iHappinessLevel = (kContext.bNoUnhappiness ? std::max(3, iHealthLevel + 5) : AI_assignCached(ASSIGN_CACHE_HAPPINESS_LEVEL));
+		int iPopulation = kContext.iPopulation;
 		int	iExtraPopulationThatCanWork = std::min(iPopulation - range(-iHappinessLevel, 0, iPopulation) + std::min(0, extraFreeSpecialists()) , NUM_CITY_PLOTS) - getWorkingPopulation() + ((bRemove) ? 1 : 0);
 		int iConsumtionPerPop = GC.getFOOD_CONSUMPTION_PER_POPULATION();
 
-		int iAdjustedFoodDifference = (getYieldRate(YIELD_FOOD) + std::min(0, iHealthLevel)) - ((iPopulation + std::min(0, iHappinessLevel) - ((bRemove) ? 1 : 0)) * iConsumtionPerPop);
+		int iAdjustedFoodDifference = (((getBaseYieldRate(YIELD_FOOD) * kContext.aiBaseYieldRateModifier[YIELD_FOOD]) / 100) + std::min(0, iHealthLevel)) - ((iPopulation + std::min(0, iHappinessLevel) - ((bRemove) ? 1 : 0)) * iConsumtionPerPop);
 		
 		// if we not human, allow us to starve to half full if avoiding growth
 		if (!bIgnoreStarvation)
 		{
 			int iStarvingAllowance = 0;
-			if (bAvoidGrowth && !isHuman())
+			if (bAvoidGrowth && !kContext.bHuman)
 			{
 				iStarvingAllowance = std::max(0, (iFoodLevel - std::max(1, ((9 * iFoodToGrow) / 10))));
 			}
@@ -7116,7 +7278,7 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 				{
 					// if this is high food, then we want to pick it first, this will allow us to pick some great non-food later
 					int iHighFoodThreshold = std::min(AI_assignCached(ASSIGN_CACHE_BEST_FOOD_YIELD), iConsumtionPerPop + 1);				
-					if (iFoodPerTurn <= (AI_isEmphasizeGreatPeople() ? 0 : -iHighFoodThreshold) && aiYields[YIELD_FOOD] >= iHighFoodThreshold)
+					if (iFoodPerTurn <= (kContext.bEmphasizeGreatPeople ? 0 : -iHighFoodThreshold) && aiYields[YIELD_FOOD] >= iHighFoodThreshold)
 					{
 						// value all the food that will contribute to not starving
 						iValue += 2048 * std::min(aiYields[YIELD_FOOD], -iFoodPerTurn);
@@ -7157,11 +7319,11 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 					{
 						// if we have anger becase no military, do not count it, on the assumption that it will 
 						// be remedied soon, and that we still want to grow
-						if (getMilitaryHappinessUnits() == 0)
+						if (kContext.iMilitaryHappinessUnits == 0)
 						{
-							if (GET_PLAYER(getOwnerINLINE()).getNumCities() > 2)
+							if (kContext.iNumCities > 2)
 							{
-								iHappinessLevel += ((GC.getDefineINT("NO_MILITARY_PERCENT_ANGER") * (iPopulation + 1)) / GC.getPERCENT_ANGER_DIVISOR());
+								iHappinessLevel += ((kContext.iNoMilitaryPercentAnger * (iPopulation + 1)) / GC.getPERCENT_ANGER_DIVISOR());
 							}
 						}
 
@@ -7175,10 +7337,10 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 							int iApproxTurnsToGrow = (iNewFoodPerTurn > 0) ? ((iFoodToGrow - iFoodLevel) / iNewFoodPerTurn) : MAX_INT;
 
 							// do we have hurry anger?
-							int iHurryAngerTimer = getHurryAngerTimer();
+							int iHurryAngerTimer = kContext.iHurryAngerTimer;
 							if (iHurryAngerTimer > 0)
 							{
-								int iTurnsUntilAngerIsReduced = iHurryAngerTimer % flatHurryAngerLength();
+								int iTurnsUntilAngerIsReduced = iHurryAngerTimer % kContext.iFlatHurryAngerLength;
 								
 								// angry population is bad but if we'll recover by the time we grow...
 								if (iTurnsUntilAngerIsReduced <= iApproxTurnsToGrow)
@@ -7188,10 +7350,10 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 							}
 
 							// do we have conscript anger?
-							int iConscriptAngerTimer = getConscriptAngerTimer();
+							int iConscriptAngerTimer = kContext.iConscriptAngerTimer;
 							if (iConscriptAngerTimer > 0)
 							{
-								int iTurnsUntilAngerIsReduced = iConscriptAngerTimer % flatConscriptAngerLength();
+								int iTurnsUntilAngerIsReduced = iConscriptAngerTimer % kContext.iFlatConscriptAngerLength;
 								
 								// angry population is bad but if we'll recover by the time we grow...
 								if (iTurnsUntilAngerIsReduced <= iApproxTurnsToGrow)
@@ -7201,10 +7363,10 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 							}
 
 							// do we have defy resolution anger?
-							int iDefyResolutionAngerTimer = getDefyResolutionAngerTimer();
+							int iDefyResolutionAngerTimer = kContext.iDefyResolutionAngerTimer;
 							if (iDefyResolutionAngerTimer > 0)
 							{
-								int iTurnsUntilAngerIsReduced = iDefyResolutionAngerTimer % flatDefyResolutionAngerLength();
+								int iTurnsUntilAngerIsReduced = iDefyResolutionAngerTimer % kContext.iFlatDefyResolutionAngerLength;
 
 								// angry population is bad but if we'll recover by the time we grow...
 								if (iTurnsUntilAngerIsReduced <= iApproxTurnsToGrow)
@@ -7240,16 +7402,16 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 					{
 						if (!bBarFull)
 						{
-							if (AI_specialYieldMultiplier(YIELD_PRODUCTION) < 50)
+							if (kContext.aiSpecialYieldMultiplier[YIELD_PRODUCTION] < 50)
 							{
 								bFillingBar = true;
 							}
 						}
 					}
 					
-					if (getPopulation() < 3)
+					if (kContext.iPopulation < 3)
 					{
-						iPopToGrow = std::max(iPopToGrow, 3 - getPopulation());
+						iPopToGrow = std::max(iPopToGrow, 3 - kContext.iPopulation);
 						iPopToGrow += 2;
 					}
 
@@ -7280,7 +7442,7 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 						//If we already grow somewhat fast, devalue further food
 						//Remember growth acceleration is not dependent on food eaten per 
 						//pop, 4f twice as fast as 2f twice as fast as 1f...
-						int iHighGrowthThreshold = 2 + std::max(std::max(0, 5 - getPopulation()), (iPopToGrow + 1) / 2);
+						int iHighGrowthThreshold = 2 + std::max(std::max(0, 5 - kContext.iPopulation), (iPopToGrow + 1) / 2);
 						if (bEmphasizeFood)
 						{
 							iHighGrowthThreshold *= 2;
@@ -7295,7 +7457,7 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 				}
 			
 				//very high food override
-				if ((isHuman()) && ((iPopToGrow > 0) || bCanPopRush))
+				if ((kContext.bHuman) && ((iPopToGrow > 0) || bCanPopRush))
 				{
 					//very high food override
 					int iTempValue = std::max(0, 30 * aiYields[YIELD_FOOD] - 15 * iConsumtionPerPop);
@@ -7312,17 +7474,17 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 				if (bCanPopRush && (iHappinessLevel > 0))
 				{
 					iSlaveryValue = 30 * 14 * std::max(0, aiYields[YIELD_FOOD] - ((iHealthLevel < 0) ? 1 : 0));
-					iSlaveryValue /= std::max(10, (growthThreshold() * (100 - getMaxFoodKeptPercent())));
+					iSlaveryValue /= std::max(10, (kContext.iGrowthThreshold * (100 - kContext.iMaxFoodKeptPercent)));
 					
 					iSlaveryValue *= 100;
-					iSlaveryValue /= getHurryCostModifier(true);
+					iSlaveryValue /= kContext.iHurryCostModifier;
 					
 					iSlaveryValue *= iConsumtionPerPop * 2;
 					iSlaveryValue /= iConsumtionPerPop * 2 + std::max(0, iAdjustedFoodDifference);
 				}
 				
 				//Great People Override
-				if ((iExtraPopulationThatCanWork > 1) && AI_isEmphasizeGreatPeople())
+				if ((iExtraPopulationThatCanWork > 1) && kContext.bEmphasizeGreatPeople)
 				{
 					int iAdjust = iConsumtionPerPop;
 					if (iFoodPerTurn == 0)
@@ -7344,7 +7506,7 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 			
 	// value production medium(15)
 	iProductionValue += (adjustedYIELD_PRODUCTION * iBaseProductionValue);
-	if (!isProduction() && !isHuman())
+	if (!kContext.bProduction && !kContext.bHuman)
 	{
 		iProductionValue /= 2;
 	}	
@@ -7354,20 +7516,15 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 	{
 		if (aiCommerceYieldsTimes100[iI] != 0)
 		{
-			int iCommerceWeight = GET_PLAYER(getOwnerINLINE()).AI_commerceWeight((CommerceTypes)iI);
-			if (AI_isEmphasizeCommerce((CommerceTypes)iI))
-			{
-				iCommerceWeight *= 200;
-				iCommerceWeight /= 100;
-			}
+			int iCommerceWeight = kContext.aiCommerceWeight[iI];	// with the commerce emphasis
 			if (iI == COMMERCE_CULTURE)
 			{
-				if (getCultureLevel() <= (CultureLevelTypes) 1)
+				if (kContext.bLowCultureLevel)
 				{
 					iCommerceValue += (15 * aiCommerceYieldsTimes100[iI]) / 100;
 				}
 			}
-			iCommerceValue += (iCommerceWeight * (aiCommerceYieldsTimes100[iI] * iBaseCommerceValue) * GET_PLAYER(getOwnerINLINE()).AI_averageCommerceExchange((CommerceTypes)iI)) / 1000000;
+			iCommerceValue += (iCommerceWeight * (aiCommerceYieldsTimes100[iI] * iBaseCommerceValue) * kContext.aiAverageCommerceExchange[iI]) / 1000000;
 		}
 	}
 /*
@@ -7405,7 +7562,7 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 	{
 		for (int iI = 0; iI < NUM_COMMERCE_TYPES; iI++)
 		{
-			iCommerceValue += ((iCommerceYields[iI] * 40) * GET_PLAYER(getOwnerINLINE()).AI_averageCommerceExchange((CommerceTypes)iI)) / 100;
+			iCommerceValue += ((iCommerceYields[iI] * 40) * kContext.aiAverageCommerceExchange[iI]) / 100;
 		}
 	}
 
@@ -7426,31 +7583,31 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 	//unusually high transient production modifiers.
 	//Other yields don't have transient bonuses in quite the same way.
 
-	if (AI_isEmphasizeYield(YIELD_PRODUCTION))
+	if (kContext.abEmphasizeYield[YIELD_PRODUCTION])
 	{
 		iProductionValue *= 130;
 		iProductionValue /= 100;
 		
-		if (isFoodProduction())
+		if (kContext.bFoodIsProduction)
 		{
 			iFoodValue *= 130;
 			iFoodValue /= 100;
 		}
 		
-		if (!AI_isEmphasizeYield(YIELD_COMMERCE))
+		if (!kContext.abEmphasizeYield[YIELD_COMMERCE])
 		{
 			iCommerceValue *= 60;
 			iCommerceValue /= 100;
 		}
-		if (!AI_isEmphasizeYield(YIELD_FOOD))
+		if (!kContext.abEmphasizeYield[YIELD_FOOD])
 		{
 			iFoodValue *= 75;
 			iFoodValue /= 100;
 		}
 	}
-	if (AI_isEmphasizeYield(YIELD_FOOD))
+	if (kContext.abEmphasizeYield[YIELD_FOOD])
 	{
-		if (!isFoodProduction())
+		if (!kContext.bFoodIsProduction)
 		{
 			iFoodValue *= 130;
 			iFoodValue /= 100;
@@ -7458,19 +7615,19 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 			iSlaveryValue /= 100;
 		}
 	}
-	if (AI_isEmphasizeYield(YIELD_COMMERCE))
+	if (kContext.abEmphasizeYield[YIELD_COMMERCE])
 	{
 		iCommerceValue *= 130;
 		iCommerceValue /= 100;
-		if (!AI_isEmphasizeYield(YIELD_PRODUCTION))
+		if (!kContext.abEmphasizeYield[YIELD_PRODUCTION])
 		{
 			iProductionValue *= 75;
 			iProductionValue /= 100;
 		}
-		if (!AI_isEmphasizeYield(YIELD_FOOD))
+		if (!kContext.abEmphasizeYield[YIELD_FOOD])
 		{
 			//Don't supress twice.
-			if (!AI_isEmphasizeYield(YIELD_PRODUCTION))
+			if (!kContext.abEmphasizeYield[YIELD_PRODUCTION])
 			{
 				iFoodValue *= 80;
 				iFoodValue /= 100;
@@ -7479,9 +7636,9 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 	}
 		
 
-	if (isFoodProduction())
+	if (kContext.bFoodIsProduction)
 	{
-		iProductionValue *= 100 + (bWorkerOptimization ? 0 : AI_specialYieldMultiplier(YIELD_PRODUCTION));
+		iProductionValue *= 100 + (bWorkerOptimization ? 0 : kContext.aiSpecialYieldMultiplier[YIELD_PRODUCTION]);
 		iProductionValue /= 100;		
 	}
 	else
@@ -7490,20 +7647,20 @@ int CvCityAI::AI_yieldValue(short* piYields, short* piCommerceYields, bool bAvoi
 		iProductionValue /= (iBaseProductionModifier + iExtraProductionModifier);
 		
 		iProductionValue += iSlaveryValue;
-		iProductionValue *= (100 + (bWorkerOptimization ? 0 : AI_specialYieldMultiplier(YIELD_PRODUCTION)));
+		iProductionValue *= (100 + (bWorkerOptimization ? 0 : kContext.aiSpecialYieldMultiplier[YIELD_PRODUCTION]));
 		
-		iProductionValue /= GET_PLAYER(getOwnerINLINE()).AI_averageYieldMultiplier(YIELD_PRODUCTION);
+		iProductionValue /= kContext.aiAverageYieldMultiplier[YIELD_PRODUCTION];
 	}
 	
 	iValue += iProductionValue;
 	
 	
-	iCommerceValue *= (100 + (bWorkerOptimization ? 0 : AI_specialYieldMultiplier(YIELD_COMMERCE)));
-	iCommerceValue /= GET_PLAYER(getOwnerINLINE()).AI_averageYieldMultiplier(YIELD_COMMERCE);
+	iCommerceValue *= (100 + (bWorkerOptimization ? 0 : kContext.aiSpecialYieldMultiplier[YIELD_COMMERCE]));
+	iCommerceValue /= kContext.aiAverageYieldMultiplier[YIELD_COMMERCE];
 	iValue += iCommerceValue;
 //	
 	iFoodValue *= 100;
-	iFoodValue /= GET_PLAYER(getOwnerINLINE()).AI_averageYieldMultiplier(YIELD_FOOD);
+	iFoodValue /= kContext.aiAverageYieldMultiplier[YIELD_FOOD];
 	iValue += iFoodValue;
 
 	
@@ -8825,6 +8982,14 @@ int CvCityAI::AI_getPlotMagicValue(CvPlot* pPlot, bool bHealthy, bool bWorkerOpt
 //if healthy is false it assumes bad health conditions.
 int CvCityAI::AI_countGoodTiles(bool bHealthy, bool bUnworkedOnly, int iThreshold, bool bWorkerOptimization)
 {
+	// the city-wide inputs of AI_yieldValue() are kept until this function returns
+	AI_beginYieldValueContext();
+	struct YieldValueContextScope
+	{
+		int& iDepth;
+		~YieldValueContextScope() { iDepth--; }
+	} kYieldValueContextScope = { m_iYieldValueContextDepth };
+
     CvPlot* pLoopPlot;
     int iI;
     int iCount;
@@ -9077,6 +9242,8 @@ int CvCityAI::AI_yieldMultiplier(YieldTypes eYield)
 void CvCityAI::AI_updateSpecialYieldMultiplier()
 {
 	PROFILE_FUNC();
+
+	m_bYieldValueContextValid = false;	// see AI_yieldValueContext()
 	
 	for (int iI = 0; iI < NUM_YIELD_TYPES; iI++)
 	{
@@ -9419,6 +9586,14 @@ void CvCityAI::AI_changeWorkersHave(int iChange)
 //This needs to be serialized for human workers.
 void CvCityAI::AI_updateWorkersNeededHere()
 {
+	// the city-wide inputs of AI_yieldValue() are kept until this function returns
+	AI_beginYieldValueContext();
+	struct YieldValueContextScope
+	{
+		int& iDepth;
+		~YieldValueContextScope() { iDepth--; }
+	} kYieldValueContextScope = { m_iYieldValueContextDepth };
+
 	CvPlot* pLoopPlot;
 	
 	short aiYields[NUM_YIELD_TYPES];

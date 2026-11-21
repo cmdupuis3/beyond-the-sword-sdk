@@ -143,6 +143,51 @@ protected:
 
 	int AI_assignCached(AssignCacheTypes eType);
 
+	// What AI_yieldValue() reads about the city and its owner that does not change when
+	// a plot is worked or a specialist assigned: see AI_yieldValueContext()
+	struct YieldValueContext
+	{
+		int aiBaseYieldRateModifier[NUM_YIELD_TYPES];
+		int iProductionModifier;
+		int aiTotalCommerceRateModifier[NUM_COMMERCE_TYPES];
+		int aiCommercePercent[NUM_COMMERCE_TYPES];
+		int aiProcessCommerceModifier[NUM_COMMERCE_TYPES];	// 0 unless bProductionProcess
+		int aiCommerceWeight[NUM_COMMERCE_TYPES];			// with the city's commerce emphasis
+		int aiAverageCommerceExchange[NUM_COMMERCE_TYPES];
+		int aiAverageYieldMultiplier[NUM_YIELD_TYPES];
+		int aiSpecialYieldMultiplier[NUM_YIELD_TYPES];
+		int iFood;
+		int iGrowthThreshold;
+		int iPopulation;
+		int iMilitaryHappinessUnits;
+		int iNumCities;
+		int iNoMilitaryPercentAnger;
+		int iHurryAngerTimer;
+		int iFlatHurryAngerLength;
+		int iConscriptAngerTimer;
+		int iFlatConscriptAngerLength;
+		int iDefyResolutionAngerTimer;
+		int iFlatDefyResolutionAngerLength;
+		int iMaxFoodKeptPercent;
+		int iHurryCostModifier;
+		int abEmphasizeYield[NUM_YIELD_TYPES];
+		int bEmphasizeGreatPeople;
+		int bFoodIsProduction;
+		int bCanPopRush;
+		int bProductionProcess;
+		int bProduction;
+		int bNoUnhappiness;
+		int bHuman;
+		int bLowCultureLevel;
+	};
+	int m_iYieldValueContextDepth;
+	bool m_bYieldValueContextValid;
+	YieldValueContext m_kYieldValueContext;
+
+	void AI_calculateYieldValueContext(YieldValueContext& kContext);
+	const YieldValueContext& AI_yieldValueContext(YieldValueContext& kLocal);
+	void AI_beginYieldValueContext();
+
 	// The values AI_buildingValueThreshold() works from that do not depend on the building:
 	// see AI_buildingValueContext()
 	struct BuildingValueContext
