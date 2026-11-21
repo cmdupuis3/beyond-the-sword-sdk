@@ -450,32 +450,53 @@ void CvUnitAI::AI_upgrade()
 	FAssertMsg(!isHuman(), "isHuman did not return false as expected");
 	FAssertMsg(AI_getUnitAIType() != NO_UNITAI, "AI_getUnitAIType() is not expected to be equal with NO_UNITAI");
 
+	// canUpgrade() is false for every unit type unless this unit is ready to upgrade, and
+	// false for any type off its upgrade tree. Settle both before scoring: this used to
+	// call AI_unitValue() on every unit type in the game, twice, for every unit every turn,
+	// and canUpgrade() then refused nearly all of them. The types that remain are visited
+	// in the same order, so the same random numbers are drawn and the same upgrades chosen.
+	// Types off the tree no longer reach upgradePrice() and its Python price override.
+	if (!isReadyForUpgrade())
+	{
+		return;
+	}
+
+	std::vector<UnitTypes> aeUpgradeUnits;
+	getUpgradeUnitTypes(aeUpgradeUnits);
+
+	if (aeUpgradeUnits.empty())
+	{
+		return;
+	}
+
 	CvPlayerAI& kPlayer = GET_PLAYER(getOwnerINLINE());
 	UnitAITypes eUnitAI = AI_getUnitAIType();
 	CvArea* pArea = area();
 
 	int iCurrentValue = kPlayer.AI_unitValue(getUnitType(), eUnitAI, pArea);
-	
+
 	for (int iPass = 0; iPass < 2; iPass++)
 	{
 		int iBestValue = 0;
 		UnitTypes eBestUnit = NO_UNIT;
 
-		for (int iI = 0; iI < GC.getNumUnitInfos(); iI++)
+		for (size_t iI = 0; iI < aeUpgradeUnits.size(); iI++)
 		{
-			if ((iPass > 0) || GC.getUnitInfo((UnitTypes)iI).getUnitAIType(AI_getUnitAIType()))
+			const UnitTypes eLoopUnit = aeUpgradeUnits[iI];
+
+			if ((iPass > 0) || GC.getUnitInfo(eLoopUnit).getUnitAIType(AI_getUnitAIType()))
 			{
-				int iNewValue = kPlayer.AI_unitValue(((UnitTypes)iI), eUnitAI, pArea);
+				int iNewValue = kPlayer.AI_unitValue(eLoopUnit, eUnitAI, pArea);
 				if ((iPass == 0 || iNewValue > 0) && iNewValue > iCurrentValue)
 				{
-					if (canUpgrade((UnitTypes)iI))
+					if (canUpgrade(eLoopUnit))
 					{
 						int iValue = (1 + GC.getGameINLINE().getSorenRandNum(10000, "AI Upgrade"));
 
 						if (iValue > iBestValue)
 						{
 							iBestValue = iValue;
-							eBestUnit = ((UnitTypes)iI);
+							eBestUnit = eLoopUnit;
 						}
 					}
 				}

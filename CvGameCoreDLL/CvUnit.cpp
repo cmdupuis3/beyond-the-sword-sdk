@@ -6721,6 +6721,66 @@ bool CvUnit::upgradeAvailable(UnitTypes eFromUnit, UnitClassTypes eToUnitClass, 
 }
 
 
+//
+// Fills aeUnits, in increasing unit type order, with the unit types this unit's upgrade
+// tree leads to: the type must be its class's unit for this civilization, and
+// upgradeAvailable(getUnitType(), that class) must hold. These are the two tests
+// getUpgradeCity() makes before it looks at cargo or cities, so canUpgrade() is false for
+// every other type. Gold, position and cities are not considered here.
+//
+// One walk over the tree replaces an upgradeAvailable() recursion per unit type.
+//
+void CvUnit::getUpgradeUnitTypes(std::vector<UnitTypes>& aeUnits) const
+{
+	aeUnits.clear();
+
+	const int iNumUnitClassInfos = GC.getNumUnitClassInfos();
+	const int iNumUnitInfos = GC.getNumUnitInfos();
+	const CvCivilizationInfo& kCivilization = GC.getCivilizationInfo(getCivilizationType());
+
+	std::vector<bool> abClassReachable(iNumUnitClassInfos, false);
+	std::vector<bool> abExpanded(iNumUnitInfos, false);
+	std::vector<UnitTypes> aeOpen;
+
+	abExpanded[getUnitType()] = true;
+	aeOpen.push_back(getUnitType());
+
+	while (!aeOpen.empty())
+	{
+		const CvUnitInfo& kFromUnit = GC.getUnitInfo(aeOpen.back());
+		aeOpen.pop_back();
+
+		for (int iI = 0; iI < iNumUnitClassInfos; iI++)
+		{
+			if (kFromUnit.getUpgradeUnitClass(iI))
+			{
+				// upgradeAvailable() accepts a class as soon as some unit on the tree
+				// upgrades to it, whether or not this civilization has a unit of that class
+				abClassReachable[iI] = true;
+
+				const UnitTypes eLoopUnit = ((UnitTypes)(kCivilization.getCivilizationUnits(iI)));
+
+				if (eLoopUnit != NO_UNIT && !abExpanded[eLoopUnit])
+				{
+					abExpanded[eLoopUnit] = true;
+					aeOpen.push_back(eLoopUnit);
+				}
+			}
+		}
+	}
+
+	for (int iI = 0; iI < iNumUnitInfos; iI++)
+	{
+		const int iUnitClass = GC.getUnitInfo((UnitTypes)iI).getUnitClassType();
+
+		if (abClassReachable[iUnitClass] && kCivilization.getCivilizationUnits(iUnitClass) == iI)
+		{
+			aeUnits.push_back((UnitTypes)iI);
+		}
+	}
+}
+
+
 bool CvUnit::canUpgrade(UnitTypes eUnit, bool bTestVisible) const
 {
 	if (eUnit == NO_UNIT)
