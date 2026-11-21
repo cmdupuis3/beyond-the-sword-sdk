@@ -4592,7 +4592,13 @@ void CvPlot::setOwner(PlayerTypes eNewValue, bool bCheckUnits, bool bUpdatePlotG
 				}
 			}
 
+			// keep the map's team index: see CvMap.cpp
+			GC.getMapINLINE().changeBlockOwnedPlots(getX_INLINE(), getY_INLINE(), getTeam(), -1);
+
 			m_eOwner = eNewValue;
+
+			GC.getMapINLINE().changeBlockOwnedPlots(getX_INLINE(), getY_INLINE(), getTeam(), 1);
+			GC.getMapINLINE().updatePlotTeams(this);
 
 			setWorkingCityOverride(NULL);
 			updateWorkingCity();
@@ -8071,6 +8077,16 @@ void CvPlot::addUnit(CvUnit* pUnit, bool bUpdate)
 		m_units.insertAtEnd(pUnit->getIDInfo());
 	}
 
+	// keep the map's team index: see CvMap.cpp
+	if (pUnit->canAttack())
+	{
+		GC.getMapINLINE().changeBlockUnits(getX_INLINE(), getY_INLINE(), pUnit->getTeam(), 1);
+		if (pUnit->getUnitInfo().isAlwaysHostile())
+		{
+			GC.getMapINLINE().changeBlockUnits(getX_INLINE(), getY_INLINE(), BARBARIAN_TEAM, 1);
+		}
+	}
+	GC.getMapINLINE().updatePlotTeams(this);
 	if (bUpdate)
 	{
 		updateCenterUnit();
@@ -8092,6 +8108,16 @@ void CvPlot::removeUnit(CvUnit* pUnit, bool bUpdate)
 		{
 			FAssertMsg(::getUnit(pUnitNode->m_data)->at(getX_INLINE(), getY_INLINE()), "The current unit instance is expected to be at getX_INLINE and getY_INLINE");
 			m_units.deleteNode(pUnitNode);
+			// keep the map's team index: see CvMap.cpp
+			if (pUnit->canAttack())
+			{
+				GC.getMapINLINE().changeBlockUnits(getX_INLINE(), getY_INLINE(), pUnit->getTeam(), -1);
+				if (pUnit->getUnitInfo().isAlwaysHostile())
+				{
+					GC.getMapINLINE().changeBlockUnits(getX_INLINE(), getY_INLINE(), BARBARIAN_TEAM, -1);
+				}
+			}
+			GC.getMapINLINE().updatePlotTeams(this);
 			break;
 		}
 		else

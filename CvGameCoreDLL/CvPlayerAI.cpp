@@ -3151,6 +3151,48 @@ int CvPlayerAI::AI_getPlotDanger(CvPlot* pPlot, int iRange, bool bTestMoves) con
 	{
 		iRange = DANGER_RANGE;
 	}
+	// Most calls are nowhere near anything hostile, and the map's team index can say so
+	// without walking the unit lists. The count below is of units that are enemies and can
+	// attack, plus, for the AI outside its cities, the border danger: enemy territory one
+	// plot away, or two with a route. With neither in range the answer is 0.
+	unsigned long long uiEnemyTeams = 0;
+
+	for (int iTeam = 0; iTeam < MAX_TEAMS; iTeam++)
+	{
+		if (atWar((TeamTypes)iTeam, getTeam()))
+		{
+			uiEnemyTeams |= (1ULL << iTeam);
+		}
+	}
+
+	bool bNothingNear = !GC.getMapINLINE().isTeamUnitNear(pPlot->getX_INLINE(), pPlot->getY_INLINE(), iRange, uiEnemyTeams);
+
+	if (bNothingNear && !isHuman() && !pPlot->isCity())
+	{
+		bNothingNear = !GC.getMapINLINE().isTeamTerritoryNear(pPlot->getX_INLINE(), pPlot->getY_INLINE(), std::min(iRange, 2), uiEnemyTeams);
+	}
+
+#ifdef BRIDGED_PROFILE
+	// DANGER_VERIFY: a global define for profile builds. Set, the scan runs anyway and
+	// the calls where it finds danger that the index ruled out are counted.
+	static BridgedProfileSample aDangerSamples[3] = {
+		{ "danger: nothing hostile in range" }, { "danger: scanned" }, { "danger verify: RULED OUT BUT DANGER FOUND" } };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("DANGER_VERIFY") != 0) ? 1 : 0;
+	}
+	bridgedProfileAdd(&aDangerSamples[bNothingNear ? 0 : 1], 0);
+	if (bNothingNear && (iVerify == 0))
+	{
+		return 0;
+	}
+#else
+	if (bNothingNear)
+	{
+		return 0;
+	}
+#endif
 
 	for (iDX = -(iRange); iDX <= iRange; iDX++)
 	{
@@ -3222,6 +3264,12 @@ int CvPlayerAI::AI_getPlotDanger(CvPlot* pPlot, int iRange, bool bTestMoves) con
 	    }
 	}
 
+#ifdef BRIDGED_PROFILE
+	if (bNothingNear && (iCount != 0))
+	{
+		bridgedProfileAdd(&aDangerSamples[2], 0);
+	}
+#endif
 	return iCount;
 }
 

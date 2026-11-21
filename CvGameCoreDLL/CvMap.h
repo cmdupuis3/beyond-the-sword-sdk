@@ -267,6 +267,13 @@ public:
 
 	void rebuild(int iGridW, int iGridH, int iTopLatitude, int iBottomLatitude, bool bWrapX, bool bWrapY, WorldSizeTypes eWorldSize, ClimateTypes eClimate, SeaLevelTypes eSeaLevel, int iNumCustomMapOptions, CustomMapOptionTypes * eCustomMapOptions);		// Exposed to Python
 
+	// Which teams have attacking units or territory where: see the team index in CvMap.cpp
+	bool isTeamUnitNear(int iX, int iY, int iRange, unsigned long long uiTeams) const;
+	bool isTeamTerritoryNear(int iX, int iY, int iRange, unsigned long long uiTeams) const;
+	void changeBlockUnits(int iX, int iY, TeamTypes eTeam, int iChange);
+	void changeBlockOwnedPlots(int iX, int iY, TeamTypes eTeam, int iChange);
+	void updatePlotTeams(const CvPlot* pPlot);
+	void setTeamIndexDirty();
 protected:
 
 	int m_iGridWidth;
@@ -286,6 +293,20 @@ protected:
 	CvPlot* m_pMapPlots;
 
 	FFreeListTrashArray<CvArea> m_areas;
+	enum { TEAM_BLOCK_SHIFT = 3 };										// blocks of 8 x 8 plots
+	mutable bool m_bTeamIndexDirty;
+	mutable int m_iTeamBlocksWide;
+	mutable std::vector<unsigned short> m_aiBlockTeamUnits;				// per block and team: attacking units there
+	mutable std::vector<unsigned short> m_aiBlockTeamOwnedPlots;		// per block and team: plots owned there
+	mutable std::vector<unsigned long long> m_aiBlockUnitTeams;			// per block: a bit for each team with such a unit
+	mutable std::vector<unsigned long long> m_aiBlockOwnerTeams;		// per block: a bit for each team owning a plot
+	mutable std::vector<unsigned long long> m_aiPlotUnitTeams;			// per plot: as for the blocks
+	mutable std::vector<unsigned long long> m_aiPlotOwnerTeams;
+
+	void rebuildTeamIndex() const;
+	unsigned long long calculatePlotUnitTeams(const CvPlot* pPlot) const;
+	void changeBlockTeamCount(std::vector<unsigned short>& aiCounts, std::vector<unsigned long long>& aiBlockTeams, int iX, int iY, TeamTypes eTeam, int iChange);
+	bool isTeamNear(const std::vector<unsigned long long>& aiBlockTeams, const std::vector<unsigned long long>& aiPlotTeams, int iX, int iY, int iRange, unsigned long long uiTeams) const;
 
 	void calculateAreas();
 

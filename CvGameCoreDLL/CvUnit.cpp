@@ -7470,7 +7470,15 @@ bool CvUnit::isDead() const
 
 void CvUnit::setBaseCombatStr(int iCombat)
 {
+	const bool bCouldAttack = canAttack();
+
 	m_iBaseCombat = iCombat;
+
+	if (bCouldAttack != canAttack())
+	{
+		// the map's team index counts only units that can attack: see CvMap.cpp
+		GC.getMapINLINE().setTeamIndexDirty();
+	}
 }
 
 int CvUnit::baseCombatStr() const

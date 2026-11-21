@@ -10159,6 +10159,8 @@ void CvPlayer::updateTeamType()
 	{
 		m_eTeamType = GC.getInitCore().getTeam(getID());
 	}
+	// this player's units and plots may now count for another team: see the team index in CvMap.cpp
+	GC.getMapINLINE().setTeamIndexDirty();
 }
 
 void CvPlayer::setTeam(TeamTypes eTeam)

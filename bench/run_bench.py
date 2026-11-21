@@ -56,7 +56,11 @@ def game_running():
 
 
 def kill_game():
+    """Stop the game and wait until it has gone, so the next run does not find it still closing."""
     subprocess.run(['taskkill', '/F', '/IM', EXE], capture_output=True, text=True)
+    deadline = time.monotonic() + 60
+    while game_running() and time.monotonic() < deadline:
+        time.sleep(1)
 
 
 def deploy_mod(dll, label, turns, log, defines):
