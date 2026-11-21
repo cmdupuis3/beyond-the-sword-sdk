@@ -51,6 +51,7 @@ public:
 	void AI_updateFoundValues(bool bStartingLoc = false) const;
 	void AI_invalidateFoundValueCache() const;
 	void AI_changeMissionTargetGroups(const CvPlot* pPlot, int iChange);
+	bool AI_isMissionTargetNear(const CvPlot* pPlot, int iRange) const;
 	void AI_updateFoundValuesAhead() const;
 	bool AI_isFoundValueKept() const;
 	void AI_updateAreaTargets();
@@ -426,8 +427,6 @@ protected:
 	// see AI_plotTargetMissionAIs(); not saved
 	mutable std::vector<unsigned short> m_aiMissionTargetGroups;	// per plot: the groups whose mission plot it is
 	mutable bool m_bMissionTargetsDirty;
-
-	bool AI_isMissionTargetNear(const CvPlot* pPlot, int iRange) const;
 
 	void AI_updateFoundValuesAll() const;
 	void AI_refreshFoundValues(bool bAhead) const;

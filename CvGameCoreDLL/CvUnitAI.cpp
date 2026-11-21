@@ -1255,8 +1255,181 @@ void CvUnitAI::AI_settleMove()
 }
 
 
+//
+// Two rules that make a player's workers act as a team. Each worker still decides for itself,
+// in the stock order; the rules only look at what the player's other workers are doing.
+// They do not apply to a human player's automated workers, and the WORKER_STOCK_CHOICE
+// global define turns them off.
+//
+// One build to a plot (AI_agreedBuild()). The stock code only counts the workers heading for
+// a plot, not what they mean to build there, and progress is kept per build, so two workers
+// could each work at a different improvement on the same plot, one of them for nothing. A
+// worker about to start an improvement where another worker of the player is on, or heading
+// for, a different one takes that one over. The exception is a bonus: if this worker's
+// improvement makes the plot's bonus available and the other's does not, the other worker's
+// orders are cancelled instead and it decides again.
+//
+// Far jobs to the nearer worker (AI_isIdleWorkerCloser()). Workers are asked in unit order,
+// so a job often went to whichever worker was asked first, however far away, while one
+// standing near it was sent somewhere else. A worker now leaves a job more than a turn away
+// if another worker of the player in the same area has yet to decide this turn and is less
+// than half as far from it. The job is still there for that worker to take; if it does not,
+// it is taken next turn.
+//
+static bool workerTeamRules()
+{
+	static int iOff = -1;
+
+	if (iOff == -1)
+	{
+		iOff = ((GC.getDefineINT("WORKER_STOCK_CHOICE") != 0) ? 1 : 0);
+	}
+
+	return (iOff == 0);
+}
+
+// where the player's other workers stand that have yet to decide this turn, for the worker now deciding
+static bool s_bIdleWorkersKnown = false;
+static std::vector<const CvPlot*> s_apIdleWorkerPlots;
+
+#ifdef BRIDGED_PROFILE
+static BridgedProfileSample s_aWorkerRuleSamples[3] = {
+	{ "worker rule: took over the improvement another worker is on" }, { "worker rule: bonus improvement cancelled another worker's" },
+	{ "worker rule: far job left to a nearer idle worker" } };
+#endif
+
+
+BuildTypes CvUnitAI::AI_agreedBuild(CvPlot* pPlot, BuildTypes eBuild)
+{
+	if (!workerTeamRules() || (eBuild == NO_BUILD) || isHuman())
+	{
+		return eBuild;
+	}
+
+	const ImprovementTypes eImprovement = (ImprovementTypes)GC.getBuildInfo(eBuild).getImprovement();
+
+	if (eImprovement == NO_IMPROVEMENT)
+	{
+		return eBuild;	// a route or a clearing does not stand in the way of anything
+	}
+
+	CvPlayerAI& kOwner = GET_PLAYER(getOwnerINLINE());
+
+	if (!kOwner.AI_isMissionTargetNear(pPlot, 0))
+	{
+		return eBuild;	// nobody else is heading for the plot
+	}
+
+	const BonusTypes eBonus = pPlot->getNonObsoleteBonusType(getTeam());
+	const bool bConnectsBonus = ((eBonus != NO_BONUS) && GC.getImprovementInfo(eImprovement).isImprovementBonusTrade(eBonus));
+
+	int iLoop;
+	for (CvSelectionGroup* pLoopGroup = kOwner.firstSelectionGroup(&iLoop); pLoopGroup != NULL; pLoopGroup = kOwner.nextSelectionGroup(&iLoop))
+	{
+		if ((pLoopGroup == getGroup()) || (pLoopGroup->AI_getMissionAIType() != MISSIONAI_BUILD) || (pLoopGroup->AI_getMissionAIPlot() != pPlot))
+		{
+			continue;
+		}
+
+		BuildTypes eOtherBuild = NO_BUILD;
+
+		for (CLLNode<MissionData>* pMissionNode = pLoopGroup->headMissionQueueNode(); pMissionNode != NULL; pMissionNode = pLoopGroup->nextMissionQueueNode(pMissionNode))
+		{
+			if (pMissionNode->m_data.eMissionType == MISSION_BUILD)
+			{
+				const BuildTypes eQueuedBuild = (BuildTypes)pMissionNode->m_data.iData1;
+				const ImprovementTypes eQueuedImprovement = (ImprovementTypes)GC.getBuildInfo(eQueuedBuild).getImprovement();
+
+				if ((eQueuedImprovement != NO_IMPROVEMENT) && (eQueuedImprovement != eImprovement))
+				{
+					eOtherBuild = eQueuedBuild;
+					break;
+				}
+			}
+		}
+
+		if (eOtherBuild == NO_BUILD)
+		{
+			continue;
+		}
+
+		const ImprovementTypes eOtherImprovement = (ImprovementTypes)GC.getBuildInfo(eOtherBuild).getImprovement();
+
+		if (bConnectsBonus && !GC.getImprovementInfo(eOtherImprovement).isImprovementBonusTrade(eBonus))
+		{
+			// the bonus comes first: the other worker gives up and decides again
+			pLoopGroup->clearMissionQueue();
+			pLoopGroup->AI_setMissionAI(NO_MISSIONAI, NULL, NULL);
+#ifdef BRIDGED_PROFILE
+			bridgedProfileAdd(&s_aWorkerRuleSamples[1], 0);
+#endif
+		}
+		else if (canBuild(pPlot, eOtherBuild))
+		{
+#ifdef BRIDGED_PROFILE
+			bridgedProfileAdd(&s_aWorkerRuleSamples[0], 0);
+#endif
+			return eOtherBuild;
+		}
+	}
+
+	return eBuild;
+}
+
+
+bool CvUnitAI::AI_isIdleWorkerCloser(const CvPlot* pPlot, int iPathTurns)
+{
+	if (!workerTeamRules() || isHuman() || (iPathTurns <= 1))
+	{
+		return false;
+	}
+
+	if (!s_bIdleWorkersKnown)
+	{
+		CvPlayerAI& kOwner = GET_PLAYER(getOwnerINLINE());
+
+		s_apIdleWorkerPlots.clear();
+
+		int iLoop;
+		for (CvSelectionGroup* pLoopGroup = kOwner.firstSelectionGroup(&iLoop); pLoopGroup != NULL; pLoopGroup = kOwner.nextSelectionGroup(&iLoop))
+		{
+			if (pLoopGroup != getGroup())
+			{
+				const CvUnit* pHeadUnit = pLoopGroup->getHeadUnit();
+
+				// a group that is ready to move has not had its turn yet: one that has decided has orders or has passed
+				if ((pHeadUnit != NULL) && (pHeadUnit->AI_getUnitAIType() == UNITAI_WORKER) && (pHeadUnit->getDomainType() == DOMAIN_LAND)
+					&& (pHeadUnit->area() == area()) && pLoopGroup->readyToMove())
+				{
+					s_apIdleWorkerPlots.push_back(pHeadUnit->plot());
+				}
+			}
+		}
+
+		s_bIdleWorkersKnown = true;
+	}
+
+	const int iDistance = stepDistance(getX_INLINE(), getY_INLINE(), pPlot->getX_INLINE(), pPlot->getY_INLINE());
+
+	for (size_t i = 0; i < s_apIdleWorkerPlots.size(); i++)
+	{
+		if ((stepDistance(s_apIdleWorkerPlots[i]->getX_INLINE(), s_apIdleWorkerPlots[i]->getY_INLINE(), pPlot->getX_INLINE(), pPlot->getY_INLINE()) * 2) < iDistance)
+		{
+#ifdef BRIDGED_PROFILE
+			bridgedProfileAdd(&s_aWorkerRuleSamples[2], 0);
+#endif
+			return true;
+		}
+	}
+
+	return false;
+}
+
+
 void CvUnitAI::AI_workerMove()
 {
+	s_bIdleWorkersKnown = false;	// see AI_isIdleWorkerCloser()
+
 	PROFILE_FUNC();
 	
 	CvCity* pCity;
@@ -13167,6 +13340,7 @@ bool CvUnitAI::AI_improveCity(CvCity* pCity)
 		eBestBuild = AI_betterPlotBuild(pBestPlot, eBestBuild);
 
 		getGroup()->pushMission(eMission, pBestPlot->getX_INLINE(), pBestPlot->getY_INLINE(), 0, false, false, MISSIONAI_BUILD, pBestPlot);
+		eBestBuild = AI_agreedBuild(pBestPlot, eBestBuild);
 		getGroup()->pushMission(MISSION_BUILD, eBestBuild, -1, 0, (getGroup()->getLengthMissionQueue() > 0), false, MISSIONAI_BUILD, pBestPlot);
 
 		return true;
@@ -13311,6 +13485,7 @@ bool CvUnitAI::AI_improveLocalPlot(int iRange, CvCity* pIgnoreCity)
 		eBestBuild = AI_betterPlotBuild(pBestPlot, eBestBuild);
 
 		getGroup()->pushMission(eMission, pBestPlot->getX_INLINE(), pBestPlot->getY_INLINE(), 0, false, false, MISSIONAI_BUILD, pBestPlot);
+		eBestBuild = AI_agreedBuild(pBestPlot, eBestBuild);
 		getGroup()->pushMission(MISSION_BUILD, eBestBuild, -1, 0, (getGroup()->getLengthMissionQueue() > 0), false, MISSIONAI_BUILD, pBestPlot);
 		return true;
 	}
@@ -13367,7 +13542,7 @@ bool CvUnitAI::AI_nextCityToImprove(CvCity* pCity)
 					generatePath(pPlot, 0, true, &iPathTurns);
 					iValue /= (iPathTurns + 1);
 
-					if (iValue > iBestValue)
+					if ((iValue > iBestValue) && !AI_isIdleWorkerCloser(pPlot, iPathTurns))
 					{
 						iBestValue = iValue;
 						eBestBuild = eBuild;
@@ -13397,6 +13572,7 @@ bool CvUnitAI::AI_nextCityToImprove(CvCity* pCity)
 		eBestBuild = AI_betterPlotBuild(pBestPlot, eBestBuild);
 
 		getGroup()->pushMission(MISSION_ROUTE_TO, pBestPlot->getX_INLINE(), pBestPlot->getY_INLINE(), 0, false, false, MISSIONAI_BUILD, pBestPlot);
+		eBestBuild = AI_agreedBuild(pBestPlot, eBestBuild);
 		getGroup()->pushMission(MISSION_BUILD, eBestBuild, -1, 0, (getGroup()->getLengthMissionQueue() > 0), false, MISSIONAI_BUILD, pBestPlot);
 		return true;
 	}
@@ -13570,7 +13746,7 @@ bool CvUnitAI::AI_irrigateTerritory()
 
 														iValue /= (iPathTurns + 1);
 
-														if (iValue > iBestValue)
+														if ((iValue > iBestValue) && !AI_isIdleWorkerCloser(pLoopPlot, iPathTurns))
 														{
 															iBestValue = iValue;
 															eBestBuild = eBestTempBuild;
@@ -13596,6 +13772,7 @@ bool CvUnitAI::AI_irrigateTerritory()
 		FAssertMsg(eBestBuild < GC.getNumBuildInfos(), "BestBuild is assigned a corrupt value");
 
 		getGroup()->pushMission(MISSION_ROUTE_TO, pBestPlot->getX_INLINE(), pBestPlot->getY_INLINE(), 0, false, false, MISSIONAI_BUILD, pBestPlot);
+		eBestBuild = AI_agreedBuild(pBestPlot, eBestBuild);
 		getGroup()->pushMission(MISSION_BUILD, eBestBuild, -1, 0, (getGroup()->getLengthMissionQueue() > 0), false, MISSIONAI_BUILD, pBestPlot);
 
 		return true;
@@ -13688,7 +13865,7 @@ bool CvUnitAI::AI_fortTerritory(bool bCanal, bool bAirbase)
 											iValue *= 1000;
 											iValue /= (iPathTurns + 1);
 
-											if (iValue > iBestValue)
+											if ((iValue > iBestValue) && !AI_isIdleWorkerCloser(pLoopPlot, iPathTurns))
 											{
 												iBestValue = iValue;
 												eBestBuild = eBestTempBuild;
@@ -13711,6 +13888,7 @@ bool CvUnitAI::AI_fortTerritory(bool bCanal, bool bAirbase)
 		FAssertMsg(eBestBuild < GC.getNumBuildInfos(), "BestBuild is assigned a corrupt value");
 
 		getGroup()->pushMission(MISSION_ROUTE_TO, pBestPlot->getX_INLINE(), pBestPlot->getY_INLINE(), 0, false, false, MISSIONAI_BUILD, pBestPlot);
+		eBestBuild = AI_agreedBuild(pBestPlot, eBestBuild);
 		getGroup()->pushMission(MISSION_BUILD, eBestBuild, -1, 0, (getGroup()->getLengthMissionQueue() > 0), false, MISSIONAI_BUILD, pBestPlot);
 
 		return true;
@@ -13866,7 +14044,8 @@ bool CvUnitAI::AI_improveBonus(int iMinValue, CvPlot** ppBestPlot, BuildTypes* p
 								}
 								
 								if ((GET_PLAYER(getOwnerINLINE()).AI_plotTargetMissionAIs(pLoopPlot, MISSIONAI_BUILD, getGroup()) < iMaxWorkers)
-									&& (!bDoImprove || (pLoopPlot->getBuildTurnsLeft(eBestTempBuild, 0, 0) > (iPathTurns * 2 - 1))))
+									&& (!bDoImprove || (pLoopPlot->getBuildTurnsLeft(eBestTempBuild, 0, 0) > (iPathTurns * 2 - 1)))
+									&& !AI_isIdleWorkerCloser(pLoopPlot, iPathTurns))
 								{
 									if (bDoImprove)
 									{
@@ -13959,6 +14138,7 @@ bool CvUnitAI::AI_improveBonus(int iMinValue, CvPlot** ppBestPlot, BuildTypes* p
 
 			eBestBuild = AI_betterPlotBuild(pBestPlot, eBestBuild);
 			getGroup()->pushMission(eBestMission, pBestPlot->getX_INLINE(), pBestPlot->getY_INLINE(), 0, false, false, MISSIONAI_BUILD, pBestPlot);
+			eBestBuild = AI_agreedBuild(pBestPlot, eBestBuild);
 			getGroup()->pushMission(MISSION_BUILD, eBestBuild, -1, 0, (getGroup()->getLengthMissionQueue() > 0), false, MISSIONAI_BUILD, pBestPlot);
 
 			return true;
@@ -13999,6 +14179,7 @@ bool CvUnitAI::AI_improvePlot(CvPlot* pPlot, BuildTypes eBuild)
 		{
 			getGroup()->pushMission(MISSION_MOVE_TO, pPlot->getX_INLINE(), pPlot->getY_INLINE(), 0, false, false, MISSIONAI_BUILD, pPlot);
 		}
+		eBuild = AI_agreedBuild(pPlot, eBuild);
 		getGroup()->pushMission(MISSION_BUILD, eBuild, -1, 0, (getGroup()->getLengthMissionQueue() > 0), false, MISSIONAI_BUILD, pPlot);
 
 		return true;
@@ -14363,7 +14544,7 @@ bool CvUnitAI::AI_routeTerritory(bool bImprovementOnly)
 
 										iValue /= (iPathTurns + 1);
 
-										if (iValue > iBestValue)
+										if ((iValue > iBestValue) && !AI_isIdleWorkerCloser(pLoopPlot, iPathTurns))
 										{
 											iBestValue = iValue;
 											pBestPlot = pLoopPlot;

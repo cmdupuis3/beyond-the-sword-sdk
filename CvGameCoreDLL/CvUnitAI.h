@@ -230,6 +230,8 @@ protected:
 	bool AI_solveBlockageProblem(CvPlot* pDestPlot, bool bDeclareWar);
 	
 	int AI_calculatePlotWorkersNeeded(CvPlot* pPlot, BuildTypes eBuild);
+	BuildTypes AI_agreedBuild(CvPlot* pPlot, BuildTypes eBuild);
+	bool AI_isIdleWorkerCloser(const CvPlot* pPlot, int iPathTurns);
 
 	int AI_getEspionageTargetValue(CvPlot* pPlot, int iMaxPath);
 

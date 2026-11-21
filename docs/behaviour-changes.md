@@ -130,3 +130,49 @@ take, which an all-AI game otherwise never enters: the seeded standard-map game 
 stock DLL's state hash on all 151 turns.
 
 Not checked: a game played by a human, and multiplayer.
+
+## A player's workers act as a team
+
+### What changed
+
+Each AI worker still decides for itself, in the stock order of things to try. Two rules now
+look at what the player's other workers are doing (`CvUnitAI::AI_agreedBuild()` and
+`AI_isIdleWorkerCloser()` in `CvUnitAI.cpp`). They do not apply to a human player's automated
+workers.
+
+- One build to a plot. The stock code counts the workers heading for a plot but not what they
+  mean to build there, and progress is kept per build, so two workers could each work at a
+  different improvement on the same plot. A worker about to start an improvement where
+  another worker of the player is on, or heading for, a different one now takes that one
+  over. If this worker's improvement makes the plot's bonus available and the other's does
+  not, the other worker's orders are cancelled instead and it decides again.
+
+- Far jobs to the nearer worker. Workers are asked in unit order, so a job could go to a
+  worker far away while one standing near it was sent elsewhere. A worker now leaves a job
+  more than a turn away if another worker of the player in the same area has yet to decide
+  this turn and is less than half as far from it. This applies where a worker looks over the
+  whole territory for work (bonuses, the next city to improve, routes, irrigation and
+  forts), not to the plots of the city it is working for.
+
+### How to turn it off
+
+Set the global define `WORKER_STOCK_CHOICE` to 1. The seeded standard game then has the same
+state hash as before on all 151 turns.
+
+### What it does, measured
+
+Profile builds count what workers do. Over five seeded 150-turn standard games, with the
+rules off and on:
+
+| | off | on |
+| --- | ---: | ---: |
+| plots moved by workers | 7,967 | 7,913 |
+| turns of building | 8,830 | 8,897 |
+| builds finished | 2,676 | 2,715 |
+| plots moved per build finished | 2.98 | 2.91 |
+| builds begun on a plot with another build unfinished | 168 | 111 |
+
+The games differ from the turn the rules first act, so the totals are from different games
+and the first four rows are within what that alone would give. The last row fell in every
+one of the five games. The first rule is rarely needed: it took over a build twice in those
+five games, and eight times in the 250-turn huge game.
