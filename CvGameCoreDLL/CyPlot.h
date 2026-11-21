@@ -224,6 +224,10 @@ public:
 	int countNumAirUnits(int /*TeamTypes*/ ePlayer);
 
 	int getFoundValue(int /*PlayerTypes*/ eIndex);
+	int getFoundModifier(int /*PlayerTypes*/ eIndex);
+	void setFoundModifier(int /*PlayerTypes*/ eIndex, int iNewValue);
+	int getFixedFoundValue(int /*PlayerTypes*/ eIndex);
+	void setFixedFoundValue(int /*PlayerTypes*/ eIndex, int iNewValue);
 	bool isBestAdjacentFound(int /*PlayerTypes*/ eIndex);
 
 	int getPlayerCityRadiusCount(int /*PlayerTypes*/ eIndex);

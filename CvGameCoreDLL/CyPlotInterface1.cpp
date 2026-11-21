@@ -219,6 +219,10 @@ void CyPlotPythonInterface1(python::class_<CyPlot>& x)
 		.def("countNumAirUnits", &CyPlot::countNumAirUnits, "int (int /*TeamTypes*/ ePlayer)")
 
 		.def("getFoundValue", &CyPlot::getFoundValue, "int (int /*PlayerTypes*/ eIndex)")
+		.def("getFoundModifier", &CyPlot::getFoundModifier, "int (int /*PlayerTypes*/ eIndex) - percentage applied to the player's found value here; 0 rules the plot out")
+		.def("setFoundModifier", &CyPlot::setFoundModifier, "void (int /*PlayerTypes*/ eIndex, int iNewValue)")
+		.def("getFixedFoundValue", &CyPlot::getFixedFoundValue, "int (int /*PlayerTypes*/ eIndex) - found value prescribed for the player here, or -1")
+		.def("setFixedFoundValue", &CyPlot::setFixedFoundValue, "void (int /*PlayerTypes*/ eIndex, int iNewValue)")
 		.def("isBestAdjacentFound", &CyPlot::isBestAdjacentFound, "bool (int /*PlayerTypes*/ eIndex)")
 
 		.def("getPlayerCityRadiusCount", &CyPlot::getPlayerCityRadiusCount, "int (int /*PlayerTypes*/ eIndex)")

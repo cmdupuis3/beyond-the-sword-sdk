@@ -10,6 +10,8 @@
 
 class CvEventTriggerInfo;
 
+struct FoundValueSweep;
+
 class CvPlayerAI : public CvPlayer
 {
 
@@ -47,6 +49,7 @@ public:
 	void AI_doPeace();
 
 	void AI_updateFoundValues(bool bStartingLoc = false) const;
+	void AI_invalidateFoundValueCache() const;
 	void AI_updateAreaTargets();
 
 	int AI_movementPriority(CvSelectionGroup* pGroup) const;
@@ -393,6 +396,17 @@ protected:
 	int** m_aaiMemoryCount;
 	
 	mutable std::vector<int> m_aiAICitySites;
+	// See AI_updateFoundValuesCached(). Not saved with the game.
+	mutable std::vector<int> m_aiFoundValueCache;					// per plot: score with no planned sites, or MIN_INT
+	mutable std::vector<unsigned long long> m_aiFoundValueSignature;	// per plot: what that score was computed from
+
+	void AI_updateFoundValuesAll() const;
+	void AI_updateFoundValuesCached() const;
+	unsigned long long AI_foundValueSignature(CvPlot* pPlot, FoundValueSweep& kSweep) const;
+	int AI_foundValueForSweep(CvPlot* pPlot) const;
+#ifdef BRIDGED_PROFILE
+	void AI_verifyFoundValueCache(int iMaxCityCount) const;
+#endif
 	
 	bool m_bWasFinancialTrouble;
 	int m_iTurnLastProductionDirty;

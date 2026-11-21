@@ -359,6 +359,10 @@ public:
 	int getFoundValue(PlayerTypes eIndex);																															// Exposed to Python
 	bool isBestAdjacentFound(PlayerTypes eIndex);																												// Exposed to Python
 	void setFoundValue(PlayerTypes eIndex, int iNewValue);
+	int getFoundModifier(PlayerTypes eIndex) const;																										// Exposed to Python
+	void setFoundModifier(PlayerTypes eIndex, int iNewValue);																					// Exposed to Python
+	int getFixedFoundValue(PlayerTypes eIndex) const;																									// Exposed to Python
+	void setFixedFoundValue(PlayerTypes eIndex, int iNewValue);																				// Exposed to Python
 
 	int getPlayerCityRadiusCount(PlayerTypes eIndex) const;																							// Exposed to Python
 	bool isPlayerCityRadius(PlayerTypes eIndex) const;																									// Exposed to Python
@@ -524,6 +528,8 @@ protected:
 	short* m_aiYield;
 	int* m_aiCulture;
 	short* m_aiFoundValue;
+	short* m_aiFoundModifier;
+	short* m_aiFixedFoundValue;
 	char* m_aiPlayerCityRadiusCount;
 	int* m_aiPlotGroup;			// IDs - keep as int
 	short* m_aiVisibilityCount;

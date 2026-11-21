@@ -122,6 +122,16 @@ inline void bridgedProfileLeave(BridgedProfileSample* pSample, BridgedProfileSam
 	g_pBridgedProfileCurrent = pParent;
 }
 
+// For counts and timings taken by hand rather than through a scope.
+inline void bridgedProfileAdd(BridgedProfileSample* pSample, unsigned long long uiTicks, unsigned int uiCalls = 1)
+{
+	if (!pSample->bRegistered)
+	{
+		bridgedProfileRegister(pSample);
+	}
+	pSample->uiTicks += uiTicks;
+	pSample->uiCalls += uiCalls;
+}
 class BridgedProfileScope
 {
 public:

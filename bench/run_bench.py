@@ -59,13 +59,22 @@ def kill_game():
     subprocess.run(['taskkill', '/F', '/IM', EXE], capture_output=True, text=True)
 
 
-def deploy_mod(dll, label, turns, log):
-    """The mod is the harness scripts plus the DLL under test, nothing else."""
+def deploy_mod(dll, label, turns, log, defines):
+    """The mod is the harness scripts, the DLL under test and any global defines for it."""
     assets = MOD / 'Assets'
     if assets.exists():
         shutil.rmtree(assets)
     shutil.copytree(BENCH / 'mod' / 'Assets', assets)
     shutil.copyfile(dll, assets / 'CvGameCoreDLL.dll')
+    if defines:
+        # The game's own GlobalDefinesAlt.xml is an empty placeholder for mods to replace.
+        entries = ''.join(f'\t<Define>\n\t\t<DefineName>{name}</DefineName>\n'
+                          f'\t\t<iDefineIntVal>{value}</iDefineIntVal>\n\t</Define>\n'
+                          for name, value in defines.items())
+        (assets / 'XML').mkdir(exist_ok=True)
+        (assets / 'XML' / 'GlobalDefinesAlt.xml').write_text(
+            '<?xml version="1.0"?>\n<Civ4Defines xmlns="x-schema:CIV4GlobalDefinesSchema.xml">\n'
+            + entries + '</Civ4Defines>\n', encoding='ascii')
     (assets / 'Python' / 'BenchConfig.py').write_text(
         '# Written by run_bench.py for this run.\n'
         f'LOG_PATH = r"{log}"\n'
@@ -115,7 +124,15 @@ def main():
     parser.add_argument('--fullscreen', action='store_true')
     parser.add_argument('--profile', action='store_true',
                         help='for a DLL built with build_dll.py --profile: write results/<label>.profile.tsv')
+    parser.add_argument('--define', action='append', default=[], metavar='NAME=INT',
+                        help='integer global define for the mod, e.g. FOUND_VALUE_REFRESH_TURNS=8; repeatable')
     args = parser.parse_args()
+    defines = {}
+    for item in args.define:
+        match = re.fullmatch(r'([A-Z][A-Z0-9_]*)=(-?\d+)', item)
+        if not match:
+            parser.error(f'--define wants NAME=INT, got {item}')
+        defines[match[1]] = int(match[2])
 
     exe = args.bts_dir / EXE
     for path in [exe, args.dll, args.template_ini] + ([args.save] if args.save else []):
@@ -129,7 +146,7 @@ def main():
     RESULTS.mkdir(exist_ok=True)
     log = RESULTS / f'{args.label}.log'
     log.unlink(missing_ok=True)
-    deploy_mod(args.dll.resolve(), args.label, args.turns, log)
+    deploy_mod(args.dll.resolve(), args.label, args.turns, log, defines)
 
     overrides = {
         'FullScreen': '1' if args.fullscreen else '0',

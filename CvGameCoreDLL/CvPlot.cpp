@@ -37,6 +37,8 @@ CvPlot::CvPlot()
 
 	m_aiCulture = NULL;
 	m_aiFoundValue = NULL;
+	m_aiFoundModifier = NULL;
+	m_aiFixedFoundValue = NULL;
 	m_aiPlayerCityRadiusCount = NULL;
 	m_aiPlotGroup = NULL;
 	m_aiVisibilityCount = NULL;
@@ -105,6 +107,8 @@ void CvPlot::uninit()
 
 	SAFE_DELETE_ARRAY(m_aiCulture);
 	SAFE_DELETE_ARRAY(m_aiFoundValue);
+	SAFE_DELETE_ARRAY(m_aiFoundModifier);
+	SAFE_DELETE_ARRAY(m_aiFixedFoundValue);
 	SAFE_DELETE_ARRAY(m_aiPlayerCityRadiusCount);
 	SAFE_DELETE_ARRAY(m_aiPlotGroup);
 
@@ -6306,6 +6310,92 @@ void CvPlot::setFoundValue(PlayerTypes eIndex, int iNewValue)
 	if (NULL != m_aiFoundValue)
 	{
 		m_aiFoundValue[eIndex] = iNewValue;
+	}
+}
+//
+// Prescribed city sites, for mods that decide where each player should settle.
+//
+// CvPlayerAI::AI_foundValue() consults both before it scores a plot:
+//  - a fixed found value (0 or more) is returned as it stands, with no scoring at all;
+//  - a found modifier of 0 rules the plot out, also with no scoring;
+//  - any other found modifier is a percentage applied to the finished score.
+// The defaults (no fixed value, modifier 100) leave AI_foundValue() as it was.
+//
+// Neither is saved with the game: set them when a game starts and again when one loads.
+//
+int CvPlot::getFoundModifier(PlayerTypes eIndex) const
+{
+	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
+	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
+
+	if (NULL == m_aiFoundModifier)
+	{
+		return 100;
+	}
+
+	return m_aiFoundModifier[eIndex];
+}
+
+
+void CvPlot::setFoundModifier(PlayerTypes eIndex, int iNewValue)
+{
+	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
+	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
+	FAssert(iNewValue >= 0 && iNewValue <= MAX_SHORT);
+
+	if (getFoundModifier(eIndex) != iNewValue)
+	{
+		if (NULL == m_aiFoundModifier)
+		{
+			m_aiFoundModifier = new short[MAX_PLAYERS];
+			for (int iI = 0; iI < MAX_PLAYERS; ++iI)
+			{
+				m_aiFoundModifier[iI] = 100;
+			}
+		}
+
+		m_aiFoundModifier[eIndex] = (short)iNewValue;
+
+		GET_PLAYER(eIndex).AI_invalidateFoundValueCache();
+	}
+}
+
+
+int CvPlot::getFixedFoundValue(PlayerTypes eIndex) const
+{
+	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
+	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
+
+	if (NULL == m_aiFixedFoundValue)
+	{
+		return -1;
+	}
+
+	return m_aiFixedFoundValue[eIndex];
+}
+
+
+// -1 removes the fixed value
+void CvPlot::setFixedFoundValue(PlayerTypes eIndex, int iNewValue)
+{
+	FAssertMsg(eIndex >= 0, "eIndex is expected to be non-negative (invalid Index)");
+	FAssertMsg(eIndex < MAX_PLAYERS, "eIndex is expected to be within maximum bounds (invalid Index)");
+	FAssert(iNewValue >= -1 && iNewValue <= MAX_SHORT);
+
+	if (getFixedFoundValue(eIndex) != iNewValue)
+	{
+		if (NULL == m_aiFixedFoundValue)
+		{
+			m_aiFixedFoundValue = new short[MAX_PLAYERS];
+			for (int iI = 0; iI < MAX_PLAYERS; ++iI)
+			{
+				m_aiFixedFoundValue[iI] = -1;
+			}
+		}
+
+		m_aiFixedFoundValue[eIndex] = (short)iNewValue;
+
+		GET_PLAYER(eIndex).AI_invalidateFoundValueCache();
 	}
 }
 

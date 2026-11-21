@@ -911,6 +911,31 @@ int CyPlot::getFoundValue(int /*PlayerTypes*/ eIndex)
 {
 	return m_pPlot ? m_pPlot->getFoundValue((PlayerTypes)eIndex) : -1;
 }
+int CyPlot::getFoundModifier(int /*PlayerTypes*/ eIndex)
+{
+	return m_pPlot ? m_pPlot->getFoundModifier((PlayerTypes)eIndex) : -1;
+}
+
+void CyPlot::setFoundModifier(int /*PlayerTypes*/ eIndex, int iNewValue)
+{
+	if (m_pPlot)
+	{
+		m_pPlot->setFoundModifier((PlayerTypes)eIndex, iNewValue);
+	}
+}
+
+int CyPlot::getFixedFoundValue(int /*PlayerTypes*/ eIndex)
+{
+	return m_pPlot ? m_pPlot->getFixedFoundValue((PlayerTypes)eIndex) : -1;
+}
+
+void CyPlot::setFixedFoundValue(int /*PlayerTypes*/ eIndex, int iNewValue)
+{
+	if (m_pPlot)
+	{
+		m_pPlot->setFixedFoundValue((PlayerTypes)eIndex, iNewValue);
+	}
+}
 
 bool CyPlot::isBestAdjacentFound(int /*PlayerTypes*/ eIndex)	
 {
