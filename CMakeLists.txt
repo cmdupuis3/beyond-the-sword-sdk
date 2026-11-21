@@ -84,18 +84,18 @@ endif()
 # Profile-guided optimisation. TRAIN builds a DLL that counts how often each block of code
 # runs and writes the counts to the file named by the BRIDGED_PGO_RAW environment variable
 # (see CvGameCoreDLL.cpp). USE optimises with a profile made from such counts by
-# llvm-profdata merge. Value profiling is off because it needs LLVM's runtime library.
+# llvm-profdata merge.
 set(BRIDGED_PGO "OFF" CACHE STRING "Profile-guided optimisation: OFF, TRAIN or USE")
 set(BRIDGED_PGO_PROFILE "" CACHE FILEPATH "Merged profile (.profdata) for BRIDGED_PGO=USE")
 if(BRIDGED_PGO STREQUAL "TRAIN")
   target_compile_definitions(CvGameCoreDLL PRIVATE BRIDGED_PGO_TRAIN)
-  target_compile_options(CvGameCoreDLL PRIVATE -fprofile-generate "SHELL:-mllvm -disable-vp")
+  target_compile_options(CvGameCoreDLL PRIVATE -fprofile-generate)
 elseif(BRIDGED_PGO STREQUAL "USE")
   if(NOT EXISTS "${BRIDGED_PGO_PROFILE}")
     message(FATAL_ERROR "Set BRIDGED_PGO_PROFILE to the merged profile")
   endif()
   target_compile_options(CvGameCoreDLL PRIVATE "-fprofile-use=${BRIDGED_PGO_PROFILE}"
-    "SHELL:-mllvm -disable-vp" -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
+    -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${BRIDGED_PGO_PROFILE}")
   set_property(TARGET CvGameCoreDLL APPEND PROPERTY OBJECT_DEPENDS "${BRIDGED_PGO_PROFILE}")
 elseif(NOT BRIDGED_PGO STREQUAL "OFF")

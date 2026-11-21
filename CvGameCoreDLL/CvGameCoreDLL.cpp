@@ -245,8 +245,11 @@ void bridgedProfileTurn(int iGameTurn)
 // is written here instead: the raw profile format of the pinned LLVM 23.1.2
 // (INSTR_PROF_RAW_VERSION 11 in its profile/InstrProfData.inc), which llvm-profdata reads.
 //
-// Indirect-call and memory-size profiling are switched off in the build (-disable-vp):
-// they are the part that needs the runtime library.
+// The instrumented code also reports two kinds of value as it runs: the function an
+// indirect call goes to, and the size of a memory copy or fill whose size is not fixed.
+// It does that by calling the runtime library, so the two functions it calls are here
+// too. They keep, for each place in the code, a short list of the values seen and how
+// often, as the runtime library does.
 //
 // The file is named by the BRIDGED_PGO_RAW environment variable and rewritten every tenth
 // game turn, because the benchmark stops the game by killing it.
@@ -263,7 +266,7 @@ struct BridgedPgoData
 	unsigned int uiUniformCounterPtr;
 	unsigned int uiBitmapPtr;
 	unsigned int uiFunctionPointer;
-	unsigned int uiValues;
+	unsigned int uiValues;				// an array with a list of values for each value site, or 0
 	unsigned int uiNumCounters;
 	unsigned short ausNumValueSites[3];	// IPVK_Last + 1
 	unsigned short usOffloadDeviceWaveSize;
@@ -286,8 +289,125 @@ __declspec(allocate(".lprfc$Z")) __declspec(align(8)) unsigned long long g_uiBri
 __declspec(allocate(".lprfn$A")) extern const char g_cBridgedPgoNamesStart = 1;
 __declspec(allocate(".lprfn$Z")) extern const char g_cBridgedPgoNamesEnd = 2;
 
+// a value seen at a value site (ValueProfNode)
+struct BridgedPgoNode
+{
+	unsigned long long uiValue;
+	unsigned long long uiCount;
+	BridgedPgoNode* pNext;
+};
+
+static const unsigned int BRIDGED_PGO_SITE_VALUES = 16;	// kept for each site, as the runtime library keeps by default
+static const int BRIDGED_PGO_VALUE_KINDS = 3;
+
+static unsigned int bridgedPgoNumSites(const BridgedPgoData& kData)
+{
+	return (unsigned int)kData.ausNumValueSites[0] + kData.ausNumValueSites[1] + kData.ausNumValueSites[2];
+}
+
 extern "C"
 {
+	//
+	// Called by instrumented code at an indirect call, with the address called. The compiler
+	// gives every function that has value sites an array of list heads, one for each site.
+	// A new value takes the place of the least seen one when the list is full and that one
+	// has only been seen once; otherwise the least seen one loses a count.
+	//
+	// These two must not be instrumented themselves: they would call themselves.
+	//
+	__attribute__((no_profile_instrument_function))
+	void __llvm_profile_instrument_target(unsigned long long uiValue, void* pData, unsigned int uiSite)
+	{
+		BridgedPgoData* pRecord = (BridgedPgoData*)pData;
+
+		if (pRecord == NULL || uiSite >= bridgedPgoNumSites(*pRecord))
+		{
+			return;
+		}
+
+		if (pRecord->uiValues == 0)
+		{
+			pRecord->uiValues = (unsigned int)calloc(bridgedPgoNumSites(*pRecord), sizeof(BridgedPgoNode*));
+			if (pRecord->uiValues == 0)
+			{
+				return;
+			}
+		}
+
+		BridgedPgoNode** ppHead = &(((BridgedPgoNode**)pRecord->uiValues)[uiSite]);
+		BridgedPgoNode* pLast = NULL;
+		BridgedPgoNode* pLeast = NULL;
+		unsigned int uiNodes = 0;
+
+		for (BridgedPgoNode* pNode = *ppHead; pNode != NULL; pNode = pNode->pNext)
+		{
+			if (pNode->uiValue == uiValue)
+			{
+				pNode->uiCount++;
+				return;
+			}
+			if (pLeast == NULL || pNode->uiCount < pLeast->uiCount)
+			{
+				pLeast = pNode;
+			}
+			pLast = pNode;
+			uiNodes++;
+		}
+
+		if (uiNodes >= BRIDGED_PGO_SITE_VALUES)
+		{
+			if (pLeast->uiCount <= 1)
+			{
+				pLeast->uiValue = uiValue;
+				pLeast->uiCount = 1;
+			}
+			else
+			{
+				pLeast->uiCount--;
+			}
+			return;
+		}
+
+		BridgedPgoNode* pNew = (BridgedPgoNode*)malloc(sizeof(BridgedPgoNode));
+		if (pNew == NULL)
+		{
+			return;
+		}
+		pNew->uiValue = uiValue;
+		pNew->uiCount = 1;
+		pNew->pNext = NULL;
+		if (pLast == NULL)
+		{
+			*ppHead = pNew;
+		}
+		else
+		{
+			pLast->pNext = pNew;
+		}
+	}
+
+	// Called with the size of a memory copy or fill. Sizes are counted in the ranges of
+	// InstrProfGetRangeRepValue(): up to 8 each on its own, a power of two on its own, the
+	// sizes between two powers of two together, and everything from 513 up together.
+	__attribute__((no_profile_instrument_function))
+	void __llvm_profile_instrument_memop(unsigned long long uiValue, void* pData, unsigned int uiSite)
+	{
+		if (uiValue >= 513)
+		{
+			uiValue = 513;
+		}
+		else if (uiValue > 8 && (uiValue & (uiValue - 1)) != 0)
+		{
+			unsigned long long uiPower = 8;
+			while ((uiPower * 2) < uiValue)
+			{
+				uiPower *= 2;
+			}
+			uiValue = uiPower + 1;
+		}
+		__llvm_profile_instrument_target(uiValue, pData, uiSite);
+	}
+
 	int __llvm_profile_runtime = 0;						// instrumented code refers to it to pull the runtime in
 	// Set by the compiler in every instrumented unit: the format version and what kind of
 	// profile it is. Declared under its link name, because a declaration under its own name
@@ -324,11 +444,7 @@ void bridgedPgoTurn(int iGameTurn)
 	for (unsigned int uiI = 0; uiI < uiNumData && szProblem == NULL; uiI++)
 	{
 		const BridgedPgoData& kData = pDataBegin[uiI];
-		if (kData.ausNumValueSites[0] != 0 || kData.ausNumValueSites[1] != 0 || kData.ausNumValueSites[2] != 0)
-		{
-			szProblem = "a function has value sites: build with -mllvm -disable-vp";
-		}
-		else if (kData.uiNumBitmapBytes != 0 || kData.uiUniformCounterPtr != 0)
+		if (kData.uiNumBitmapBytes != 0 || kData.uiUniformCounterPtr != 0)
 		{
 			szProblem = "a function has bitmap bytes or uniform counters";
 		}
@@ -379,6 +495,82 @@ void bridgedPgoTurn(int iGameTurn)
 	fwrite(pCountersBegin, sizeof(unsigned long long), uiNumCounters, pFile);
 	fwrite(pNamesBegin, 1, uiNamesSize, pFile);
 	fwrite(acPadding, 1, (8 - (uiNamesSize % 8)) % 8, pFile);
+
+	// The values, for each function that has value sites, in the order of the records: a
+	// ValueProfData, which is its size and the number of kinds, and for each kind that has
+	// sites a ValueProfRecord: the kind, the number of sites, a byte for each site with the
+	// number of values kept there, padding to eight bytes, and then the values and counts.
+	// A function's sites are numbered through the kinds in order.
+	for (unsigned int uiI = 0; uiI < uiNumData; uiI++)
+	{
+		const BridgedPgoData& kData = pDataBegin[uiI];
+		BridgedPgoNode* const* ppSites = (BridgedPgoNode* const*)kData.uiValues;
+		unsigned int uiKinds = 0;
+		unsigned int uiTotalSize = 8;
+		unsigned int uiFirstSite = 0;
+
+		for (int iKind = 0; iKind < BRIDGED_PGO_VALUE_KINDS; iKind++)
+		{
+			const unsigned int uiSites = kData.ausNumValueSites[iKind];
+			if (uiSites != 0)
+			{
+				uiKinds++;
+				uiTotalSize += ((8 + uiSites + 7) & ~7u);
+				for (unsigned int uiSite = 0; uiSite < uiSites && ppSites != NULL; uiSite++)
+				{
+					unsigned int uiNodes = 0;
+					for (const BridgedPgoNode* pNode = ppSites[uiFirstSite + uiSite]; pNode != NULL && uiNodes < 255; pNode = pNode->pNext)
+					{
+						uiNodes++;
+					}
+					uiTotalSize += 16 * uiNodes;
+				}
+			}
+			uiFirstSite += uiSites;
+		}
+
+		if (uiKinds == 0)
+		{
+			continue;
+		}
+
+		const unsigned int auiValueHeader[2] = { uiTotalSize, uiKinds };
+		fwrite(auiValueHeader, sizeof(auiValueHeader), 1, pFile);
+
+		uiFirstSite = 0;
+		for (int iKind = 0; iKind < BRIDGED_PGO_VALUE_KINDS; iKind++)
+		{
+			const unsigned int uiSites = kData.ausNumValueSites[iKind];
+			if (uiSites != 0)
+			{
+				const unsigned int auiRecordHeader[2] = { (unsigned int)iKind, uiSites };
+				fwrite(auiRecordHeader, sizeof(auiRecordHeader), 1, pFile);
+
+				for (unsigned int uiSite = 0; uiSite < uiSites; uiSite++)
+				{
+					unsigned char ucNodes = 0;
+					for (const BridgedPgoNode* pNode = ((ppSites != NULL) ? ppSites[uiFirstSite + uiSite] : NULL); pNode != NULL && ucNodes < 255; pNode = pNode->pNext)
+					{
+						ucNodes++;
+					}
+					fwrite(&ucNodes, 1, 1, pFile);
+				}
+				fwrite(acPadding, 1, ((8 + uiSites + 7) & ~7u) - (8 + uiSites), pFile);
+
+				for (unsigned int uiSite = 0; uiSite < uiSites && ppSites != NULL; uiSite++)
+				{
+					unsigned int uiNodes = 0;
+					for (const BridgedPgoNode* pNode = ppSites[uiFirstSite + uiSite]; pNode != NULL && uiNodes < 255; pNode = pNode->pNext)
+					{
+						fwrite(pNode, 16, 1, pFile);	// the value and its count
+						uiNodes++;
+					}
+				}
+			}
+			uiFirstSite += uiSites;
+		}
+	}
+
 	fclose(pFile);
 }
 #endif	// BRIDGED_PGO_TRAIN

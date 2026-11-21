@@ -92,10 +92,11 @@ to one `llvm-profdata merge`.
 The training DLL writes the profile itself (`bridgedPgoTurn()` in `CvGameCoreDLL.cpp`),
 every tenth game turn, to the file named by the `BRIDGED_PGO_RAW` environment variable.
 LLVM's own profile runtime is not used: it is not shipped for 32-bit Windows and needs a
-modern C runtime. The part of profiling that depends on it, which targets indirect calls
-take, is switched off in both builds. The writer follows the raw profile format of the
-pinned LLVM 23.1.2 and has to be checked against `profile/InstrProfData.inc` if the
-compiler is changed.
+modern C runtime. The two functions of it that instrumented code calls as it runs are in
+`CvGameCoreDLL.cpp` as well. They record which functions indirect calls go to and the
+sizes of memory copies, so the profile has those too. The writer follows the raw profile
+format of the pinned LLVM 23.1.2 and has to be checked against `profile/InstrProfData.inc`
+if the compiler is changed.
 
 The training DLL is for collecting a profile only. Its link-time object is too large for
 `tools/eh_metadata.py` to read, so its exception metadata is not checked; the DLL built
@@ -104,7 +105,15 @@ functions that no longer match are optimised without it, so collect a new one af
 larger changes.
 
 Measured on the seeded standard game, 150 turns, trained on that same game: the same
-state hash on all 151 turns with the training DLL and with the optimised one, and the
-optimised DLL about 2% to 4% faster (five runs of each; the sum over turns of each turn's
-fastest run falls from 8.94 s to 8.73 s). The runs differ from one another by more than
-that, so the gain is small and only just measurable. The DLL is 0.9 MB smaller.
+state hash on all 151 turns with the training DLL and with the optimised one. Eight runs
+of each DLL, taken in turn; the times are the sum over the 150 turns of each turn's
+fastest run, because whole runs differ from one another by more than the gain.
+
+| | time | against the normal build |
+| --- | ---: | ---: |
+| normal build | 7.00 s | |
+| optimised, profile without call targets and copy sizes | 6.88 s | 1.8% less |
+| optimised, full profile | 6.57 s | 6.2% less |
+
+The optimised DLL is 0.8 MB smaller. Not measured: the huge map, and a game other than
+the one the profile was collected on.
