@@ -24,6 +24,7 @@ The entries below, by tier:
 | A player's workers act as a team | 2 | `WORKER_STOCK_CHOICE` |
 | The AI does not search for paths it could do without | 2 | `PATH_STOCK_SEARCHES` |
 | A city keeps the builds it chose for its plots | 2 | `BEST_BUILD_STOCK` |
+| AI cities choose their builds while a human takes their turn | 3 | `BEST_BUILD_AHEAD_OFF` (tier 3 builds) |
 | AI turns do not wait for the screen | 1 | `STOCK_TURN_SLICES` |
 | Yield and route symbols are made once before the screen is drawn | 1 | `STOCK_SYMBOL_UPDATES` |
 | Collateral damage ties go to the unit first on the plot | 1 | none |
@@ -31,7 +32,7 @@ The entries below, by tier:
 | Optional: a city's turn without its Python callbacks | 1 | off unless a mod sets the defines |
 | Optional: four more Python calls a mod can leave out | 1 | off unless a mod sets the defines |
 
-Nothing is in tier 3 yet. Tier 1 changes with nothing for a player or a mod to notice are
+Tier 1 changes with nothing for a player or a mod to notice are
 not listed; their commit messages describe them.
 
 ### What tier 1 allows
@@ -708,8 +709,8 @@ be made is not started: the workers check that themselves, as they always did.
 - A network game works them out every turn, as stock does: a player who joins late loads
   the game and the others do not, and they would disagree.
 - Working the builds out while a human takes their turn, so that they are fresh and cost
-  nothing, would make the game depend on how long the human took. That is tier 3 and is
-  not done here.
+  nothing, makes the game depend on how long the human took. That is tier 3: see "AI
+  cities choose their builds while a human takes their turn".
 
 ### How to turn it off
 
@@ -753,3 +754,77 @@ The checks, as "How the tiers are checked" asks:
   is `2179c206` / `1277dcc6`, from one run.
 
 Not checked: the huge game a second time, and the tier 1 DLL on the huge game.
+
+## AI cities choose their builds while a human takes their turn
+
+Tier 3. On the branch `cmd/non-deterministic`, in a `--tier 3` build only.
+
+### What changed
+
+While a human takes their turn in a single-player game, `CvGame::updateAhead()` goes round
+the AI players, one every tenth of a second. In a tier 3 build each of them then has all
+its cities work out their builds for their plots (`CvPlayerAI::AI_updateBestBuildsAhead()`):
+every city once a game turn, and again if something it looks at changes afterwards. A city
+that has had its turn ahead keeps what it chose, by the rule of "A city keeps the builds
+it chose for its plots", and on its own turn works them out again only if something has
+changed since.
+
+So the builds a city goes into its turn with are no older than the human's last turn,
+where tier 2 lets them be up to three turns old, and the work is done in time nobody is
+waiting for. The turns a city may keep its builds are what is left when the human ends
+the turn before the city was reached.
+
+The stock AI works its strategy and its average yields out once a game turn, the first
+time they are asked for. Working a player's builds out ahead asks for them before the
+players in between have moved, so they are put back afterwards and worked out again on
+the player's own turn. (Left as they were, they changed the seeded games on their own.)
+
+### Why it is tier 3
+
+What is worked out ahead is used. Which cities were reached before the human ended the
+turn depends on the clock, and a city that was reached chose its builds before the players
+in between moved, where one that was not chooses them after. The same game with the same
+input can therefore go differently from one playing to the next. The city-site scores
+that `CvGame::updateAhead()` also works on are different: they are never relied on, and
+stay tier 1.
+
+### How to turn it off
+
+Build without `--tier 3`. In a tier 3 build, set the global define `BEST_BUILD_AHEAD_OFF`
+to 1.
+
+### What it does, measured
+
+The benchmark games have no human. With the define `BEST_BUILD_AHEAD_TEST` the first
+player's turn stands in for one: at its start every other player's cities get their turn
+ahead, which is what a human who takes long enough gives them. That makes the game the
+same on every run, so it can be checked; a real game is not.
+
+Seeded games, all players AI, `--tier 3 --profile` build, `BEST_BUILD_AHEAD_TEST=1`:
+
+| | standard, 150 turns | huge, 250 turns |
+| --- | ---: | ---: |
+| city turns | 3,178 | 18,068 |
+| builds worked out ahead | 2,610 | 16,531 |
+| kept on the city's own turn | 2,192 (69%) | 11,847 (66%) |
+| worked out on the city's own turn | 986 | 6,221 |
+| time ahead, which a human's turn would hide | 0.26 s | 1.78 s |
+| time left in the players' turns | about 0.09 s | about 0.61 s |
+| the same in a default build (tier 2) | 0.22 s | 1.25 s |
+| the same with `BEST_BUILD_STOCK` | 0.37 s | 2.61 s |
+
+The first player's own cities get no turn ahead and are in these figures with the tier 2
+rule. A version that worked out ahead only the cities the tier 2 rule would have worked
+out left about 0.11 s and 0.79 s in the players' turns, and left the others with older
+builds; it was not kept.
+
+The checks:
+
+- without `BEST_BUILD_AHEAD_TEST` the tier 3 DLL has the two hashes of the default build on
+  all 151 turns of the standard game, and so has the default build from this branch;
+- with it, two runs have the same two hashes on all 151 turns: turn 150 is `2eb5e9fc` /
+  `1cbbbb52`. The huge game's turn 250 is `f37528bf` / `bea34e93`, from one run.
+
+Not checked: a game with a human in it. `CvGame::updateAhead()` only runs then, so the
+code that goes round the players during a human's turn has not run at all, only the same
+work called from the stand-in. Nor has a release build of tier 3 been made.

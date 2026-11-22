@@ -24,6 +24,7 @@
 #include "CvDLLFAStarIFaceBase.h"
 #include "FAStarNode.h"
 #include "CvEventReporter.h"
+#include "CvCityAI.h"
 
 #define DANGER_RANGE						(4)
 #define GREATER_FOUND_RANGE			(5)
@@ -390,6 +391,19 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 	// player's turn stands in for a human's: the other players' city-site scores are worked
 	// on at its start, as CvGame::updateAhead() does while a human takes their turn. A game
 	// must play out exactly as it does without it.
+#ifdef NON_DETERMINISM_OK
+	// BEST_BUILD_AHEAD_TEST: the same stand-in for AI_updateBestBuildsAhead(). Every other
+	// player's cities get their turn ahead, which is what a human who takes long enough
+	// gives them; with it the benchmark game is the same on every run.
+	if ((getID() == 0) && (GC.getDefineINT("BEST_BUILD_AHEAD_TEST") != 0))
+	{
+		for (int iPlayer = 1; iPlayer < MAX_CIV_PLAYERS; iPlayer++)
+		{
+			GET_PLAYER((PlayerTypes)iPlayer).AI_updateBestBuildsAhead();
+		}
+	}
+#endif
+
 	if ((getID() == 0) && (GC.getDefineINT("FOUND_VALUE_AHEAD_TEST") != 0))
 	{
 		for (int iPlayer = 1; iPlayer < MAX_CIV_PLAYERS; iPlayer++)
@@ -1196,6 +1210,68 @@ bool CvPlayerAI::AI_isFoundValueKept() const
 
 
 // The city-site scores brought up to date while another player takes their turn: see CvGame::updateAhead().
+//
+// The cities' builds for their plots, worked out while a human takes their turn: see
+// CvGame::updateAhead() and CvCityAI::AI_isBestBuildKept().
+//
+// Every city works its builds out now, once a game turn, and then keeps them as any city
+// does (CvCityAI::AI_isBestBuildWantedAhead()). If something changes again before its
+// turn, it works them out again then; otherwise its turn has nothing to do.
+//
+// Tier 3 (see BridgedTiers.h). Unlike the city-site scores, what is worked out here is
+// used: a city that got its turn ahead goes into its own turn with builds chosen before
+// the players in between had moved. Which cities got it depends on how long the human
+// took, so the same game played twice can go differently. BEST_BUILD_AHEAD_OFF switches
+// it off in a build that has it.
+//
+void CvPlayerAI::AI_updateBestBuildsAhead()
+{
+#ifdef NON_DETERMINISM_OK
+	static int iOff = -1;
+
+	if (iOff == -1)
+	{
+		iOff = ((GC.getDefineINT("BEST_BUILD_AHEAD_OFF") != 0) ? 1 : 0);
+	}
+
+	if ((iOff != 0) || !isAlive() || isHuman())
+	{
+		return;
+	}
+
+	PROFILE("best builds ahead of the player's turn");
+
+	// The stock AI works its strategy and its average yields out once a game turn, when
+	// they are first asked for. Asked for now, they would be fixed before the players in
+	// between have moved, for everything the player does this turn; so they are put back.
+	const int iStrategyTurn = m_iStrategyHashCacheTurn;
+	const int iStrategy = m_iStrategyHash;
+	const int iAveragesTurn = m_iAveragesCacheTurn;
+	const int iUpgradeTurn = m_iUpgradeUnitsCacheTurn;
+
+	int iLoop;
+	for (CvCity* pLoopCity = firstCity(&iLoop); pLoopCity != NULL; pLoopCity = nextCity(&iLoop))
+	{
+		CvCityAI* pCity = static_cast<CvCityAI*>(pLoopCity);
+
+		if (pCity->AI_isBestBuildWantedAhead())
+		{
+#ifdef BRIDGED_PROFILE
+			static BridgedProfileSample kAhead = { "best build: worked out ahead of the player's turn" };
+			bridgedProfileAdd(&kAhead, 0);
+#endif
+			pCity->AI_updateBestBuild();
+		}
+	}
+
+	m_iStrategyHashCacheTurn = iStrategyTurn;
+	m_iStrategyHash = iStrategy;
+	m_iAveragesCacheTurn = iAveragesTurn;
+	m_iUpgradeUnitsCacheTurn = iUpgradeTurn;
+#endif
+}
+
+
 void CvPlayerAI::AI_updateFoundValuesAhead() const
 {
 	if (!isAlive() || isHuman() || !AI_isFoundValueKept())

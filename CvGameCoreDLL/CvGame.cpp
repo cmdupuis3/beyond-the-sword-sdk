@@ -2045,11 +2045,14 @@ int CvGame::getTeamClosenessScore(int** aaiDistances, int* aiStartingLocs)
 
 //
 // Work for the AI players that can be done while a human takes their turn, so that it is not
-// waited for when the turn ends. For now that is their city-site scores.
+// waited for when the turn ends: their city-site scores and, in a tier 3 build, their
+// cities' builds for their plots.
 //
-// What is done here is never relied on: when an AI player's turn comes it brings its scores
+// The scores are never relied on: when an AI player's turn comes it brings its scores
 // up to date in the usual place, and work done ahead only means there is less left to do. So
 // how much gets done, which depends on how long the human takes, cannot change the game.
+// The builds are used as they are (CvPlayerAI::AI_updateBestBuildsAhead()), which is why
+// they are tier 3.
 //
 // Single-player games only, and one player at a time with a pause between, so that the
 // interface is not held up.
@@ -2088,6 +2091,9 @@ void CvGame::updateAhead()
 		if (kPlayer.isAlive() && !kPlayer.isHuman())
 		{
 			kPlayer.AI_updateFoundValuesAhead();
+#ifdef NON_DETERMINISM_OK
+			GET_PLAYER(ePlayer).AI_updateBestBuildsAhead();	// tier 3: what it works out is used
+#endif
 			iNextPlayer = (ePlayer + 1) % MAX_CIV_PLAYERS;
 			break;
 		}

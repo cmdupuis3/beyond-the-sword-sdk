@@ -94,6 +94,7 @@ public:
 	int AI_countBestBuilds(CvArea* pArea);
 	void AI_updateBestBuild();
 	bool AI_isBestBuildKept() const;
+	bool AI_isBestBuildWantedAhead() const;
 
 	virtual int AI_cityValue() const;
     

@@ -5335,6 +5335,26 @@ bool CvCityAI::AI_isBestBuildKept() const
 }
 
 
+// Whether the city should work its builds out ahead of its turn: see
+// CvPlayerAI::AI_updateBestBuildsAhead(). Tier 3.
+//
+// Every city, once a game turn, and again if something it looks at changes after that.
+// The time is the human's, so there is no reason to leave a city with the builds of some
+// turns ago as AI_isBestBuildKept() does: a city that gets its turn ahead goes into its
+// own turn with builds no older than that, and works them out there only if something
+// has changed in between. The turns a city may keep its builds are then only what it
+// falls back on when the human ends the turn before the city has been reached.
+bool CvCityAI::AI_isBestBuildWantedAhead() const
+{
+	if ((bestBuildKeepTurns() <= 1) || GC.getGameINLINE().isNetworkMultiPlayer())
+	{
+		return false;		// the city works them out every turn whatever is done ahead
+	}
+
+	return (m_bBestBuildDirty || (m_iBestBuildTurn != GC.getGameINLINE().getGameTurn()));
+}
+
+
 void CvCityAI::AI_updateBestBuild()
 {
 	PROFILE_FUNC();

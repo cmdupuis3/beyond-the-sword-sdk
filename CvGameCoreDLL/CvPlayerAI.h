@@ -53,6 +53,7 @@ public:
 	void AI_changeMissionTargetGroups(const CvPlot* pPlot, int iChange);
 	bool AI_isMissionTargetNear(const CvPlot* pPlot, int iRange) const;
 	void AI_updateFoundValuesAhead() const;
+	void AI_updateBestBuildsAhead();
 	bool AI_isFoundValueKept() const;
 	void AI_updateAreaTargets();
 
