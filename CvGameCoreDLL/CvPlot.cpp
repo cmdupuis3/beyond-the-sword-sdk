@@ -178,6 +178,10 @@ void CvPlot::reset(int iX, int iY, bool bConstructorCall)
 	m_bIrrigated = false;
 	m_bPotentialCityWork = false;
 	m_bShowCitySymbols = false;
+	m_bYieldSymbolsDirty = false;
+	m_bYieldSymbolsSkipped = false;
+	m_bRouteSymbolDirty = false;
+	m_bRouteSymbolForce = false;
 	m_bFlagDirty = false;
 	m_bPlotLayoutDirty = false;
 	m_bLayoutStateWorked = false;
@@ -562,6 +566,11 @@ void CvPlot::updateSymbolDisplay()
 		return;
 	}
 
+	if (m_bYieldSymbolsDirty)
+	{
+		return;		// the symbols are about to be made anew, and that ends by coming here
+	}
+
 	for (iLoop = 0; iLoop < getNumSymbols(); iLoop++)
 	{
 		pLoopSymbol = getSymbol(iLoop);
@@ -595,6 +604,20 @@ void CvPlot::updateSymbolVisibility()
 		return;
 	}
 
+	if (m_bYieldSymbolsDirty)
+	{
+		return;		// the symbols are about to be made anew, and that ends by coming here
+	}
+
+	if (m_bYieldSymbolsSkipped && isRevealed(GC.getGameINLINE().getActiveTeam(), true))
+	{
+		// The plot can be seen now and its symbols were never made: see updateSymbols().
+		// Revealing a plot makes them itself; this is for the ways a plot comes to be
+		// seen that do not, such as the active player's team joining another.
+		updateSymbols();
+		return;
+	}
+
 	for (iLoop = 0; iLoop < getNumSymbols(); iLoop++)
 	{
 		pLoopSymbol = getSymbol(iLoop);
@@ -625,7 +648,41 @@ void CvPlot::updateSymbols()
 		return;
 	}
 
+	// Differs from stock. The yield symbols of a plot are made anew each time one of its
+	// yields, its owner or what the active team knows of it changes, which can be several
+	// times in a round of AI turns. Nothing is drawn until CvGame::update() returns, so
+	// while it runs the plot is only marked, and CvMap::updateDeferredSymbols() makes the
+	// symbols once at the end. Route symbols are kept back the same way. The define
+	// STOCK_SYMBOL_UPDATES switches this and the next difference off.
+	if (GC.getMapINLINE().isSymbolsDeferred())
+	{
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample aSamples[2] = {
+			{ "symbols, yield: kept for the end of CvGame::update" },
+			{ "symbols, yield: asked again for a plot already waiting" },
+		};
+		bridgedProfileAdd(&aSamples[m_bYieldSymbolsDirty ? 1 : 0], 0);
+#endif
+		m_bYieldSymbolsDirty = true;
+		GC.getMapINLINE().setSymbolsDirty();
+		return;
+	}
+	m_bYieldSymbolsDirty = false;
+
 	deleteAllSymbols();
+
+	// Also differs from stock: no symbols for a plot the active team has not revealed.
+	// They would be hidden (see updateSymbolVisibility()), and revealing the plot, changing
+	// the active player and switching debug mode all come back here.
+	m_bYieldSymbolsSkipped = (!isRevealed(GC.getGameINLINE().getActiveTeam(), true) && !GC.getMapINLINE().isStockSymbolUpdates());
+	if (m_bYieldSymbolsSkipped)
+	{
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample kSkipped = { "symbols, yield: not made, plot not revealed" };
+		bridgedProfileAdd(&kSkipped, 0);
+#endif
+		return;
+	}
 
 	int yieldAmounts[NUM_YIELD_TYPES];
 	int maxYield = 0;
@@ -668,6 +725,21 @@ void CvPlot::updateSymbols()
 
 	updateSymbolDisplay();
 	updateSymbolVisibility();
+}
+
+
+// Called for every plot by CvMap::updateDeferredSymbols(), in the order stock updates them
+// when a plot's revealed route changes.
+void CvPlot::updateDeferredSymbols()
+{
+	if (m_bYieldSymbolsDirty)
+	{
+		updateSymbols();
+	}
+	if (m_bRouteSymbolDirty)
+	{
+		updateRouteSymbol(false, false);
+	}
 }
 
 
@@ -7968,6 +8040,32 @@ void CvPlot::updateRouteSymbol(bool bForce, bool bAdjacent)
 			}
 		}
 	}
+
+	// kept for the end of CvGame::update(): see updateSymbols(). The plots around have just
+	// been marked by the calls above.
+	if (GC.getMapINLINE().isSymbolsDeferred())
+	{
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample aSamples[2] = {
+			{ "symbols, route: kept for the end of CvGame::update" },
+			{ "symbols, route: asked again for a plot already waiting" },
+		};
+		bridgedProfileAdd(&aSamples[m_bRouteSymbolDirty ? 1 : 0], 0);
+#endif
+		m_bRouteSymbolDirty = true;
+		if (bForce)
+		{
+			m_bRouteSymbolForce = true;
+		}
+		GC.getMapINLINE().setSymbolsDirty();
+		return;
+	}
+	if (m_bRouteSymbolForce)
+	{
+		bForce = true;
+	}
+	m_bRouteSymbolDirty = false;
+	m_bRouteSymbolForce = false;
 
 	eRoute = getRevealedRouteType(GC.getGameINLINE().getActiveTeam(), true);
 

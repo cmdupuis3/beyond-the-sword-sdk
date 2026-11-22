@@ -2247,6 +2247,10 @@ void CvGame::update()
 		int iPasses = 0;
 		int iWait;
 
+		// Yield and route symbols are made once at the end rather than each time something
+		// changes: see CvPlot::updateSymbols().
+		GC.getMapINLINE().setSymbolsDeferred(!GC.getMapINLINE().isStockSymbolUpdates());
+
 		do
 		{
 			const int iStartGameTurn = getGameTurn();
@@ -2274,6 +2278,9 @@ void CvGame::update()
 #endif
 		}
 		while (iWait == SLICE_WAIT_NONE);
+
+		GC.getMapINLINE().setSymbolsDeferred(false);
+		GC.getMapINLINE().updateDeferredSymbols();
 	}
 #ifdef BRIDGED_PROFILE
 	uiLastCallMs = GetTickCount() - uiCallStart;

@@ -121,6 +121,8 @@ void CvMap::reset(CvMapInitData* pInitInfo)
 	//--------------------------------
 	// Uninit class
 	uninit();
+	m_bSymbolsDeferred = false;
+	m_bSymbolsDirty = false;
 	m_bTeamIndexDirty = true;
 	setFoundValuesAllDirty();
 
@@ -403,6 +405,37 @@ void CvMap::updateSymbols()
 	for (iI = 0; iI < numPlotsINLINE(); iI++)
 	{
 		plotByIndexINLINE(iI)->updateSymbols();
+	}
+}
+
+
+bool CvMap::isStockSymbolUpdates() const
+{
+	static int iStock = -1;
+
+	if (iStock == -1)
+	{
+		iStock = ((GC.getDefineINT("STOCK_SYMBOL_UPDATES") != 0) ? 1 : 0);
+	}
+
+	return (iStock != 0);
+}
+
+
+// The symbol updates kept back while CvGame::update() ran: see CvPlot::updateSymbols().
+void CvMap::updateDeferredSymbols()
+{
+	PROFILE_FUNC();
+
+	if (!m_bSymbolsDirty)
+	{
+		return;
+	}
+	m_bSymbolsDirty = false;
+
+	for (int iI = 0; iI < numPlotsINLINE(); iI++)
+	{
+		plotByIndexINLINE(iI)->updateDeferredSymbols();
 	}
 }
 

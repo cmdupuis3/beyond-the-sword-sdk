@@ -253,3 +253,63 @@ been busier on the day of the earlier run was not measured.
 
 Benchmark times from before this change include those waits and are not comparable with
 times from after it. The state hashes are.
+
+## Yield and route symbols are made once before the screen is drawn
+
+### What changed
+
+This changes what the DLL asks the graphics engine to do, not the game: the seeded standard
+and huge games have the same state hash on every turn. It is listed here because nobody
+has yet looked at a map drawn this way.
+
+The stock game makes a plot's yield symbols (the food, production and commerce icons) anew
+every time one of its yields, its owner or what the active team knows of it changes, and a
+route symbol anew, with those of the eight plots around it, every time the active team
+learns of a route. In a round of AI turns the same plot often comes up several times, and
+nothing is drawn until `CvGame::update()` returns.
+
+- While `CvGame::update()` runs, `CvPlot::updateSymbols()` and `CvPlot::updateRouteSymbol()`
+  only mark the plot. `CvMap::updateDeferredSymbols()` makes the symbols once, just before
+  the function returns and the exe gets to draw. Outside `CvGame::update()`, when the exe
+  calls in because of something the player did, they are made at once as before. The stock
+  game already treats unit flags this way (`CvMap::updateFlagSymbols()`).
+- No yield symbols are made for a plot the active team has not revealed. Stock makes them
+  and hides them. Revealing the plot, changing the active player and switching debug mode
+  all make the symbols, as they do in stock, and `CvPlot::updateSymbolVisibility()` makes
+  them if a plot comes to be seen some other way (the player's team joining another, for
+  example).
+
+Feature symbols (forests and the like) are not touched: they are almost never asked for
+twice.
+
+### What a player should notice
+
+Nothing. Not checked: the map as drawn. The benchmark cannot see it, so the first game
+played with this should be watched for yield icons missing from a plot the player has
+revealed (with the yield display on, and in the city screen) and for a road or railroad
+that is not drawn, or not joined to its neighbours, after it is built or discovered.
+
+### How to turn it off
+
+Set the global define `STOCK_SYMBOL_UPDATES` to 1. With it the standard game makes exactly
+as many symbol updates as before the change (10,394 yield and 5,991 route).
+
+### What it does, measured
+
+Seeded games, all players AI, profile builds, before and after on the same day.
+
+| | standard, 150 turns, before | after | huge, 250 turns, before | after |
+| --- | ---: | ---: | ---: | ---: |
+| yield symbol updates asked for during turns | 3,527 | | 22,892 | |
+| route symbol updates asked for during turns | 1,704 | | 18,511 | |
+| plots with a yield update waiting when the exe got the screen | | 2,491 | | 17,105 |
+| plots with a route update waiting | | 1,147 | | 10,894 |
+| time making yield and route symbols during turns | 0.36 s | 0.13 s | 3.53 s | 1.33 s |
+| time inside `CvGame::update()` | | | 49.6 s | 46.4 s |
+
+Release builds of the standard game, four runs of each taken in turn, the sum over the
+turns of each turn's fastest run: 4.61 s before and 4.29 s after. That is more than the
+time saved inside the DLL and was not looked into; the times of whole runs overlap.
+
+Feature symbols take 0.75 s of the huge game's turns (724 updates) and are what is left,
+with the route symbols, of the graphics work done during turns.

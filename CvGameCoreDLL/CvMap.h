@@ -98,6 +98,14 @@ public:
 	DllExport void updateVisibility();																// Exposed to Python
 	DllExport void updateSymbolVisibility();
 	void updateSymbols();
+
+	// Yield and route symbols asked for while CvGame::update() runs are made once, when it
+	// is about to give the exe the screen back: see CvPlot::updateSymbols().
+	bool isStockSymbolUpdates() const;		// the STOCK_SYMBOL_UPDATES define: do as stock does
+	void setSymbolsDeferred(bool bNewValue)	{ m_bSymbolsDeferred = bNewValue; }
+	bool isSymbolsDeferred() const			{ return m_bSymbolsDeferred; }
+	void setSymbolsDirty()					{ m_bSymbolsDirty = true; }
+	void updateDeferredSymbols();
 	DllExport void updateMinimapColor();															// Exposed to Python
 	void updateSight(bool bIncrement);
 	void updateIrrigated();
@@ -323,6 +331,9 @@ protected:
 	mutable std::vector<unsigned long long> m_aiPlotUnitTeams;			// per plot: as for the blocks
 	mutable std::vector<unsigned long long> m_aiPlotOwnerTeams;
 	mutable std::vector<unsigned long long> m_aiPlotReachTeams;			// per plot, TEAM_REACH_WORDS words: teams with such a unit that reaches that far
+
+	bool m_bSymbolsDeferred;		// CvGame::update() is running: keep symbol updates for its end
+	bool m_bSymbolsDirty;			// some plot has a symbol update waiting
 
 	void rebuildTeamIndex() const;
 	unsigned long long calculatePlotUnitTeams(const CvPlot* pPlot, unsigned long long* puiReachTeams) const;
