@@ -284,6 +284,34 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 
 		const unsigned long long uiRequestTicks = bridgedProfileTicks() - uiProfileRequestStart;
 
+		// probe for a road corridor: requests more than 12 plots away, by whether they
+		// started a tree and whether a land AI group asked with both ends on a route
+		{
+			static BridgedProfileSample aProbe[4] = {
+				{ "path probe, far: started a tree, both ends on a route" }, { "path probe, far: started a tree, other" },
+				{ "path probe, far: carried on a tree, both ends on a route" }, { "path probe, far: carried on a tree, other" } };
+			static BridgedProfileSample aProbeNodes[4] = {
+				{ "path probe nodes, far: started a tree, both ends on a route" }, { "path probe nodes, far: started a tree, other" },
+				{ "path probe nodes, far: carried on a tree, both ends on a route" }, { "path probe nodes, far: carried on a tree, other" } };
+			static BridgedProfileSample aProbeBig[2] = {
+				{ "path probe, far, both ends on a route: requests of 300 nodes or more" }, { "path probe nodes, far, both ends on a route: in requests of 300 nodes or more" } };
+			if (stepDistance(x1, y1, x2, y2) > 12)
+			{
+				const CvPlot* pFrom = GC.getMapINLINE().plotSorenINLINE(x1, y1);
+				const CvPlot* pTo = GC.getMapINLINE().plotSorenINLINE(x2, y2);
+				const bool bRoads = (settings.pGroup->getDomainType() == DOMAIN_LAND) && settings.pGroup->AI_isControlled()
+					&& pFrom->isRoute() && pTo->isRoute() && (pFrom->getArea() == pTo->getArea());
+				const int iProbe = (bProfileNewTree ? 0 : 2) + (bRoads ? 0 : 1);
+				bridgedProfileAdd(&aProbe[iProbe], uiRequestTicks);
+				bridgedProfileAdd(&aProbeNodes[iProbe], 0, s_uiProfileNodes);
+				if (bRoads && (s_uiProfileNodes >= 300))
+				{
+					bridgedProfileAdd(&aProbeBig[0], uiRequestTicks);
+					bridgedProfileAdd(&aProbeBig[1], 0, s_uiProfileNodes);
+				}
+			}
+		}
+
 		if (end_node && (settings.iMaxPath < 0 || end_node->m_iData2 <= settings.iMaxPath))
 		{
 			const int iDistance = stepDistance(x1, y1, x2, y2);
