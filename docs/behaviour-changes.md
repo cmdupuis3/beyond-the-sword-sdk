@@ -307,9 +307,11 @@ Seeded games, all players AI, profile builds, before and after on the same day.
 | time making yield and route symbols during turns | 0.36 s | 0.13 s | 3.53 s | 1.33 s |
 | time inside `CvGame::update()` | | | 49.6 s | 46.4 s |
 
-Release builds of the standard game, four runs of each taken in turn, the sum over the
-turns of each turn's fastest run: 4.61 s before and 4.29 s after. That is more than the
-time saved inside the DLL and was not looked into; the times of whole runs overlap.
+The release build on the standard game, four runs with `STOCK_SYMBOL_UPDATES` set and four
+without, taken in turn, the sum over the turns of each turn's fastest run: 4.47 s with
+stock symbol updates and 4.19 s without, 6% less. That is about twice the time saved
+inside the DLL. The rest was not looked into; these times include the exe's drawing
+between calls, and it has fewer symbols to deal with.
 
 Feature symbols take 0.75 s of the huge game's turns (724 updates) and are what is left,
 with the route symbols, of the graphics work done during turns.
