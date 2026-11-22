@@ -388,3 +388,26 @@ Path time by where it was asked for, huge game:
 | `AI_group` | 369 ms | 118 ms |
 | `AI_anyAttack` | 334 ms | 88 ms |
 | `AI_targetBarbCity` | 305 ms | 76 ms |
+
+## Collateral damage ties go to the unit first on the plot
+
+### What changed
+
+`CvUnit::collateralCombat()` chooses which defenders take collateral damage, highest value
+first (a random number times the unit's hit points). Stock kept the candidates in a
+`std::map` by the unit's address in memory, so when two units had the same value the one
+lower in memory was hit. The candidates are now kept in the order they are on the plot, and
+a tie goes to the unit first on the plot.
+
+### What differs from the stock game
+
+Only ties are settled differently, and stock settled them by where the units happened to be
+in memory. That made the game depend on how memory was laid out: a change that did nothing
+but allocate memory differently (the define lookup cache in `CvGlobals.cpp`, before this
+fix) changed the seeded huge game from turn 213. In multiplayer it could also differ between
+computers. A tie is rare: one of the 174 collateral choices in the seeded huge game, which
+stock happened to settle the same way, so the seeded games are unchanged.
+
+### How to check
+
+Profile builds count the choices and the ties ("collateral damage:" in the profile).

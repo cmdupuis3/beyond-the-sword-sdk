@@ -11708,8 +11708,12 @@ void CvUnit::collateralCombat(const CvPlot* pPlot, CvUnit* pSkipUnit)
 	int iCount;
 	int iValue;
 	int iBestValue;
-	std::map<CvUnit*, int> mapUnitDamage;
-	std::map<CvUnit*, int>::iterator it;
+	// The units that can take collateral damage, in the order they are on the plot, with the
+	// value that decides which are hit first. Stock kept them in a std::map by address, so a
+	// tie went to the unit that happened to sit lower in memory and the game could change with
+	// nothing more than how memory was laid out. Now a tie goes to the unit first on the plot.
+	// See docs/behaviour-changes.md.
+	std::vector< std::pair<CvUnit*, int> > aUnitDamage;
 
 	int iCollateralStrength = (getDomainType() == DOMAIN_AIR ? airBaseCombatStr() : baseCombatStr()) * collateralDamage() / 100;
 	if (iCollateralStrength == 0)
@@ -11738,7 +11742,7 @@ void CvUnit::collateralCombat(const CvPlot* pPlot, CvUnit* pSkipUnit)
 
 						iValue *= pLoopUnit->currHitPoints();
 
-						mapUnitDamage[pLoopUnit] = iValue;
+						aUnitDamage.push_back(std::make_pair(pLoopUnit, iValue));
 					}
 				}
 			}
@@ -11759,18 +11763,38 @@ void CvUnit::collateralCombat(const CvPlot* pPlot, CvUnit* pSkipUnit)
 		iBestValue = 0;
 		pBestUnit = NULL;
 
-		for (it = mapUnitDamage.begin(); it != mapUnitDamage.end(); it++)
+		size_t iBestIndex = 0;
+
+		for (size_t iIndex = 0; iIndex < aUnitDamage.size(); iIndex++)
 		{
-			if (it->second > iBestValue)
+			if (aUnitDamage[iIndex].second > iBestValue)
 			{
-				iBestValue = it->second;
-				pBestUnit = it->first;
+				iBestValue = aUnitDamage[iIndex].second;
+				pBestUnit = aUnitDamage[iIndex].first;
+				iBestIndex = iIndex;
 			}
 		}
 
+#ifdef BRIDGED_PROFILE
 		if (pBestUnit != NULL)
 		{
-			mapUnitDamage.erase(pBestUnit);
+			static BridgedProfileSample kChoices = { "collateral damage: units chosen" };
+			static BridgedProfileSample kTies = { "collateral damage: choices with a tie for the highest value" };
+			bridgedProfileAdd(&kChoices, 0);
+			for (size_t iIndex = iBestIndex + 1; iIndex < aUnitDamage.size(); iIndex++)
+			{
+				if (aUnitDamage[iIndex].second == iBestValue)
+				{
+					bridgedProfileAdd(&kTies, 0);
+					break;
+				}
+			}
+		}
+#endif
+
+		if (pBestUnit != NULL)
+		{
+			aUnitDamage.erase(aUnitDamage.begin() + iBestIndex);
 
 			if (NO_UNITCOMBAT == getUnitCombatType() || !pBestUnit->getUnitInfo().getUnitCombatCollateralImmune(getUnitCombatType()))
 			{
