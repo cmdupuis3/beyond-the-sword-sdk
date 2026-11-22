@@ -2878,14 +2878,17 @@ void CvPlayer::updateCitySight(bool bIncrement, bool bUpdatePlotGroups)
 }
 
 
+static bool isHigherTradeModifier(const std::pair<int, int>& kFirst, const std::pair<int, int>& kSecond)
+{
+	return (kFirst.first > kSecond.first);
+}
+
+
 void CvPlayer::updateTradeRoutes()
 {
 	PROFILE_FUNC();
 
-	CLLNode<int>* pCityNode;
 	CvCity* pLoopCity;
-	CvCity* pListCity;
-	CLinkList<int> cityList;
 	int iTotalTradeModifier;
 	int iLoop;
 
@@ -2894,41 +2897,24 @@ void CvPlayer::updateTradeRoutes()
 		pLoopCity->clearTradeRoutes();
 	}
 
-	cityList.clear();
+	// The cities in the order of their trade modifiers, highest first and equal ones in
+	// city order. Stock made the same list by insertion (a new city went before the first
+	// listed city with a lower modifier), working out the modifier of each city already
+	// listed again for every comparison. Each modifier is worked out once here, and nothing
+	// changes it while the list is made; a stable sort gives the order insertion gave.
+	std::vector<std::pair<int, int> > aSorted;	// modifier, city ID
 
 	for (pLoopCity = firstCity(&iLoop); pLoopCity != NULL; pLoopCity = nextCity(&iLoop))
 	{
 		iTotalTradeModifier = pLoopCity->totalTradeModifier();
-
-		pCityNode = cityList.head();
-
-		while (pCityNode != NULL)
-		{
-			pListCity = getCity(pCityNode->m_data);
-
-			if (iTotalTradeModifier > pListCity->totalTradeModifier())
-			{
-				cityList.insertBefore(pLoopCity->getID(), pCityNode);
-				break;
-			}
-			else
-			{
-				pCityNode = cityList.next(pCityNode);
-			}
-		}
-
-		if (pCityNode == NULL)
-		{
-			cityList.insertAtEnd(pLoopCity->getID());
-		}
+		aSorted.push_back(std::make_pair(iTotalTradeModifier, pLoopCity->getID()));
 	}
 
-	pCityNode = cityList.head();
+	std::stable_sort(aSorted.begin(), aSorted.end(), isHigherTradeModifier);
 
-	while (pCityNode != NULL)
+	for (size_t i = 0; i < aSorted.size(); i++)
 	{
-		getCity(pCityNode->m_data)->updateTradeRoutes();
-		pCityNode = cityList.next(pCityNode);
+		getCity(aSorted[i].second)->updateTradeRoutes();
 	}
 }
 

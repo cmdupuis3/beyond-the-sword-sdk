@@ -597,7 +597,23 @@ public:
 	int getPopulationTradeModifier() const;
 	int getPeaceTradeModifier(TeamTypes eTeam) const;
 	int getBaseTradeProfit(CvCity* pCity) const;
-	int calculateTradeProfit(CvCity* pCity) const;															// Exposed to Python
+	int calculateTradeProfit(CvCity* pCity) const;
+
+	// What calculateTradeProfit() looks up that is the same for every city this one could
+	// trade with: see updateTradeRoutes()
+	struct TradeProfitContext
+	{
+		int iTheirPopulationTradePercent;
+		int iTradeProfitPercent;
+		int iWorldTradeProfitPercent;
+		int iOverseasTradeModifier;
+		int iForeignTradeRouteModifier;
+		int iModifier;								// totalTradeModifier(NULL)
+		int aiPeaceTradeModifier[MAX_TEAMS];		// filled in as teams are met
+		bool abPeaceTradeModifier[MAX_TEAMS];
+	};
+	void calculateTradeProfitContext(TradeProfitContext& kContext) const;
+	int calculateTradeProfit(CvCity* pCity, TradeProfitContext& kContext) const;															// Exposed to Python
 	int calculateTradeYield(YieldTypes eIndex, int iTradeProfit) const;					// Exposed to Python
 	void setTradeYield(YieldTypes eIndex, int iNewValue);
 

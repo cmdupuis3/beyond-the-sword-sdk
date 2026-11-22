@@ -7851,6 +7851,92 @@ int CvCity::calculateTradeProfit(CvCity* pCity) const
 }
 
 
+//
+// calculateTradeProfit() for a city that works the profit out for many others.
+//
+// updateTradeRoutes() asks for the profit of a route to every city this one could trade
+// with. Each answer looks up, by name, the same six to ten global defines, and adds up the
+// same parts of this city's modifier. The context holds what does not depend on the other
+// city; the peace modifier depends on the other city's team only and is kept per team.
+// The sums are those of getBaseTradeProfit(), totalTradeModifier() and
+// calculateTradeProfit(), in their order.
+//
+// TRADE_VERIFY: a global define for profile builds. Set, each profit is also worked out
+// by calculateTradeProfit(pCity) and the ones that differ are counted.
+//
+void CvCity::calculateTradeProfitContext(TradeProfitContext& kContext) const
+{
+	kContext.iTheirPopulationTradePercent = GC.getDefineINT("THEIR_POPULATION_TRADE_PERCENT");
+	kContext.iTradeProfitPercent = GC.getDefineINT("TRADE_PROFIT_PERCENT");
+	kContext.iWorldTradeProfitPercent = GC.getWorldInfo(GC.getMapINLINE().getWorldSize()).getTradeProfitPercent();
+	kContext.iOverseasTradeModifier = GC.getDefineINT("OVERSEAS_TRADE_MODIFIER");
+	kContext.iForeignTradeRouteModifier = getForeignTradeRouteModifier();
+	kContext.iModifier = totalTradeModifier(NULL);
+
+	for (int iI = 0; iI < MAX_TEAMS; iI++)
+	{
+		kContext.abPeaceTradeModifier[iI] = false;
+	}
+}
+
+
+int CvCity::calculateTradeProfit(CvCity* pCity, TradeProfitContext& kContext) const
+{
+	// getBaseTradeProfit(pCity)
+	int iProfit = std::min(pCity->getPopulation() * kContext.iTheirPopulationTradePercent, plotDistance(getX_INLINE(), getY_INLINE(), pCity->getX_INLINE(), pCity->getY_INLINE()) * kContext.iWorldTradeProfitPercent);
+
+	iProfit *= kContext.iTradeProfitPercent;
+	iProfit /= 100;
+
+	iProfit = std::max(100, iProfit);
+
+	// totalTradeModifier(pCity)
+	int iModifier = kContext.iModifier;
+
+	if (area() != pCity->area())
+	{
+		iModifier += kContext.iOverseasTradeModifier;
+	}
+
+	const TeamTypes eTeam = pCity->getTeam();
+
+	if (getTeam() != eTeam)
+	{
+		iModifier += kContext.iForeignTradeRouteModifier;
+
+		if (!kContext.abPeaceTradeModifier[eTeam])
+		{
+			kContext.aiPeaceTradeModifier[eTeam] = getPeaceTradeModifier(eTeam);
+			kContext.abPeaceTradeModifier[eTeam] = true;
+		}
+
+		iModifier += kContext.aiPeaceTradeModifier[eTeam];
+	}
+
+	iProfit *= iModifier;
+	iProfit /= 10000;
+
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample aSamples[2] = { { "trade verify: profits checked" }, { "trade verify: TRADE PROFIT DIFFERS" } };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("TRADE_VERIFY") != 0) ? 1 : 0;
+	}
+	if (iVerify != 0)
+	{
+		bridgedProfileAdd(&aSamples[0], 0);
+		if (iProfit != calculateTradeProfit(pCity))
+		{
+			bridgedProfileAdd(&aSamples[1], 0);
+		}
+	}
+#endif
+
+	return iProfit;
+}
+
+
 int CvCity::calculateTradeYield(YieldTypes eIndex, int iTradeProfit) const
 {
 	if ((iTradeProfit > 0) && (GET_PLAYER(getOwnerINLINE()).getTradeYieldModifier(eIndex) > 0))
@@ -10453,7 +10539,9 @@ void CvCity::clearTradeRoutes()
 	CvCity* pLoopCity;
 	int iI;
 
-	for (iI = 0; iI < GC.getDefineINT("MAX_TRADE_ROUTES"); iI++)
+	const int iMaxTradeRoutes = GC.getDefineINT("MAX_TRADE_ROUTES");	// once, where stock looked it up in the loop's test
+
+	for (iI = 0; iI < iMaxTradeRoutes; iI++)
 	{
 		pLoopCity = getTradeCity(iI);
 
@@ -10494,6 +10582,9 @@ void CvCity::updateTradeRoutes()
 
 	clearTradeRoutes();
 
+	TradeProfitContext kTradeProfitContext;		// see calculateTradeProfit(pCity, kContext)
+	bool bTradeProfitContext = false;
+
 	if (!isDisorder() && !isPlundered())
 	{
 		iTradeRoutes = getTradeRoutes();
@@ -10501,6 +10592,9 @@ void CvCity::updateTradeRoutes()
 		FAssert(iTradeRoutes <= iMaxTradeRoutes);
 
 		CvPlotGroup* pPlotGroup = plotGroup(getOwnerINLINE());	// nothing below changes it
+
+		calculateTradeProfitContext(kTradeProfitContext);
+		bTradeProfitContext = true;
 
 		for (iI = 0; iI < MAX_PLAYERS; iI++)
 		{
@@ -10514,7 +10608,7 @@ void CvCity::updateTradeRoutes()
 						{
 							if (pLoopCity->plotGroup(getOwnerINLINE()) == pPlotGroup || bIgnorePlotGroup)
 							{
-								iValue = calculateTradeProfit(pLoopCity);
+								iValue = calculateTradeProfit(pLoopCity, kTradeProfitContext);
 
 								for (iJ = 0; iJ < iTradeRoutes; iJ++)
 								{
@@ -10550,7 +10644,8 @@ void CvCity::updateTradeRoutes()
 		{
 			pLoopCity->setTradeRoute(getOwnerINLINE(), true);
 
-			iTradeProfit += calculateTradeProfit(pLoopCity);
+			// (a trade city is only chosen in the block above, which made the context)
+			iTradeProfit += (bTradeProfitContext ? calculateTradeProfit(pLoopCity, kTradeProfitContext) : calculateTradeProfit(pLoopCity));
 		}
 	}
 
