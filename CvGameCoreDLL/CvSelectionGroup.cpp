@@ -4008,9 +4008,31 @@ CvPlot* CvSelectionGroup::getPathEndTurnPlot() const
 }
 
 
-bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToPlot, int iFlags, bool bReuse, int* piPathTurns) const
+// iMaxPath: when 0 or more, a path of more turns than that is no path. The K-Mod pathfinder
+// then does not search past that many turns, so it can find a path within the limit that
+// costs more than one beyond it; see docs/behaviour-changes.md. (The exe's pathfinder
+// searches in full, and a path over the limit is then turned down.)
+// The global define PATH_STOCK_SEARCHES set to 1 turns off the turn limits of path requests
+// and the AI's not searching for paths it could do without (AI_targetCity and others in
+// CvUnitAI.cpp); see docs/behaviour-changes.md.
+bool CvSelectionGroup::isStockPathSearches()
+{
+	static int iStock = -1;
+	if (iStock == -1)
+	{
+		iStock = ((GC.getDefineINT("PATH_STOCK_SEARCHES") != 0) ? 1 : 0);
+	}
+	return (iStock != 0);
+}
+
+bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToPlot, int iFlags, bool bReuse, int* piPathTurns, int iMaxPath) const
 {
 	PROFILE("CvSelectionGroup::generatePath()")
+
+	if (isStockPathSearches())
+	{
+		iMaxPath = -1;
+	}
 
 	FAStarNode* pNode;
 	bool bSuccess;
@@ -4023,7 +4045,7 @@ bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToP
 	// so bReuse is not passed on to it.
 	if (isKmodPathGroup(this))
 	{
-		path_finder.SetSettings(this, iFlags);
+		path_finder.SetSettings(this, iFlags, iMaxPath);
 
 		bSuccess = path_finder.GeneratePath(pFromPlot->getX_INLINE(), pFromPlot->getY_INLINE(), pToPlot->getX_INLINE(), pToPlot->getY_INLINE());
 
@@ -4037,7 +4059,8 @@ bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToP
 		g_szPathProbeFunction = NULL;	// see the top of CvUnitAI.cpp
 		g_iPathProbeLine = 0;
 		bridgedProfileAdd(&aServedSamples[0], 0);
-		if (pathVerifyMode() != 0)
+		// a request with a turn limit is not searched in full, so the exe's answer can differ
+		if ((pathVerifyMode() != 0) && (iMaxPath < 0))
 		{
 			pathVerify(this, pFromPlot, pToPlot, iFlags, bReuse, bSuccess, (path_finder.IsPathComplete() ? path_finder.GetEndNode() : NULL));
 		}
@@ -4048,6 +4071,15 @@ bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToP
 		gDLL->getFAStarIFace()->SetData(&GC.getPathFinder(), this);
 
 		bSuccess = gDLL->getFAStarIFace()->GeneratePath(&GC.getPathFinder(), pFromPlot->getX_INLINE(), pFromPlot->getY_INLINE(), pToPlot->getX_INLINE(), pToPlot->getY_INLINE(), false, iFlags, bReuse);
+
+		if (bSuccess && (iMaxPath >= 0))
+		{
+			FAStarNode* pLastNode = gDLL->getFAStarIFace()->GetLastNode(&GC.getPathFinder());
+			if ((pLastNode != NULL) && (pLastNode->m_iData2 > iMaxPath))
+			{
+				bSuccess = false;
+			}
+		}
 
 		s_pExePathGroup = this;
 		if (s_pKmodPathGroup == this)

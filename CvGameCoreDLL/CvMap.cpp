@@ -125,6 +125,7 @@ void CvMap::reset(CvMapInitData* pInitInfo)
 	m_bSymbolsDirty = false;
 	m_bTeamIndexDirty = true;
 	m_bAreaPlotsDirty = true;
+	m_uiRoutesSeen = 0;
 	setFoundValuesAllDirty();
 
 	//
@@ -1351,8 +1352,12 @@ void CvMap::read(FDataStreamBase* pStream)
 	setup();
 	// the plots' owners and unit lists were read without going through setOwner() and addUnit()
 	m_bTeamIndexDirty = true;
-	// and their areas without going through setArea()
+	// and their areas and routes without going through setArea() and setRouteType()
 	m_bAreaPlotsDirty = true;
+	for (int iI = 0; iI < numPlotsINLINE(); iI++)
+	{
+		noteRoute(m_pMapPlots[iI].getRouteType());
+	}
 	setFoundValuesAllDirty();
 }
 

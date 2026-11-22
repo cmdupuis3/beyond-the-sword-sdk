@@ -291,6 +291,12 @@ public:
 	const std::vector<int>& getAreaPlotIndices(int iArea) const;
 	void setAreaPlotsDirty() { m_bAreaPlotsDirty = true; }
 
+	// Whether a route of this type has been on some plot since the game was started or loaded.
+	// Never cleared during a game, so a path can use no route that is not seen. For bounds on
+	// how far a unit can move in a turn: see CvUnitAI::AI_maxStepsPerTurn().
+	bool isRouteSeen(RouteTypes eRoute) const { return ((eRoute >= 32) || (((m_uiRoutesSeen >> eRoute) & 1) != 0)); }
+	void noteRoute(RouteTypes eRoute) { if ((eRoute >= 0) && (eRoute < 32)) m_uiRoutesSeen |= (1u << eRoute); }
+
 	// City-site scores kept by the players: which plots need another look, a bit per player.
 	// See CvPlayerAI::AI_refreshFoundValues().
 	void foundValuesChanged(const CvPlot* pPlot, int iScoreRange, int iDeadlockRange);
@@ -340,6 +346,7 @@ protected:
 	mutable std::vector<unsigned long long> m_aiPlotReachTeams;			// per plot, TEAM_REACH_WORDS words: teams with such a unit that reaches that far
 
 	mutable bool m_bAreaPlotsDirty;
+	unsigned int m_uiRoutesSeen;	// a bit per route type: see isRouteSeen()
 	mutable std::map<int, std::vector<int> > m_aaiAreaPlots;	// by area ID: see getAreaPlotIndices()
 
 	bool m_bSymbolsDeferred;		// CvGame::update() is running: keep symbol updates for its end

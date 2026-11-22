@@ -6932,7 +6932,7 @@ bool CvUnitAI::AI_group(UnitAITypes eUnitAI, int iMaxGroup, int iMaxOwnUnitAI, i
 										{
 											if (!(pPlot->isVisibleEnemyUnit(this)))
 											{
-												if (generatePath(pPlot, 0, true, &iPathTurns))
+												if (generatePath(pPlot, 0, true, &iPathTurns, iMaxPath))
 												{
 													if (iPathTurns <= iMaxPath)
 													{
@@ -7040,7 +7040,7 @@ bool CvUnitAI::AI_groupMergeRange(UnitAITypes eUnitAI, int iMaxRange, bool bBigg
 							if (!bBiggerOnly || (pLoopGroup->getNumUnits() >= pGroup->getNumUnits()))
 							{
 								int iPathTurns;
-								if (generatePath(pLoopPlot, 0, true, &iPathTurns))
+								if (generatePath(pLoopPlot, 0, true, &iPathTurns, (iMaxRange + 2)))
 								{
 									if (iPathTurns <= (iMaxRange + 2))
 									{
@@ -7166,7 +7166,7 @@ bool CvUnitAI::AI_load(UnitAITypes eUnitAI, MissionAITypes eMissionAI, UnitAITyp
 														CvPlot* pUnitTargetPlot = pLoopUnit->getGroup()->AI_getMissionAIPlot();
 														if ((pUnitTargetPlot == NULL) || (pUnitTargetPlot->getTeam() == getTeam()) || (!pUnitTargetPlot->isOwned() || !isPotentialEnemy(pUnitTargetPlot->getTeam(), pUnitTargetPlot)))
 														{
-															if (generatePath(pLoopUnit->plot(), iFlags, true, &iPathTurns))
+															if (generatePath(pLoopUnit->plot(), iFlags, true, &iPathTurns, iMaxPath))
 															{
 																if (iPathTurns <= iMaxPath)
 																{
@@ -7297,7 +7297,7 @@ bool CvUnitAI::AI_guardCityMinDefender(bool bSearch)
 						if (iDefendersHave < iDefendersNeed + 1)
 						{
 							int iPathTurns;
-							if (!atPlot(pLoopCity->plot()) && generatePath(pLoopCity->plot(), 0, true, &iPathTurns))
+							if (!atPlot(pLoopCity->plot()) && generatePath(pLoopCity->plot(), 0, true, &iPathTurns, 10))
 							{
 								if (iPathTurns <= 10)
 								{
@@ -7492,7 +7492,7 @@ bool CvUnitAI::AI_guardCity(bool bLeave, bool bSearch, int iMaxPath)
 					{
 						if ((GC.getGame().getGameTurn() - pLoopCity->getGameTurnAcquired() < 10) || GET_PLAYER(getOwnerINLINE()).AI_plotTargetMissionAIs(pLoopCity->plot(), MISSIONAI_GUARD_CITY, getGroup()) < 2)
 						{
-							if (!atPlot(pLoopCity->plot()) && generatePath(pLoopCity->plot(), 0, true, &iPathTurns))
+							if (!atPlot(pLoopCity->plot()) && generatePath(pLoopCity->plot(), 0, true, &iPathTurns, iMaxPath))
 							{
 								if (iPathTurns <= iMaxPath)
 								{
@@ -10088,7 +10088,7 @@ bool CvUnitAI::AI_defend()
 					{
 						if (!(pLoopPlot->isVisibleEnemyUnit(this)))
 						{
-							if (!atPlot(pLoopPlot) && generatePath(pLoopPlot, 0, true, &iPathTurns))
+							if (!atPlot(pLoopPlot) && generatePath(pLoopPlot, 0, true, &iPathTurns, 1))
 							{
 								if (iPathTurns <= 1)
 								{
@@ -10156,7 +10156,7 @@ bool CvUnitAI::AI_safety()
 					{
 						if (!(pLoopPlot->isVisibleEnemyUnit(this)))
 						{
-							if (generatePath(pLoopPlot, ((iPass > 0) ? MOVE_IGNORE_DANGER : 0), true, &iPathTurns))
+							if (generatePath(pLoopPlot, ((iPass > 0) ? MOVE_IGNORE_DANGER : 0), true, &iPathTurns, 1))
 							{
 								if (iPathTurns <= 1)
 								{
@@ -10292,7 +10292,7 @@ bool CvUnitAI::AI_hide()
 					{
 						if (!(pLoopPlot->isVisibleEnemyUnit(this)))
 						{
-							if (generatePath(pLoopPlot, 0, true, &iPathTurns))
+							if (generatePath(pLoopPlot, 0, true, &iPathTurns, 1))
 							{
 								if (iPathTurns <= 1)
 								{
@@ -10410,7 +10410,7 @@ bool CvUnitAI::AI_goody(int iRange)
 					{
 						if (!(pLoopPlot->isVisibleEnemyUnit(this)))
 						{
-							if (!atPlot(pLoopPlot) && generatePath(pLoopPlot, 0, true, &iPathTurns))
+							if (!atPlot(pLoopPlot) && generatePath(pLoopPlot, 0, true, &iPathTurns, iRange))
 							{
 								if (iPathTurns <= iRange)
 								{
@@ -10627,7 +10627,7 @@ bool CvUnitAI::AI_exploreRange(int iRange)
 							{
 								PROFILE("AI_exploreRange 4");
 
-								if (!atPlot(pLoopPlot) && generatePath(pLoopPlot, MOVE_NO_ENEMY_TERRITORY, true, &iPathTurns))
+								if (!atPlot(pLoopPlot) && generatePath(pLoopPlot, MOVE_NO_ENEMY_TERRITORY, true, &iPathTurns, iRange))
 								{
 									if (iPathTurns <= iRange)
 									{
@@ -10750,6 +10750,26 @@ bool CvUnitAI::AI_targetCity(int iFlags)
 
 	if (pBestCity == NULL)
 	{
+		// The cities are valued before any path is looked for, at the most they could be worth:
+		// with a path of the fewest turns the distance allows (AI_minPathTurns()) and the most
+		// the random part of the value can add. They are looked at from the most valuable down,
+		// and once no city left could beat the best so far, the rest are not searched for. The
+		// best city is the one the stock loop would choose from the same paths, a tie going to
+		// the city stock meets first. The random part is drawn only for the cities whose paths
+		// are searched for. See docs/behaviour-changes.md.
+		struct TargetCityCandidate
+		{
+			CvCity* pCity;
+			int iMostValue;
+			int iOrder;
+			bool operator<(const TargetCityCandidate& kOther) const { return (iMostValue > kOther.iMostValue); }
+		};
+		std::vector<TargetCityCandidate> aCandidates;
+		const bool bAttackCity = (AI_getUnitAIType() == UNITAI_ATTACK_CITY); //lemming?
+		const bool bDefensiveArea = (area()->getAreaAIType(getTeam()) == AREAAI_DEFENSIVE);
+		const int iMaxStepsPerTurn = AI_maxStepsPerTurn();
+		const bool bStockSearches = CvSelectionGroup::isStockPathSearches();	// PATH_STOCK_SEARCHES
+
 		for (iI = 0; iI < MAX_CIV_PLAYERS; iI++)
 		{
 			if (GET_PLAYER((PlayerTypes)iI).isAlive())
@@ -10758,37 +10778,87 @@ bool CvUnitAI::AI_targetCity(int iFlags)
 				{
 					if (AI_plotValid(pLoopCity->plot()) && AI_potentialEnemy(GET_PLAYER((PlayerTypes)iI).getTeam(), pLoopCity->plot()))
 					{
-						if (!atPlot(pLoopCity->plot()) && generatePath(pLoopCity->plot(), iFlags, true, &iPathTurns))
+						if (!atPlot(pLoopCity->plot()))
 						{
-							iValue = 0;
-							if (AI_getUnitAIType() == UNITAI_ATTACK_CITY) //lemming?
-							{
-								iValue = GET_PLAYER(getOwnerINLINE()).AI_targetCityValue(pLoopCity, false, false);
-							}
-							else
-							{
-								iValue = GET_PLAYER(getOwnerINLINE()).AI_targetCityValue(pLoopCity, true, true);
-							}
+							TargetCityCandidate kCandidate;
+							kCandidate.pCity = pLoopCity;
+							kCandidate.iOrder = (int)aCandidates.size();
 
-							iValue *= 1000;
-							
-							if ((area()->getAreaAIType(getTeam()) == AREAAI_DEFENSIVE))
+							// (with PATH_STOCK_SEARCHES no city is valued before its path is found,
+							// as in stock: a value asks the exe's step pathfinder, which answers
+							// from its last search)
+							iValue = 0;
+							if (!bStockSearches)
 							{
-								if (pLoopCity->calculateCulturePercent(getOwnerINLINE()) < 75)
+								iValue = GET_PLAYER(getOwnerINLINE()).AI_targetCityValue(pLoopCity, false, !bAttackCity);
+								if (!bAttackCity)
+								{
+									iValue += pLoopCity->getPopulation() / 2;	// the most the random part adds
+								}
+								iValue *= 1000;
+								if (bDefensiveArea && (pLoopCity->calculateCulturePercent(getOwnerINLINE()) < 75))
 								{
 									iValue /= 2;
 								}
+								const int iMinTurns = AI_minPathTurns(pLoopCity->plot(), iMaxStepsPerTurn);
+								iValue /= (4 + iMinTurns*iMinTurns);
 							}
+							kCandidate.iMostValue = iValue;
 
-							iValue /= (4 + iPathTurns*iPathTurns);
-
-							if (iValue > iBestValue)
-							{
-								iBestValue = iValue;
-								pBestCity = pLoopCity;
-							}
+							aCandidates.push_back(kCandidate);
 						}
 					}
+				}
+			}
+		}
+
+		if (!bStockSearches)
+		{
+			std::stable_sort(aCandidates.begin(), aCandidates.end());
+		}
+		int iBestOrder = MAX_INT;
+
+		for (size_t iCandidate = 0; iCandidate < aCandidates.size(); iCandidate++)
+		{
+			const TargetCityCandidate& kCandidate = aCandidates[iCandidate];
+
+			// the rest are worth no more than this one, and come after it in stock order if they tie
+			if (!bStockSearches && ((kCandidate.iMostValue <= 0) || (kCandidate.iMostValue < iBestValue) || ((kCandidate.iMostValue == iBestValue) && (kCandidate.iOrder > iBestOrder))))
+			{
+				break;
+			}
+
+			pLoopCity = kCandidate.pCity;
+
+			if (generatePath(pLoopCity->plot(), iFlags, true, &iPathTurns))
+			{
+				iValue = 0;
+				if (bAttackCity)
+				{
+					iValue = GET_PLAYER(getOwnerINLINE()).AI_targetCityValue(pLoopCity, false, false);
+				}
+				else
+				{
+					iValue = GET_PLAYER(getOwnerINLINE()).AI_targetCityValue(pLoopCity, true, true);
+				}
+
+				iValue *= 1000;
+
+				if (bDefensiveArea)
+				{
+					if (pLoopCity->calculateCulturePercent(getOwnerINLINE()) < 75)
+					{
+						iValue /= 2;
+					}
+				}
+
+				iValue /= (4 + iPathTurns*iPathTurns);
+
+				if ((iValue > iBestValue) || ((iValue == iBestValue) && (iValue > 0) && (kCandidate.iOrder < iBestOrder)))
+				{
+					iBestValue = iValue;
+					iBestOrder = kCandidate.iOrder;
+					pBestCity = pLoopCity;
 				}
 			}
 		}
@@ -10887,28 +10957,75 @@ bool CvUnitAI::AI_targetBarbCity()
 	iBestValue = 0;
 	pBestCity = NULL;
 
+	// The cities are valued before any path is looked for, at the most they could be worth
+	// with a path of the fewest turns the distance allows (AI_minPathTurns()), and looked at
+	// from the most valuable down; once no city left could beat the best so far, the rest are
+	// not searched for. The best city is the one the stock loop would choose from the same
+	// paths, a tie going to the city stock meets first. See docs/behaviour-changes.md.
+	struct BarbCityCandidate
+	{
+		CvCity* pCity;
+		int iMostValue;
+		int iOrder;
+		bool operator<(const BarbCityCandidate& kOther) const { return (iMostValue > kOther.iMostValue); }
+	};
+	std::vector<BarbCityCandidate> aCandidates;
+	const int iMaxStepsPerTurn = AI_maxStepsPerTurn();
+	const bool bStockSearches = CvSelectionGroup::isStockPathSearches();	// PATH_STOCK_SEARCHES
+
 	for (pLoopCity = GET_PLAYER(BARBARIAN_PLAYER).firstCity(&iLoop); pLoopCity != NULL; pLoopCity = GET_PLAYER(BARBARIAN_PLAYER).nextCity(&iLoop))
 	{
 		if (AI_plotValid(pLoopCity->plot()))
 		{
 			if (pLoopCity->isRevealed(getTeam(), false))
 			{
-				if (!atPlot(pLoopCity->plot()) && generatePath(pLoopCity->plot(), 0, true, &iPathTurns))
+				const int iMinTurns = AI_minPathTurns(pLoopCity->plot(), iMaxStepsPerTurn);
+
+				if (!atPlot(pLoopCity->plot()) && (bStockSearches || (iMinTurns < 10)))	// a path of 10 turns or more is not wanted
 				{
-					if (iPathTurns < 10)
-					{
-						iValue = GET_PLAYER(getOwnerINLINE()).AI_targetCityValue(pLoopCity, false);
+					BarbCityCandidate kCandidate;
+					kCandidate.pCity = pLoopCity;
+					kCandidate.iOrder = (int)aCandidates.size();
+					// (not with PATH_STOCK_SEARCHES: see AI_targetCity)
+					kCandidate.iMostValue = (bStockSearches ? 0 : ((GET_PLAYER(getOwnerINLINE()).AI_targetCityValue(pLoopCity, false) * 1000) / (iMinTurns + 1)));
+					aCandidates.push_back(kCandidate);
+				}
+			}
+		}
+	}
 
-						iValue *= 1000;
+	if (!bStockSearches)
+	{
+		std::stable_sort(aCandidates.begin(), aCandidates.end());
+	}
+	int iBestOrder = MAX_INT;
 
-						iValue /= (iPathTurns + 1);
+	for (size_t iCandidate = 0; iCandidate < aCandidates.size(); iCandidate++)
+	{
+		const BarbCityCandidate& kCandidate = aCandidates[iCandidate];
 
-						if (iValue > iBestValue)
-						{
-							iBestValue = iValue;
-							pBestCity = pLoopCity;
-						}
-					}
+		if (!bStockSearches && ((kCandidate.iMostValue <= 0) || (kCandidate.iMostValue < iBestValue) || ((kCandidate.iMostValue == iBestValue) && (kCandidate.iOrder > iBestOrder))))
+		{
+			break;
+		}
+
+		pLoopCity = kCandidate.pCity;
+
+		if (generatePath(pLoopCity->plot(), 0, true, &iPathTurns, 9))
+		{
+			if (iPathTurns < 10)
+			{
+				iValue = GET_PLAYER(getOwnerINLINE()).AI_targetCityValue(pLoopCity, false);
+
+				iValue *= 1000;
+
+				iValue /= (iPathTurns + 1);
+
+				if ((iValue > iBestValue) || ((iValue == iBestValue) && (iValue > 0) && (kCandidate.iOrder < iBestOrder)))
+				{
+					iBestValue = iValue;
+					iBestOrder = kCandidate.iOrder;
+					pBestCity = pLoopCity;
 				}
 			}
 		}
@@ -11056,7 +11173,7 @@ bool CvUnitAI::AI_cityAttack(int iRange, int iOddsThreshold, bool bFollow)
 					{
 						if (AI_potentialEnemy(pLoopPlot->getTeam(), pLoopPlot))
 						{
-							if (!atPlot(pLoopPlot) && ((bFollow) ? canMoveInto(pLoopPlot, true) : (generatePath(pLoopPlot, 0, true, &iPathTurns) && (iPathTurns <= iRange))))
+							if (!atPlot(pLoopPlot) && ((bFollow) ? canMoveInto(pLoopPlot, true) : (generatePath(pLoopPlot, 0, true, &iPathTurns, iRange) && (iPathTurns <= iRange))))
 							{
 								iValue = getGroup()->AI_attackOdds(pLoopPlot, true);
 
@@ -11132,7 +11249,7 @@ bool CvUnitAI::AI_anyAttack(int iRange, int iOddsThreshold, int iMinStack, bool 
 				{
 					if (pLoopPlot->isVisibleEnemyUnit(this) || (pLoopPlot->isCity() && AI_potentialEnemy(pLoopPlot->getTeam())))
 					{
-						if (!atPlot(pLoopPlot) && ((bFollow) ? canMoveInto(pLoopPlot, true) : (generatePath(pLoopPlot, 0, true, &iPathTurns) && (iPathTurns <= iRange))))
+						if (!atPlot(pLoopPlot) && ((bFollow) ? canMoveInto(pLoopPlot, true) : (generatePath(pLoopPlot, 0, true, &iPathTurns, iRange) && (iPathTurns <= iRange))))
 						{
 							if (pLoopPlot->getNumVisibleEnemyDefenders(this) >= iMinStack)
 							{
@@ -11267,7 +11384,7 @@ bool CvUnitAI::AI_leaveAttack(int iRange, int iOddsThreshold, int iStrengthThres
 				{
 					if (pLoopPlot->isVisibleEnemyUnit(this) || (pLoopPlot->isCity() && AI_potentialEnemy(pLoopPlot->getTeam(), pLoopPlot)))
 					{
-						if (!atPlot(pLoopPlot) && (generatePath(pLoopPlot, 0, true, &iPathTurns) && (iPathTurns <= iRange)))
+						if (!atPlot(pLoopPlot) && (generatePath(pLoopPlot, 0, true, &iPathTurns, iRange) && (iPathTurns <= iRange)))
 						{
 							if (pLoopPlot->getNumVisibleEnemyDefenders(this) > 0)
 							{
@@ -12167,7 +12284,7 @@ bool CvUnitAI::AI_foundRange(int iRange, bool bFollow)
 							{
 								if (GET_PLAYER(getOwnerINLINE()).AI_plotTargetMissionAIs(pLoopPlot, MISSIONAI_FOUND, getGroup(), 3) == 0)
 								{
-									if (generatePath(pLoopPlot, MOVE_SAFE_TERRITORY, true, &iPathTurns))
+									if (generatePath(pLoopPlot, MOVE_SAFE_TERRITORY, true, &iPathTurns, iRange))
 									{
 										if (iPathTurns <= iRange)
 										{
@@ -14773,7 +14890,7 @@ bool CvUnitAI::AI_retreatToCity(bool bPrimary, bool bAirlift, int iMaxPath)
 					{
 						if (!(pLoopCity->plot()->isVisibleEnemyUnit(this)))
 						{
-							if (!atPlot(pLoopCity->plot()) && generatePath(pLoopCity->plot(), ((iPass > 1) ? MOVE_IGNORE_DANGER : 0), true, &iPathTurns))
+							if (!atPlot(pLoopCity->plot()) && generatePath(pLoopCity->plot(), ((iPass > 1) ? MOVE_IGNORE_DANGER : 0), true, &iPathTurns, ((iPass == 2) ? 1 : iMaxPath)))
 							{
 								if (iPathTurns <= ((iPass == 2) ? 1 : iMaxPath))
 								{
@@ -15981,7 +16098,7 @@ bool CvUnitAI::AI_reconSpy(int iRange)
 				if (iValue > 0)
 				{
 					int iPathTurns;
-					if (generatePath(pLoopPlot, 0, true, &iPathTurns))
+					if (generatePath(pLoopPlot, 0, true, &iPathTurns, iRange))
 					{
 						if (iPathTurns <= iRange)
 						{
@@ -16056,7 +16173,7 @@ int CvUnitAI::AI_getEspionageTargetValue(CvPlot* pPlot, int iMaxPath)
 			}
 
 			int iPathTurns;
-			if (generatePath(pPlot, 0, true, &iPathTurns))
+			if (generatePath(pPlot, 0, true, &iPathTurns, iMaxPath))
 			{
 				if (iPathTurns <= iMaxPath)
 				{
@@ -16236,6 +16353,23 @@ bool CvUnitAI::AI_moveToStagingCity()
 	}
 	
 
+	// The cities are looked at from the most they could be worth down, with a path of the
+	// fewest turns the distance allows (AI_minPathTurns()), and once no city left could beat
+	// the best so far, the rest are not searched for. The best city is the one the stock loop
+	// would choose from the same paths, a tie going to the city stock meets first. See
+	// docs/behaviour-changes.md.
+	struct StagingCandidate
+	{
+		CvCity* pCity;
+		int iThreat;
+		int iMostValue;
+		int iOrder;
+		bool operator<(const StagingCandidate& kOther) const { return (iMostValue > kOther.iMostValue); }
+	};
+	std::vector<StagingCandidate> aCandidates;
+	const int iMaxStepsPerTurn = AI_maxStepsPerTurn();
+	const bool bStockSearches = CvSelectionGroup::isStockPathSearches();	// PATH_STOCK_SEARCHES
+
 	for (pLoopCity = GET_PLAYER(getOwnerINLINE()).firstCity(&iLoop); pLoopCity != NULL; pLoopCity = GET_PLAYER(getOwnerINLINE()).nextCity(&iLoop))
 	{
 		if (AI_plotValid(pLoopCity->plot()))
@@ -16243,21 +16377,54 @@ bool CvUnitAI::AI_moveToStagingCity()
 			iValue = pLoopCity->AI_cityThreat();
 			if (iValue > 0)
 			{
-				if (generatePath(pLoopCity->plot(), 0, true, &iPathTurns))
+				StagingCandidate kCandidate;
+				kCandidate.pCity = pLoopCity;
+				kCandidate.iThreat = iValue;
+				kCandidate.iOrder = (int)aCandidates.size();
+				iValue *= 1000;
+				iValue /= (5 + AI_minPathTurns(pLoopCity->plot(), iMaxStepsPerTurn));
+				if ((pLoopCity->plot() != plot()) && pLoopCity->isVisible(eTargetTeam, false))
 				{
-					iValue *= 1000;
-					iValue /= (5 + iPathTurns);
-					if ((pLoopCity->plot() != plot()) && pLoopCity->isVisible(eTargetTeam, false))
-					{
-						iValue /= 2;
-					}
-
-					if (iValue > iBestValue)
-					{
-						iBestValue = iValue;
-						pBestPlot = getPathEndTurnPlot();
-					}
+					iValue /= 2;
 				}
+				kCandidate.iMostValue = iValue;
+				aCandidates.push_back(kCandidate);
+			}
+		}
+	}
+
+	if (!bStockSearches)
+	{
+		std::stable_sort(aCandidates.begin(), aCandidates.end());
+	}
+	int iBestOrder = MAX_INT;
+
+	for (size_t iCandidate = 0; iCandidate < aCandidates.size(); iCandidate++)
+	{
+		const StagingCandidate& kCandidate = aCandidates[iCandidate];
+
+		if (!bStockSearches && ((kCandidate.iMostValue <= 0) || (kCandidate.iMostValue < iBestValue) || ((kCandidate.iMostValue == iBestValue) && (kCandidate.iOrder > iBestOrder))))
+		{
+			break;
+		}
+
+		pLoopCity = kCandidate.pCity;
+
+		if (generatePath(pLoopCity->plot(), 0, true, &iPathTurns))
+		{
+			iValue = kCandidate.iThreat;
+			iValue *= 1000;
+			iValue /= (5 + iPathTurns);
+			if ((pLoopCity->plot() != plot()) && pLoopCity->isVisible(eTargetTeam, false))
+			{
+				iValue /= 2;
+			}
+
+			if ((iValue > iBestValue) || ((iValue == iBestValue) && (iValue > 0) && (kCandidate.iOrder < iBestOrder)))
+			{
+				iBestValue = iValue;
+				iBestOrder = kCandidate.iOrder;
+				pBestPlot = getPathEndTurnPlot();
 			}
 		}
 	}
@@ -16748,6 +16915,58 @@ bool CvUnitAI::AI_plotValid(CvPlot* pPlot)
 // area. NULL when any plot can be valid. A scan of the map that does nothing for a plot
 // AI_plotValid() rejects can go through this list instead: it meets the same valid plots in
 // the same order. The unit must stay on its plot while the list is in use.
+// The most plots this unit, or a group it is in, can move in one turn: a step costs no less
+// than CvPlot::movementCost() can make it, which is the cheapest of the routes on the map
+// for the team (CvMap::isRouteSeen()) or of a plot without a route, and never less than 1,
+// and a unit with any moves left can take a step. For bounds on what a path could be worth before it is searched for.
+int CvUnitAI::AI_maxStepsPerTurn() const
+{
+	// without a route: a plot costs one move or more (half of one for a double move), or
+	// nothing if the XML has a terrain or feature that costs nothing
+	int iCheapestStep = GC.getMOVE_DENOMINATOR() / 2;
+
+	for (int iI = 0; iI < GC.getNumTerrainInfos(); iI++)
+	{
+		if (GC.getTerrainInfo((TerrainTypes)iI).getMovementCost() <= 0)
+		{
+			iCheapestStep = 1;
+		}
+	}
+	for (int iI = 0; iI < GC.getNumFeatureInfos(); iI++)
+	{
+		if (GC.getFeatureInfo((FeatureTypes)iI).getMovementCost() <= 0)
+		{
+			iCheapestStep = 1;
+		}
+	}
+
+	for (int iI = 0; iI < GC.getNumRouteInfos(); iI++)
+	{
+		if (!GC.getMapINLINE().isRouteSeen((RouteTypes)iI))
+		{
+			continue;	// not on any plot, so no path uses it
+		}
+
+		const CvRouteInfo& kRoute = GC.getRouteInfo((RouteTypes)iI);
+		const int iRouteStep = std::min(kRoute.getMovementCost() + GET_TEAM(getTeam()).getRouteChange((RouteTypes)iI), kRoute.getFlatMovementCost() * baseMoves());
+		iCheapestStep = std::min(iCheapestStep, std::max(1, iRouteStep));
+	}
+
+	iCheapestStep = std::max(1, iCheapestStep);
+
+	return std::max(1, (maxMoves() + iCheapestStep - 1) / iCheapestStep);
+}
+
+
+// The fewest turns a path from this unit's plot to pPlot can take (a path takes at least one),
+// given AI_maxStepsPerTurn(): each step moves to an adjacent plot.
+int CvUnitAI::AI_minPathTurns(const CvPlot* pPlot, int iMaxStepsPerTurn) const
+{
+	const int iDistance = stepDistance(getX_INLINE(), getY_INLINE(), pPlot->getX_INLINE(), pPlot->getY_INLINE());
+	return std::max(1, (iDistance + iMaxStepsPerTurn - 1) / iMaxStepsPerTurn);
+}
+
+
 const std::vector<int>* CvUnitAI::AI_plotValidScanList() const
 {
 	if ((getDomainType() == DOMAIN_LAND) && !canMoveAllTerrain())
@@ -16852,7 +17071,7 @@ bool CvUnitAI::AI_stackAttackCity(int iRange, int iPowerThreshold, bool bFollow)
 					{
 						if (AI_potentialEnemy(pLoopPlot->getTeam(), pLoopPlot))
 						{
-							if (!atPlot(pLoopPlot) && ((bFollow) ? canMoveInto(pLoopPlot, /*bAttack*/ true, /*bDeclareWar*/ true) : (generatePath(pLoopPlot, 0, true, &iPathTurns) && (iPathTurns <= iRange))))
+							if (!atPlot(pLoopPlot) && ((bFollow) ? canMoveInto(pLoopPlot, /*bAttack*/ true, /*bDeclareWar*/ true) : (generatePath(pLoopPlot, 0, true, &iPathTurns, iRange) && (iPathTurns <= iRange))))
 							{
 								iValue = getGroup()->AI_compareStacks(pLoopPlot, /*bPotentialEnemy*/ true, /*bCheckCanAttack*/ true, /*bCheckCanMove*/ true);
 
@@ -16919,7 +17138,7 @@ bool CvUnitAI::AI_moveIntoCity(int iRange)
 				{
 					if (pLoopPlot->isCity() || (pLoopPlot->isCity(true)))
 					{
-                        if (canMoveInto(pLoopPlot, false) && (generatePath(pLoopPlot, 0, true, &iPathTurns) && (iPathTurns <= 1)))
+                        if (canMoveInto(pLoopPlot, false) && (generatePath(pLoopPlot, 0, true, &iPathTurns, 1) && (iPathTurns <= 1)))
                         {
                             iValue = 1;
                             if (pLoopPlot->getPlotCity() != NULL)

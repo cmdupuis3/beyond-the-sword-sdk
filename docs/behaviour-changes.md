@@ -315,3 +315,76 @@ between calls, and it has fewer symbols to deal with.
 
 Feature symbols take 0.75 s of the huge game's turns (724 updates) and are what is left,
 with the route symbols, of the graphics work done during turns.
+
+## The AI does not search for paths it could do without
+
+### What changed
+
+Two changes to where the unit AI (`CvUnitAI.cpp`) asks for paths.
+
+- Turn limits. Twenty places look for a path and then use it only if it takes no more
+  than so many turns (`AI_exploreRange`, `AI_guardCity`, `AI_group`, `AI_anyAttack`,
+  `AI_targetBarbCity`, `AI_cityAttack`, `AI_reconSpy` and others). They now pass that limit
+  to `generatePath()`, and the K-Mod pathfinder does not search past it. K-Mod does the same.
+  The stock checks of the turns are still there.
+
+- Cities not worth a search. `AI_targetCity` (which enemy city to attack),
+  `AI_moveToStagingCity` (which threatened city of its own to gather in) and
+  `AI_targetBarbCity` work out each city's value before looking for a path to it, as the
+  most it could be worth: with a path of the fewest turns the distance allows
+  (`CvUnitAI::AI_minPathTurns()`) and, in `AI_targetCity`, the most the random part of the
+  value can add. The cities are then tried from the most valuable down, and once no city
+  left could beat the best so far the rest are not searched for. The fewest turns comes
+  from the cheapest step any route on the map allows the team (`CvMap::isRouteSeen()`): a
+  railroad lets a unit move about 10 plots a turn, a road 2 per move it has, more where a technology makes roads faster.
+  `AI_targetBarbCity` also drops a city that cannot be reached in under 10 turns, which it
+  never wanted.
+
+### What differs from the stock game
+
+From the same paths, the same city is chosen: a tie goes to the city stock meets first. The
+game still differs from stock:
+
+- With a turn limit, the pathfinder looks for the cheapest path within the limit. Stock
+  found the cheapest path of any length and turned it down if it was too long. Where the
+  cheapest path is too long and a dearer one is not, the unit now takes the dearer one.
+
+- Fewer paths are searched for. The K-Mod pathfinder carries its search over from one
+  request to the next (see "AI groups find their paths with the K-Mod pathfinder"), so a
+  later path of equal cost can be a different one.
+
+- `AI_targetCity` draws the random part of a city's value only for the cities it searches
+  a path for, so the game's random numbers run differently from then on.
+
+- A city's value asks the exe's step pathfinder for a distance, and that pathfinder answers
+  from its last search. Valuing cities that stock would not have valued changes some of
+  those answers.
+
+### How to turn it off
+
+Set the global define `PATH_STOCK_SEARCHES` to 1. The seeded standard game then has the
+same state hash as before on all 151 turns.
+
+### What it does, measured
+
+Profile builds, the seeded games before the change and after it. The games differ from
+turn 90 (standard) and 83 (huge), so these are totals of different games.
+
+| | standard, before | standard, after | huge, before | huge, after |
+| --- | ---: | ---: | ---: | ---: |
+| path requests | 358,952 | 332,786 | 1,762,272 | 1,734,874 |
+| nodes the K-Mod pathfinder processed | 1,214,623 | 801,216 | 16,636,396 | 9,179,826 |
+| time in `KmodPathFinder::GeneratePath` | 0.63 s | 0.52 s | 7.89 s | 5.12 s |
+| time in `CvGame::update()` | 6.2 s | 5.1 s | 39.5 s | 37.5 s |
+
+Path time by where it was asked for, huge game:
+
+| | before | after |
+| --- | ---: | ---: |
+| `AI_targetCity` | 1,049 ms | 337 ms |
+| `AI_exploreRange` | 794 ms | 271 ms |
+| `AI_guardCity` | 600 ms | 151 ms |
+| `AI_moveToStagingCity` | 452 ms | 22 ms |
+| `AI_group` | 369 ms | 118 ms |
+| `AI_anyAttack` | 334 ms | 88 ms |
+| `AI_targetBarbCity` | 305 ms | 76 ms |

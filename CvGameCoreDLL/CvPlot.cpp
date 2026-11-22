@@ -5467,6 +5467,7 @@ void CvPlot::setRouteType(RouteTypes eNewValue, bool bUpdatePlotGroups)
 		updatePlotGroupBonus(false);
 		m_eRouteType = eNewValue;
 		updatePlotGroupBonus(true);
+		GC.getMapINLINE().noteRoute(eNewValue);
 
 		// a route adds to the reach of the units here: see the team index in CvMap.cpp
 		GC.getMapINLINE().updatePlotTeams(this);
