@@ -58,6 +58,17 @@ option(BRIDGED_PROFILE "Time the SDK PROFILE scopes inside the DLL" OFF)
 if(BRIDGED_PROFILE)
   target_compile_definitions(CvGameCoreDLL PRIVATE BRIDGED_PROFILE)
 endif()
+# How far the DLL may depart from the stock game (CvGameCoreDLL/BridgedTiers.h):
+# 1 reproduces BtS, 2 may play a different game but always the same one, 3 may play a
+# different game from one run to the next.
+set(BRIDGED_TIER "2" CACHE STRING "Tiers of change the DLL has: 1, 2 or 3")
+if(BRIDGED_TIER STREQUAL "1")
+  target_compile_definitions(CvGameCoreDLL PRIVATE REPRODUCE_BTS)
+elseif(BRIDGED_TIER STREQUAL "3")
+  target_compile_definitions(CvGameCoreDLL PRIVATE NON_DETERMINISM_OK)
+elseif(NOT BRIDGED_TIER STREQUAL "2")
+  message(FATAL_ERROR "BRIDGED_TIER must be 1, 2 or 3")
+endif()
 target_include_directories(CvGameCoreDLL PRIVATE "${compat_dir}" "${compat_dir}/include-2")
 target_include_directories(CvGameCoreDLL SYSTEM PRIVATE
   "${compat_dir}/include-2/Boost-1.32.0/include"

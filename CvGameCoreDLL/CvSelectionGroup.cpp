@@ -36,8 +36,15 @@ static const CvSelectionGroup* s_pExePathGroup = NULL;
 // that is the engine that draws the path in the interface, and the units have to go where
 // the path was drawn.
 //
+// Tier 2 (see BridgedTiers.h): equal-cost paths and reused searches can come out differently
+// from the exe's, so a REPRODUCE_BTS build leaves every group with the exe's pathfinder.
+//
 static bool isKmodPathGroup(const CvSelectionGroup* pGroup)
 {
+#ifdef REPRODUCE_BTS
+	(void)pGroup;
+	return false;
+#else
 #ifdef BRIDGED_PROFILE
 	// PATH_EXE_ONLY: a global define for profile builds. Set, the exe's pathfinder serves
 	// every group, as in the stock game, and a seeded game must match the stock DLL's turn
@@ -55,6 +62,7 @@ static bool isKmodPathGroup(const CvSelectionGroup* pGroup)
 #endif
 
 	return const_cast<CvSelectionGroup*>(pGroup)->AI_isControlled();
+#endif
 }
 
 #ifdef BRIDGED_PROFILE
@@ -4015,14 +4023,19 @@ CvPlot* CvSelectionGroup::getPathEndTurnPlot() const
 // The global define PATH_STOCK_SEARCHES set to 1 turns off the turn limits of path requests
 // and the AI's not searching for paths it could do without (AI_targetCity and others in
 // CvUnitAI.cpp); see docs/behaviour-changes.md.
+// Tier 2 (see BridgedTiers.h): a REPRODUCE_BTS build always searches as stock does.
 bool CvSelectionGroup::isStockPathSearches()
 {
+#ifdef REPRODUCE_BTS
+	return true;
+#else
 	static int iStock = -1;
 	if (iStock == -1)
 	{
 		iStock = ((GC.getDefineINT("PATH_STOCK_SEARCHES") != 0) ? 1 : 0);
 	}
 	return (iStock != 0);
+#endif
 }
 
 bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToPlot, int iFlags, bool bReuse, int* piPathTurns, int iMaxPath) const

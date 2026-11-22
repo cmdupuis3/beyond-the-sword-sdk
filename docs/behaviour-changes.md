@@ -1,11 +1,106 @@
 # Behaviour changes
 
 Changes in this DLL that can make a game play differently from the stock Beyond the Sword
-3.19 game core. Each entry says what differs, where the code came from and how to check it.
-Changes that leave every game identical (the same state hash on every turn of the seeded
-benchmark games) are not listed; their commit messages describe them.
+3.19 game core, or that a player or a mod could otherwise notice. Each entry says what
+differs, where the code came from and how to check it.
+
+## Tiers
+
+Every change is in one of three tiers. `CvGameCoreDLL/BridgedTiers.h` has the definitions
+and says how a change is marked in the source; `tools/build_dll.py --tier N` chooses how
+many tiers a DLL has.
+
+| tier | what it means | in the source | built with |
+| --- | --- | --- | --- |
+| 1 | Reproduces BtS: the game state is the stock DLL's on every turn. | no guard | every build; `--tier 1` (`REPRODUCE_BTS`) has nothing else |
+| 2 | Deterministic, not BtS: the game can differ from stock, but the same start and the same input always give the same game. | `#ifndef REPRODUCE_BTS` | the default, and `--tier 3` |
+| 3 | Not deterministic: the game can differ from one run to the next (the clock, threads, where things are in memory). | `#ifdef NON_DETERMINISM_OK` | `--tier 3` (`NON_DETERMINISM_OK`) only |
+
+The entries below, by tier:
+
+| entry | tier | off switch in a default build |
+| --- | --- | --- |
+| AI groups find their paths with the K-Mod pathfinder | 2 | `PATH_EXE_ONLY` (profile builds) |
+| A player's workers act as a team | 2 | `WORKER_STOCK_CHOICE` |
+| The AI does not search for paths it could do without | 2 | `PATH_STOCK_SEARCHES` |
+| AI turns do not wait for the screen | 1 | `STOCK_TURN_SLICES` |
+| Yield and route symbols are made once before the screen is drawn | 1 | `STOCK_SYMBOL_UPDATES` |
+| Collateral damage ties go to the unit first on the plot | 1 | none |
+| The score update asks Python for each player's score once | 1 | none |
+| Optional: a city's turn without its Python callbacks | 1 | off unless a mod sets the defines |
+| Optional: four more Python calls a mod can leave out | 1 | off unless a mod sets the defines |
+
+Nothing is in tier 3 yet. Tier 1 changes with nothing for a player or a mod to notice are
+not listed; their commit messages describe them.
+
+### What tier 1 allows
+
+The game state has to be the stock DLL's. These may differ, and tier 1 changes use all
+three:
+
+- What the exe is asked to draw, and when (the two entries on the screen and on symbols).
+- How often Python is asked a question whose answer does not change. The stock Python
+  answers the same however often it is asked; a mod whose callback counts its calls, or
+  reads what the DLL is in the middle of setting, could tell. The changes: the score update
+  (below), and the unit upgrade code (`CvUnitAI::AI_upgrade()`, `CvUnit::canUpgrade()`),
+  which asks `getUpgradePriceOverride` less often: not for unit types off the unit's
+  upgrade tree, and only for an upgrade some city can make. Where a callback can
+  change the answer itself, the change stands aside and the stock code runs: the kept
+  city-site scores when any of the three found-value callbacks is on, the build lists
+  when `canBuild` is.
+- A result that in stock depended on something outside the game. There is one: collateral
+  damage ties, which stock settled by where units were in memory. Any result stock could
+  have given counts as stock's.
+
+One tier 1 change runs by the clock. While a human takes their turn,
+`CvGame::updateAhead()` brings one AI player's kept city-site scores up to date every
+tenth of a second. How much gets done depends on how long the human takes. It stays in
+tier 1 because nothing done ahead is relied on: a kept score is used only if nothing it
+was worked out from has changed, and the player's own turn does whatever is left. Any
+other work done ahead has to meet the same rule, and leave the stock once-per-turn caches
+(`m_iStrategyHashCacheTurn`, `m_iAveragesCacheTurn`, `m_iUpgradeUnitsCacheTurn`) as it
+found them, or it is tier 3.
+
+### How the tiers are checked
+
+The seeded games (`bench/run_bench.py`: Continents, seed 20261120, all players AI) log a
+hash of the game state at the start of every game turn.
+
+- Tier 1: a `--tier 1` DLL has to give the stock DLL's hash on every turn of the standard
+  game (150 turns) and the huge game (250 turns). The stock DLL's logs are
+  `bench/results/std150-stock.log` and `bench/results/huge250-stock.log`; if they are not
+  there, run `bench/run_bench.py --dll` on `Assets/CvGameCoreDLL.dll` of the game itself.
+  A change meant for tier 1 is checked the same way before it is committed. In a default
+  build the three off switches of the tier 2 entries together give the same games, which
+  saves a build: `--define PATH_EXE_ONLY=1 --define WORKER_STOCK_CHOICE=1 --define
+  PATH_STOCK_SEARCHES=1` with a `--profile` DLL.
+
+  When the tiers were introduced, both ways gave the stock DLL's hash on all 151 turns of
+  the standard game (`c509b3f9` at turn 150) and all 251 of the huge game (`be311025` at
+  turn 250). The turns took 8.8 s and 101 s with the `--tier 1` DLL against 151 s and
+  477 s with the stock DLL, most of which is the stock game waiting for the screen.
+- Tier 2: the same hash on every turn as the default build before the change, or a new
+  entry here saying what differs. The same DLL run twice has to give the same hashes.
+- Tier 3: nothing to match. The default build must not change.
+
+What the check does not cover:
+
+- The hash takes in, for every living player, their gold, population and land; for every
+  city its plot, population, food, production and culture; for every unit its plot, type,
+  damage and experience. It leaves out the random number generator, technologies,
+  buildings, improvements, diplomacy and religion. A difference in those shows only once
+  it has moved a unit or changed a city, which in a game of this length it nearly always
+  does.
+- One seed, stock Python and stock XML. No game played by a human and no multiplayer game
+  has been checked, in any tier.
+- Saving and loading. Nothing the changes keep between turns is saved, so a loaded game
+  starts with those caches empty. For tier 1 that makes no difference. A tier 2 game that
+  is saved and loaded can go on differently from the same game played straight through
+  (the K-Mod pathfinder's kept search is gone), as a stock game can (the exe's is).
 
 ## AI groups find their paths with the K-Mod pathfinder
+
+Tier 2. A `--tier 1` build leaves every group with the exe's pathfinder.
 
 ### What changed
 
@@ -133,6 +228,8 @@ Not checked: a game played by a human, and multiplayer.
 
 ## A player's workers act as a team
 
+Tier 2. A `--tier 1` build never applies the two rules.
+
 ### What changed
 
 Each AI worker still decides for itself, in the stock order of things to try. Two rules now
@@ -178,6 +275,8 @@ one of the five games. The first rule is rarely needed: it took over a build twi
 five games, and eight times in the 250-turn huge game.
 
 ## AI turns do not wait for the screen
+
+Tier 1: the game state is the same. What differs is when the screen is drawn.
 
 ### What changed
 
@@ -255,6 +354,8 @@ Benchmark times from before this change include those waits and are not comparab
 times from after it. The state hashes are.
 
 ## Yield and route symbols are made once before the screen is drawn
+
+Tier 1: the game state is the same. What differs is what the exe is asked to draw.
 
 ### What changed
 
@@ -348,6 +449,8 @@ three runs are few, so read that as a gain and not as its size.
 
 ## The AI does not search for paths it could do without
 
+Tier 2. A `--tier 1` build searches as stock does.
+
 ### What changed
 
 Two changes to where the unit AI (`CvUnitAI.cpp`) asks for paths.
@@ -421,6 +524,9 @@ Path time by where it was asked for, huge game:
 
 ## Collateral damage ties go to the unit first on the plot
 
+Tier 1: stock's own result here depended on where units were in memory, so no build could
+match it, and this result is one stock could have given.
+
 ### What changed
 
 `CvUnit::collateralCombat()` chooses which defenders take collateral damage, highest value
@@ -443,6 +549,9 @@ stock happened to settle the same way, so the seeded games are unchanged.
 Profile builds count the choices and the ties ("collateral damage:" in the profile).
 
 ## Optional: a city's turn without its Python callbacks
+
+Tier 1 as built: the stock game does not set the defines. A mod that sets one for a callback
+its Python uses has changed its own game.
 
 Nothing changes unless a mod asks for it.
 
@@ -474,6 +583,9 @@ on the standard one (3,834). That is about 1% of the time in the DLL.
 
 ## The score update asks Python for each player's score once
 
+Tier 1 for the stock Python and for any `calculateScore` that does not read the ranks and
+scores while they are being set.
+
 ### What changed
 
 A player's score is worked out by Python (`calculateScore` in `CvGameUtils.py`).
@@ -497,6 +609,8 @@ calls and 0.06 s, about 2% of the time in the DLL. The huge game had 160,056 cal
 1.08 s before and was not run again.
 
 ## Optional: four more Python calls a mod can leave out
+
+Tier 1 as built: the stock game does not set the defines.
 
 Nothing changes unless a mod asks for it.
 

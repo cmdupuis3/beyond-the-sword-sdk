@@ -1,8 +1,8 @@
 # BridgedCvGameCore
 
 A Civilization IV: Beyond the Sword GameCore DLL built with Clang and C++23
-for the original 32-bit game. It preserves stock gameplay, Python 2.4 and
-Boost.Python bindings.
+for the original 32-bit game. It keeps the Python 2.4 and Boost.Python bindings.
+How closely it keeps to stock gameplay is chosen when it is built: see [Tiers](#tiers).
 
 ## Build
 
@@ -73,6 +73,25 @@ CMake configuration. `build_support.py` provides shared hashing and PE metadata.
 `dependency-lock.json` pins the Linux tools and stock references, `link-lock.json`
 pins additional tools and link inputs, and `windows-toolchain-lock.json` pins
 the Windows LLVM package.
+
+## Tiers
+
+Every change to the stock game core is in one of three tiers, and the build chooses how
+many of them the DLL has (`tools/build_dll.py --tier N`):
+
+| `--tier` | macro | what the DLL may do | output folder |
+| --- | --- | --- | --- |
+| 1 | `REPRODUCE_BTS` | Tier 1 only. The game state is the stock DLL's on every turn. | `tmp/dll-build-tier1` |
+| 2 (default) | neither | Tiers 1 and 2. The game can differ from the stock game, but the same start and the same input always give the same game. | `tmp/dll-build` |
+| 3 | `NON_DETERMINISM_OK` | Tiers 1 to 3. The game can differ from one run to the next. | `tmp/dll-build-tier3` |
+
+`CvGameCoreDLL/BridgedTiers.h` defines the tiers and says how a change is marked in the
+source. [docs/behaviour-changes.md](docs/behaviour-changes.md) lists the changes of tiers 2
+and 3, the tier 1 changes that a player or a mod could still notice, and how the tiers are
+checked. Nothing is in tier 3 yet, so a `--tier 3` DLL plays the same game as the default.
+
+The profile in `pgo/` was collected on the default build. A `--tier 1` build uses it too;
+the few functions that differ are optimised without it.
 
 ## Profile-guided optimisation
 

@@ -32,7 +32,12 @@ def main():
     parser.add_argument('--icu70-dir', type=Path, help='required for the pinned Linux LLVM package')
     parser.add_argument('--output-dir', type=Path,
                         help='default tmp/dll-build, with -no-pgo, -pgo-train or (for --pgo-use) -pgo '
-                             'added to the name, and then -profile with --profile')
+                             'added to the name, then -tier1 or -tier3 with --tier, and then '
+                             '-profile with --profile')
+    parser.add_argument('--tier', type=int, choices=[1, 2, 3], default=2,
+                        help='how far the DLL may depart from the stock game (CvGameCoreDLL/BridgedTiers.h): '
+                             '1 reproduces BtS (REPRODUCE_BTS); 2, the default, may play a different game '
+                             'but always the same one; 3 may differ from run to run (NON_DETERMINISM_OK)')
     parser.add_argument('--profile', action='store_true',
                         help='time the SDK PROFILE scopes inside the DLL (see FProfiler.h)')
     parser.add_argument('--no-lto', dest='lto', action='store_false',
@@ -64,7 +69,10 @@ def main():
             name += '-pgo'
         elif args.no_pgo and not args.profile:
             name += '-no-pgo'
+        if args.tier != 2:
+            name += f'-tier{args.tier}'
         args.output_dir = ROOT / (name + ('-profile' if args.profile else ''))
+    tier_macro = {1: 'REPRODUCE_BTS', 3: 'NON_DETERMINISM_OK'}.get(args.tier)
     for name, path in support.dependency_paths(args.deps_dir).items():
         if getattr(args, name) is None:
             setattr(args, name, path)
@@ -118,6 +126,7 @@ def main():
                      '-DCMAKE_TOOLCHAIN_FILE=' + (ROOT / 'cmake/windows-x86-clang.cmake').as_posix(),
                      '-DCMAKE_BUILD_TYPE=Release', '-DPython3_EXECUTABLE=' + Path(sys.executable).as_posix(),
                      '-DBRIDGED_PROFILE=' + ('ON' if args.profile else 'OFF'),
+                     '-DBRIDGED_TIER=' + str(args.tier),
                      '-DBRIDGED_LTO=' + ('ON' if args.lto else 'OFF'),
                      '-DBRIDGED_PGO=' + ('TRAIN' if args.pgo_train else 'USE' if args.pgo_use else 'OFF'),
                      '-DBRIDGED_PGO_PROFILE=' + (args.pgo_use.resolve().as_posix() if args.pgo_use else ''),
@@ -196,6 +205,10 @@ def main():
                                   '-fno-wchar', '-fno-strict-aliasing', '-ffp-contract=off', '-Wall', '-Wextra'}
                 if not required_flags.issubset(flags) or any(flag in flags for flag in ['-O3', '-ffast-math']):
                     raise RuntimeError('an SDK unit does not use the required target/language/helper configuration')
+                tier_flags = {flag[2:] for flag in flags if flag in ('-DREPRODUCE_BTS', '-DNON_DETERMINISM_OK')}
+                if tier_flags != ({tier_macro} if tier_macro else set()):
+                    raise RuntimeError(f'an SDK unit was not compiled for tier {args.tier}: {source}; '
+                                       'configure a fresh build directory with --output-dir')
                 if ('-flto' in flags) != args.lto:
                     raise RuntimeError(f'an SDK unit was not compiled for the requested link-time optimisation: '
                                        f'{source}; configure a fresh build directory with --output-dir')
@@ -246,6 +259,7 @@ def main():
                       original_public_exports=len(stock['exports']), missing_public_exports=missing_public,
                       added_public_exports=sorted(set(image['exports']) - set(stock['exports'])),
                       units=len(expected_sources), adapter_units=len(adapter_sources),
+                      tier=args.tier, tier_macro=tier_macro,
                       link_time_optimisation=args.lto,
                       profile_guided_optimisation=('train' if args.pgo_train else 'use' if args.pgo_use else 'off'),
                       pgo_profile=(str(args.pgo_use) if args.pgo_use else None),
@@ -286,6 +300,7 @@ def main():
     finally:
         support.write_json(report_path, report)
     print(json.dumps({'build_pass': report['pass'], 's3_complete': False,
+                      'tier': report['tier'],
                       'units': report['units'], 'required_exports': report['required_exports'],
                       'profile_guided_optimisation': report['profile_guided_optimisation'],
                       'pgo_mismatched_functions': report['pgo_mismatched_functions'],

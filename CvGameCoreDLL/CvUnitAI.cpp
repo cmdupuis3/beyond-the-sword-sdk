@@ -1295,8 +1295,13 @@ void CvUnitAI::AI_settleMove()
 // than half as far from it. The job is still there for that worker to take; if it does not,
 // it is taken next turn.
 //
+// Tier 2 (see BridgedTiers.h): a REPRODUCE_BTS build never applies the rules.
+//
 static bool workerTeamRules()
 {
+#ifdef REPRODUCE_BTS
+	return false;
+#else
 	static int iOff = -1;
 
 	if (iOff == -1)
@@ -1305,6 +1310,7 @@ static bool workerTeamRules()
 	}
 
 	return (iOff == 0);
+#endif
 }
 
 // where the player's other workers stand that have yet to decide this turn, for the worker now deciding

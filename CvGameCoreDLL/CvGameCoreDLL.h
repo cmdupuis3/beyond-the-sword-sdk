@@ -8,6 +8,9 @@
 // Author - Mustafa Thamer
 //
 
+// REPRODUCE_BTS and NON_DETERMINISM_OK: how far this build may depart from the stock game
+#include "BridgedTiers.h"
+
 //
 // WINDOWS
 //
