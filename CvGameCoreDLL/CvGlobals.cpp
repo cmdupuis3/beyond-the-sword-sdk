@@ -2579,6 +2579,8 @@ FVariableSystem* CvGlobals::getDefinesVarSystem()
 
 void CvGlobals::cacheGlobals()
 {
+	definesChanged();	// the defines may have changed: what getDefineINT() kept is out of date
+
 	m_iMOVE_DENOMINATOR = getDefineINT("MOVE_DENOMINATOR");
 	m_iNUM_UNIT_PREREQ_OR_BONUSES = getDefineINT("NUM_UNIT_PREREQ_OR_BONUSES");
 	m_iNUM_BUILDING_PREREQ_OR_BONUSES = getDefineINT("NUM_BUILDING_PREREQ_OR_BONUSES");
@@ -2657,17 +2659,182 @@ void CvGlobals::cacheGlobals()
 	m_iUSE_ON_UNIT_LOST_CALLBACK = getDefineINT("USE_ON_UNIT_LOST_CALLBACK");
 }
 
+//
+// Defines kept by getDefineINT() and getDefineFLOAT().
+//
+// A lookup by name in the defines (FVariableSystem) makes a std::string of the name, hashes it
+// and searches a hash map: about 170 ns, and the seeded huge game asks 16.8 million times.
+// The answers are kept here, in a table for each type, by the address of the name asked
+// with. Nearly every caller passes a string literal, so the same address comes back with the
+// same name, but a caller can pass a buffer that holds another name the next time (Python
+// does), so a kept answer is used only if the name is also the same as the one kept with it.
+//
+// A define changes only when the XML is loaded and when a define is set (setDefineINT() and
+// the others, from Python), and each of those calls definesChanged(), which empties the
+// tables. Profile builds with the global define DEFINE_CACHE_VERIFY set look every kept answer
+// up again and count those that differ.
+//
+namespace
+{
+	enum
+	{
+		DEFINE_CACHE_SIZE = 2048,		// a power of 2, above the number of places that ask
+		DEFINE_CACHE_PROBES = 8,
+		DEFINE_CACHE_NAME = 64,			// a longer name is looked up every time
+	};
+
+	struct DefineCacheEntry
+	{
+		const char* szKey;				// the address asked with; NULL for an empty entry
+		union
+		{
+			int iValue;
+			float fValue;
+		};
+		char szName[DEFINE_CACHE_NAME];
+	};
+
+	DefineCacheEntry s_aIntDefines[DEFINE_CACHE_SIZE];
+	DefineCacheEntry s_aFloatDefines[DEFINE_CACHE_SIZE];
+
+	inline unsigned int defineCacheSlot(const char* szName)
+	{
+		return ((((unsigned int)(size_t)szName) * 2654435761u) >> 21) & (DEFINE_CACHE_SIZE - 1);
+	}
+
+	// The entry kept for szName, or NULL. *ppFree is set to an empty entry it could be kept in,
+	// or NULL if there is none near enough.
+	inline DefineCacheEntry* defineCacheFind(DefineCacheEntry* aTable, const char* szName, DefineCacheEntry** ppFree)
+	{
+		*ppFree = NULL;
+		unsigned int uiSlot = defineCacheSlot(szName);
+
+		for (int iProbe = 0; iProbe < DEFINE_CACHE_PROBES; iProbe++)
+		{
+			DefineCacheEntry& kEntry = aTable[uiSlot];
+
+			if (kEntry.szKey == NULL)
+			{
+				*ppFree = &kEntry;
+				return NULL;
+			}
+
+			if ((kEntry.szKey == szName) && (strcmp(kEntry.szName, szName) == 0))
+			{
+				return &kEntry;
+			}
+
+			uiSlot = (uiSlot + 1) & (DEFINE_CACHE_SIZE - 1);
+		}
+
+		return NULL;
+	}
+
+	inline void defineCacheKeep(DefineCacheEntry* pFree, const char* szName)
+	{
+		const size_t uiLength = strlen(szName);
+		if (uiLength < DEFINE_CACHE_NAME)
+		{
+			memcpy(pFree->szName, szName, uiLength + 1);
+			pFree->szKey = szName;
+		}
+	}
+
+#ifdef BRIDGED_PROFILE
+	int s_iDefineCacheVerify = -1;	// read again after the defines change: see definesChanged()
+
+	bool isDefineCacheVerify()
+	{
+		if (s_iDefineCacheVerify == -1)
+		{
+			int iValue = 0;
+			GC.getDefinesVarSystem()->GetValue("DEFINE_CACHE_VERIFY", iValue);	// not through the cache
+			s_iDefineCacheVerify = ((iValue != 0) ? 1 : 0);
+		}
+		return (s_iDefineCacheVerify != 0);
+	}
+
+	void defineCacheVerified(bool bSame)
+	{
+		static BridgedProfileSample kChecked = { "define cache verify: kept answers checked" };
+		static BridgedProfileSample kWrong = { "define cache verify: KEPT ANSWER DIFFERS" };
+		bridgedProfileAdd(&kChecked, 0);
+		if (!bSame)
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
+}
+
+void CvGlobals::definesChanged()
+{
+	memset(s_aIntDefines, 0, sizeof(s_aIntDefines));
+	memset(s_aFloatDefines, 0, sizeof(s_aFloatDefines));
+#ifdef BRIDGED_PROFILE
+	s_iDefineCacheVerify = -1;
+	static BridgedProfileSample kChanged = { "define cache: emptied (CvGlobals::definesChanged)" };
+	bridgedProfileAdd(&kChanged, 0);
+#endif
+}
+
 int CvGlobals::getDefineINT( const char * szName ) const
 {
+	DefineCacheEntry* pFree;
+	DefineCacheEntry* pKept = defineCacheFind(s_aIntDefines, szName, &pFree);
+
+	if (pKept != NULL)
+	{
+#ifdef BRIDGED_PROFILE
+		if (isDefineCacheVerify())
+		{
+			int iFresh = 0;
+			GC.getDefinesVarSystem()->GetValue( szName, iFresh );
+			defineCacheVerified(iFresh == pKept->iValue);
+		}
+#endif
+		return pKept->iValue;
+	}
+
 	int iReturn = 0;
 	GC.getDefinesVarSystem()->GetValue( szName, iReturn );
+
+	if (pFree != NULL)
+	{
+		pFree->iValue = iReturn;
+		defineCacheKeep(pFree, szName);
+	}
+
 	return iReturn;
 }
 
 float CvGlobals::getDefineFLOAT( const char * szName ) const
 {
+	DefineCacheEntry* pFree;
+	DefineCacheEntry* pKept = defineCacheFind(s_aFloatDefines, szName, &pFree);
+
+	if (pKept != NULL)
+	{
+#ifdef BRIDGED_PROFILE
+		if (isDefineCacheVerify())
+		{
+			float fFresh = 0;
+			GC.getDefinesVarSystem()->GetValue( szName, fFresh );
+			defineCacheVerified(memcmp(&fFresh, &pKept->fValue, sizeof(float)) == 0);
+		}
+#endif
+		return pKept->fValue;
+	}
+
 	float fReturn = 0;
 	GC.getDefinesVarSystem()->GetValue( szName, fReturn );
+
+	if (pFree != NULL)
+	{
+		pFree->fValue = fReturn;
+		defineCacheKeep(pFree, szName);
+	}
+
 	return fReturn;
 }
 

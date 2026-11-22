@@ -338,6 +338,9 @@ bool CvXMLLoadUtility::SetPostGlobalsGlobalDefines()
 		idx = FindInInfoClass(szVal);
 		GC.getDefinesVarSystem()->SetValue("BARBARIAN_LEADER", idx);
 
+		// the defines above changed from names to numbers
+		GC.definesChanged();
+
 		return true;
 	}
 
