@@ -5815,6 +5815,15 @@ void CvGame::addGreatPersonBornName(const CvWString& szName)
 
 // Protected Functions...
 
+// A row in profile builds for each part of CvGame::doTurn(). The time also stays in the
+// row of CvGame::doTurn() itself.
+#ifdef BRIDGED_PROFILE
+#define GAME_TURN_PART(name) static BridgedProfileSample sample = { "game turn: " name }; BridgedProfileManual partTime(&sample);
+#else
+#define GAME_TURN_PART(name)
+#endif
+
+
 void CvGame::doTurn()
 {
 	PROFILE_BEGIN("CvGame::doTurn()");
@@ -5824,35 +5833,59 @@ void CvGame::doTurn()
 	int iI;
 
 	// END OF TURN
-	CvEventReporter::getInstance().beginGameTurn( getGameTurn() );
-
-	doUpdateCacheOnTurn();
-
-	updateScore();
-
-	doDeals();
-
-	for (iI = 0; iI < MAX_TEAMS; iI++)
 	{
-		if (GET_TEAM((TeamTypes)iI).isAlive())
+		GAME_TURN_PART("begin event (Python)");
+		CvEventReporter::getInstance().beginGameTurn( getGameTurn() );
+	}
+
+	{
+		GAME_TURN_PART("caches and score");
+		doUpdateCacheOnTurn();
+
+		updateScore();
+	}
+
+	{
+		GAME_TURN_PART("deals");
+		doDeals();
+	}
+
+	{
+		GAME_TURN_PART("teams");
+		for (iI = 0; iI < MAX_TEAMS; iI++)
 		{
-			GET_TEAM((TeamTypes)iI).doTurn();
+			if (GET_TEAM((TeamTypes)iI).isAlive())
+			{
+				GET_TEAM((TeamTypes)iI).doTurn();
+			}
 		}
 	}
 
-	GC.getMapINLINE().doTurn();
+	{
+		GAME_TURN_PART("map");
+		GC.getMapINLINE().doTurn();
+	}
 
-	createBarbarianCities();
+	{
+		GAME_TURN_PART("barbarian cities");
+		createBarbarianCities();
+	}
 
-	createBarbarianUnits();
+	{
+		GAME_TURN_PART("barbarian units");
+		createBarbarianUnits();
+	}
 
-	doGlobalWarming();
+	{
+		GAME_TURN_PART("global warming, holy cities, headquarters, votes");
+		doGlobalWarming();
 
-	doHolyCity();
+		doHolyCity();
 
-	doHeadquarters();
+		doHeadquarters();
 
-	doDiploVote();
+		doDiploVote();
+	}
 
 	gDLL->getInterfaceIFace()->setEndTurnMessage(false);
 	gDLL->getInterfaceIFace()->setHasMovedUnit(false);
@@ -5867,11 +5900,16 @@ void CvGame::doTurn()
 		}
 	}
 
-	CvEventReporter::getInstance().endGameTurn(getGameTurn());
+	{
+		GAME_TURN_PART("end event (Python)");
+		CvEventReporter::getInstance().endGameTurn(getGameTurn());
+	}
 
 	incrementGameTurn();
 	incrementElapsedGameTurns();
 
+	{
+	GAME_TURN_PART("first player's turn started");
 	if (isMPOption(MPOPTION_SIMULTANEOUS_TURNS))
 	{
 		shuffleArray(aiShuffle, MAX_PLAYERS, getSorenRand());
@@ -5930,10 +5968,18 @@ void CvGame::doTurn()
 		}
 	}
 
-	testVictory();
+	}
 
-	gDLL->getEngineIFace()->SetDirty(GlobePartialTexture_DIRTY_BIT, true);
-	gDLL->getEngineIFace()->DoTurn();
+	{
+		GAME_TURN_PART("victory test");
+		testVictory();
+	}
+
+	{
+		GAME_TURN_PART("exe's own turn work (engine DoTurn)");
+		gDLL->getEngineIFace()->SetDirty(GlobePartialTexture_DIRTY_BIT, true);
+		gDLL->getEngineIFace()->DoTurn();
+	}
 
 	PROFILE_END();
 
