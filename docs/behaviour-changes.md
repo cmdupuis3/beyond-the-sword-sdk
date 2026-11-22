@@ -495,3 +495,42 @@ Profile builds, the seeded standard game, the same state hash on every turn in p
 release builds: `CvPlayer::calculateScore()` falls from 71,991 calls and 0.22 s to 6,678
 calls and 0.06 s, about 2% of the time in the DLL. The huge game had 160,056 calls and
 1.08 s before and was not run again.
+
+## Optional: four more Python calls a mod can leave out
+
+Nothing changes unless a mod asks for it.
+
+Profile builds time every call the DLL makes into Python ("python:" and "python event:"
+in the profile). Four of the calls that cost most during the turns do nothing in the stock
+game. A mod can switch each one off with a global define set to 1, in its
+`PythonCallbackDefines.xml` for example:
+
+| define | call left out | when the stock game makes it | what the stock Python does |
+| --- | --- | --- | --- |
+| `SKIP_GET_EXTRA_COST_CALLBACK` | `getExtraCost` in `CvGameUtils.py` | every time a player's costs are worked out, which the AI does over and over while it sets its commerce rates and weighs trades | answers 0 |
+| `SKIP_GET_EXPERIENCE_NEEDED_CALLBACK` | `getExperienceNeeded` in `CvGameUtils.py` | for every unit every turn, and when a unit's experience changes | level squared plus 1, changed by the player's level experience modifier and rounded up |
+| `SKIP_AI_UNIT_UPDATE_CALLBACK` | `AI_unitUpdate` in `CvGameUtils.py` | for every unit the AI moves | answers no |
+| `SKIP_ON_UNIT_MOVE_CALLBACK` | the `unitMove` event (`onUnitMove` in `CvEventManager.py`) | for every plot a unit moves | writes to the log if movement logging is on |
+
+A define that is missing or 0 leaves its call on, as in stock. Setting one for a call that
+the mod's Python does use switches that Python off, so check the mod's Python first. With
+`SKIP_GET_EXPERIENCE_NEEDED_CALLBACK` set the DLL works out the stock formula itself, so it
+is only for a mod that has left the formula as it is. Set to 2 in a profile build, it asks
+Python as well and counts the answers that differ ("experience needed verify:" in the
+profile).
+
+Sword of Islam can set all but `SKIP_AI_UNIT_UPDATE_CALLBACK`: its `AI_unitUpdate` moves
+the inquisitors.
+
+Measured on the seeded standard game with all four set, the same state hash on every turn
+with and without them, in profile and release builds:
+
+- The C++ formula gave the same answer as Python all 13,426 times it was asked.
+- The four calls were 99,000 of the 167,000 calls into Python and 0.59 s of the 8.4 s in the
+  DLL (profile build): `getExtraCost` 61,538 calls and 0.25 s, the `unitMove` event 9,084
+  and 0.18 s, `getExperienceNeeded` 15,810 and 0.09 s, `AI_unitUpdate` 12,646 and 0.07 s.
+- Release build, three runs with and three without, taken in turn, the sum over the turns
+  of each turn's fastest run: 4.98 s without and 4.30 s with, 14% less. Whole runs differed
+  from one another by more than that, so the figure is indicative.
+
+The huge game was not run.

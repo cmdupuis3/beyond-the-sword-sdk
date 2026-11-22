@@ -6375,10 +6375,18 @@ int CvPlayer::calculateUnitSupply(int& iPaidUnits, int& iBaseSupplyCost) const
 
 int CvPlayer::calculatePreInflatedCosts() const
 {
-	CyArgsList argsList;
-	argsList.add(getID());
-	long lResult;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "getExtraCost", argsList.makeFunctionArgs(), &lResult);
+	// Asked every time a player's costs are worked out, which the AI does over and over
+	// while it sets its commerce rates and weighs trades; the stock getExtraCost in
+	// CvGameUtils.py only answers 0. A mod that has left it so can set the define
+	// SKIP_GET_EXTRA_COST_CALLBACK to 1 to leave the question out: see
+	// docs/behaviour-changes.md.
+	long lResult = 0;
+	if (GC.getDefineINT("SKIP_GET_EXTRA_COST_CALLBACK") == 0)
+	{
+		CyArgsList argsList;
+		argsList.add(getID());
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "getExtraCost", argsList.makeFunctionArgs(), &lResult);
+	}
 
 	return (calculateUnitCost() + calculateUnitSupply() + getTotalMaintenance() + getCivicUpkeep() + (int)lResult);
 }

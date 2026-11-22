@@ -2754,7 +2754,14 @@ void CvUnit::move(CvPlot* pPlot, bool bShow)
 		}
 	}
 
-	CvEventReporter::getInstance().unitMove(pPlot, this, pOldPlot);
+	// Sent for every plot a unit moves; the stock handler (onUnitMove in CvEventManager.py)
+	// only writes to the log when movement logging is on. A mod that does not use the event
+	// can set the define SKIP_ON_UNIT_MOVE_CALLBACK to 1 to leave it out: see
+	// docs/behaviour-changes.md.
+	if (GC.getDefineINT("SKIP_ON_UNIT_MOVE_CALLBACK") == 0)
+	{
+		CvEventReporter::getInstance().unitMove(pPlot, this, pOldPlot);
+	}
 }
 
 // false if unit is killed
@@ -8494,6 +8501,52 @@ int CvUnit::experienceNeeded() const
 
 	lExperienceNeeded = 0;
 	iExperienceNeeded = 0;
+
+	// Asked for every unit every turn and whenever a unit's experience changes. A mod that
+	// has left getExperienceNeeded in CvGameUtils.py as it is in the stock game can set the
+	// define SKIP_GET_EXPERIENCE_NEEDED_CALLBACK to 1; the stock formula is then worked out
+	// here. With the define at 2 a profile build asks Python as well and counts the answers
+	// that differ. See docs/behaviour-changes.md.
+	const int iSkipCallback = GC.getDefineINT("SKIP_GET_EXPERIENCE_NEEDED_CALLBACK");
+
+	if (iSkipCallback != 0)
+	{
+		iExperienceNeeded = getLevel() * getLevel() + 1;
+
+		const int iModifier = GET_PLAYER(getOwnerINLINE()).getLevelExperienceModifier();
+		if (iModifier != 0)
+		{
+			// Python rounds a division down, C++ towards zero, and the modifier can be negative
+			const int iNumerator = iExperienceNeeded * iModifier + 99;
+			int iChange = iNumerator / 100;
+			if ((iNumerator % 100) < 0)
+			{
+				iChange--;
+			}
+			iExperienceNeeded += iChange;
+		}
+
+#ifdef BRIDGED_PROFILE
+		if (iSkipCallback == 2)
+		{
+			static BridgedProfileSample kChecked = { "experience needed verify: answers checked" };
+			static BridgedProfileSample kWrong = { "experience needed verify: ANSWER DIFFERS FROM PYTHON" };
+
+			CyArgsList argsList;
+			argsList.add(getLevel());
+			argsList.add(getOwnerINLINE());
+			gDLL->getPythonIFace()->callFunction(PYGameModule, "getExperienceNeeded", argsList.makeFunctionArgs(),&lExperienceNeeded);
+
+			bridgedProfileAdd(&kChecked, 0);
+			if ((int)lExperienceNeeded != iExperienceNeeded)
+			{
+				bridgedProfileAdd(&kWrong, 0);
+			}
+		}
+#endif
+
+		return iExperienceNeeded;
+	}
 
 	CyArgsList argsList;
 	argsList.add(getLevel());	// pass in the units level

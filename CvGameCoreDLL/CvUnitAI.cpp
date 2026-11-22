@@ -92,15 +92,21 @@ bool CvUnitAI::AI_update()
 	FAssertMsg(isGroupHead(), "isGroupHead is expected to be true"); // XXX is this a good idea???
 
 	// allow python to handle it
-	CyUnit* pyUnit = new CyUnit(this);
-	CyArgsList argsList;
-	argsList.add(gDLL->getPythonIFace()->makePythonObject(pyUnit));	// pass in unit class
-	long lResult=0;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "AI_unitUpdate", argsList.makeFunctionArgs(), &lResult);
-	delete pyUnit;	// python fxn must not hold on to this pointer
-	if (lResult == 1)
+	// Asked for every unit the AI moves; the stock AI_unitUpdate in CvGameUtils.py only says
+	// no. A mod that has left it so can set the define SKIP_AI_UNIT_UPDATE_CALLBACK to 1 to
+	// leave the question out: see docs/behaviour-changes.md.
+	if (GC.getDefineINT("SKIP_AI_UNIT_UPDATE_CALLBACK") == 0)
 	{
-		return false;
+		CyUnit* pyUnit = new CyUnit(this);
+		CyArgsList argsList;
+		argsList.add(gDLL->getPythonIFace()->makePythonObject(pyUnit));	// pass in unit class
+		long lResult=0;
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "AI_unitUpdate", argsList.makeFunctionArgs(), &lResult);
+		delete pyUnit;	// python fxn must not hold on to this pointer
+		if (lResult == 1)
+		{
+			return false;
+		}
 	}
 
 	if (getDomainType() == DOMAIN_LAND)
