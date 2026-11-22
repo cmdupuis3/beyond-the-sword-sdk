@@ -63,34 +63,55 @@ found them, or it is tier 3.
 
 ### How the tiers are checked
 
-The seeded games (`bench/run_bench.py`: Continents, seed 20261120, all players AI) log a
-hash of the game state at the start of every game turn.
+The seeded games (`bench/run_bench.py`: Continents, seed 20261120, all players AI) log two
+hashes of the game state at the start of every game turn (`bench/mod/Assets/Python/BenchHarness.py`),
+and `bench/compare_bench.py` compares two logs on both.
 
-- Tier 1: a `--tier 1` DLL has to give the stock DLL's hash on every turn of the standard
-  game (150 turns) and the huge game (250 turns). The stock DLL's logs are
-  `bench/results/std150-stock.log` and `bench/results/huge250-stock.log`; if they are not
-  there, run `bench/run_bench.py --dll` on `Assets/CvGameCoreDLL.dll` of the game itself.
-  A change meant for tier 1 is checked the same way before it is committed. In a default
-  build the three off switches of the tier 2 entries together give the same games, which
-  saves a build: `--define PATH_EXE_ONLY=1 --define WORKER_STOCK_CHOICE=1 --define
-  PATH_STOCK_SEARCHES=1` with a `--profile` DLL.
+- `hash` takes in, for every living player, their gold, population and land; for every
+  city its plot, population, food, production and culture; for every unit its plot, type,
+  damage and experience. It is the hash every log since the first benchmark has.
+- `wide` is the stricter one. It was added with the tiers, so older logs do not have it. It
+  takes in the game's own sync checksum, which adds in the seeds of both random number
+  generators; the turn slice; every team's technologies, research progress, wars, open
+  borders, pacts and vassals; every player's research, civics, state religion, commerce
+  rates, assets, power, buildings by class and cities by religion; every city's and unit's
+  ID, what each city is building, its great people progress and culture level, each unit's
+  group, level and moves; and every plot's owner, improvement, route, feature and bonus.
 
-  When the tiers were introduced, both ways gave the stock DLL's hash on all 151 turns of
-  the standard game (`c509b3f9` at turn 150) and all 251 of the huge game (`be311025` at
-  turn 250). The turns took 8.8 s and 101 s with the `--tier 1` DLL against 151 s and
-  477 s with the stock DLL, most of which is the stock game waiting for the screen.
-- Tier 2: the same hash on every turn as the default build before the change, or a new
-  entry here saying what differs. The same DLL run twice has to give the same hashes.
+How each tier is checked:
+
+- Tier 1: a `--tier 1` DLL has to give the stock DLL's two hashes on every turn of the
+  standard game (150 turns) and the huge game (250 turns). The stock DLL's logs are
+  `bench/results/stock-std150.log` and `bench/results/stock-huge250.log`; if they are not
+  there, run `bench/run_bench.py --dll` on `Assets/CvGameCoreDLL.dll` of the game itself
+  (a minute and a half, and eight minutes). A change meant for tier 1 is checked the same
+  way before it is committed. In a default build the three off switches of the tier 2
+  entries together give the same games, which saves a build: `--define PATH_EXE_ONLY=1
+  --define WORKER_STOCK_CHOICE=1 --define PATH_STOCK_SEARCHES=1` with a `--profile` DLL.
+- Tier 2: the same two hashes on every turn as the default build before the change, or a
+  new entry here saying what differs. The same DLL run twice has to give the same hashes.
 - Tier 3: nothing to match. The default build must not change.
+
+When the tiers were introduced, release builds, one run each on the same day:
+
+| | standard, turn 150 `hash` / `wide` | time for the turns | huge, turn 250 `hash` / `wide` | time for the turns |
+| --- | --- | ---: | --- | ---: |
+| the stock DLL | `c509b3f9` / `d5742bbf` | 79.8 s | `be311025` / `80c2a597` | 491.4 s |
+| `--tier 1` | `c509b3f9` / `d5742bbf` | 5.6 s | `be311025` / `80c2a597` | 68.3 s |
+| default (`--tier 2`) | `d15313fe` / `78a4cdf8` | 4.3 s | `b566caa6` / `c30eaa13` | 57.0 s |
+
+The `--tier 1` DLL had the stock DLL's two hashes on all 151 turns of the standard game
+and all 251 of the huge one. The default DLL's first differ from stock's on turn 30
+(standard) and turn 12 (huge), both hashes on the same turn. Most of the stock DLL's time
+is the stock game waiting for the screen between passes (see "AI turns do not wait for the
+screen"); it was 151 s for the standard game on another day.
 
 What the check does not cover:
 
-- The hash takes in, for every living player, their gold, population and land; for every
-  city its plot, population, food, production and culture; for every unit its plot, type,
-  damage and experience. It leaves out the random number generator, technologies,
-  buildings, improvements, diplomacy and religion. A difference in those shows only once
-  it has moved a unit or changed a city, which in a game of this length it nearly always
-  does.
+- What the stock Python interface cannot read or the hashes leave out: what the AI
+  remembers and plans (attitudes, memories, war plans, unit missions), plot culture, what
+  each team has seen, and the random number generators other than through the sync
+  checksum, which multiplies them in with other numbers and can lose part of them.
 - One seed, stock Python and stock XML. No game played by a human and no multiplayer game
   has been checked, in any tier.
 - Saving and loading. Nothing the changes keep between turns is saved, so a loaded game

@@ -4,7 +4,8 @@
   python compare_bench.py results/stock.log results/clang.log
 
 Reports whether both runs played the same game (state hash equal on every turn) and how
-their turn times differ, overall and by stretch of the game.
+their turn times differ, overall and by stretch of the game. Logs that both have the wide
+hash (see BenchHarness.py) are compared on that as well; it is the stricter test.
 """
 import sys
 from pathlib import Path
@@ -30,6 +31,20 @@ def main():
         print(f'DIVERGED at game turn {diverged}: hashes {runs[0][diverged][2]} vs {runs[1][diverged][2]}')
         comparable = [turn for turn in common if turn < diverged]
         print(f'timing compared only over the {len(comparable)} turns before that')
+
+    wide = [turn for turn in common if runs[0][turn][5] and runs[1][turn][5]]
+    if not wide:
+        print('wide hash: not in both logs, so only the first hash was compared')
+    else:
+        wide_diverged = next((turn for turn in wide if runs[0][turn][5] != runs[1][turn][5]), None)
+        if wide_diverged is None:
+            print(f'wide hash identical on all {len(wide)} turns that have it in both logs')
+        elif diverged is None:
+            print(f'WIDE HASH DIVERGED at game turn {wide_diverged} ({runs[0][wide_diverged][5]} vs '
+                  f'{runs[1][wide_diverged][5]}) although the first hash never differs: '
+                  'the games are NOT the same')
+        else:
+            print(f'wide hash first differs at game turn {wide_diverged}')
 
     timed = [turn for turn in comparable if runs[0][turn][1] >= 0 and runs[1][turn][1] >= 0]
     if not timed:

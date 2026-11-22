@@ -87,14 +87,17 @@ def deploy_mod(dll, label, turns, log, defines):
 
 
 def read_turns(log):
-    """TURN lines up to the DONE marker: (game turn, ms, hash, units, cities)."""
+    """TURN lines up to the DONE marker: (game turn, ms, hash, units, cities, wide hash).
+
+    The wide hash is None in a log written before it was added, or where it failed."""
     turns = []
     for line in log.read_text(encoding='latin-1').splitlines():
         if line.startswith('DONE'):
             break
-        match = re.match(r'TURN (\d+) ms=([-\d.]+) hash=(\w+) units=(\d+) cities=(\d+)', line)
+        match = re.match(r'TURN (\d+) ms=([-\d.]+) hash=(\w+) units=(\d+) cities=(\d+)'
+                         r'(?:.* wide=([0-9a-f]{8})\b)?', line)
         if match:
-            turns.append((int(match[1]), float(match[2]), match[3], int(match[4]), int(match[5])))
+            turns.append((int(match[1]), float(match[2]), match[3], int(match[4]), int(match[5]), match[6]))
     return turns
 
 
@@ -108,7 +111,8 @@ def summarize(log):
     return (f'{len(timed)} timed turns (game turns {timed[0][0]}-{timed[-1][0]}), '
             f'{total:.1f} s total, {1000.0 * total / len(timed):.0f} ms/turn mean, '
             f'slowest {max(t[1] for t in timed):.0f} ms; '
-            f'final turn {last[0]}: hash {last[2]}, {last[3]} units, {last[4]} cities')
+            f'final turn {last[0]}: hash {last[2]}, wide hash {last[5] or "none"}, '
+            f'{last[3]} units, {last[4]} cities')
 
 
 def main():
