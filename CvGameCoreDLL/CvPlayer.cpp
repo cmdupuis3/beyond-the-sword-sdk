@@ -3782,17 +3782,28 @@ bool CvPlayer::canReceiveTradeCity() const
 	return true;
 }
 
+// Differs from stock in order only. Stock asks first whether the AI would refuse the trade
+// (getTradeDenial(): for a technology, a map or a vassal agreement that is a long
+// evaluation) and only then whether the item can be traded at all. The AI's diplomacy
+// asks about every technology for every player it talks to, and nearly all of them
+// cannot be traded: the giver does not have them, or the taker does. Both questions are
+// answered from the state of the game without changing it, so the answer is the same
+// asked the other way round.
 bool CvPlayer::canTradeItem(PlayerTypes eWhoTo, TradeData item, bool bTestDenial) const
 {
-	CvCity *pOurCapitalCity;
-
-	if (bTestDenial)
+	if (!canTradeItemAtAll(eWhoTo, item))
 	{
-		if (getTradeDenial(eWhoTo, item) != NO_DENIAL)
-		{
-			return false;
-		}
+		return false;
 	}
+
+	return (!bTestDenial || (getTradeDenial(eWhoTo, item) == NO_DENIAL));
+}
+
+
+// The stock canTradeItem() without the question of whether the AI would refuse.
+bool CvPlayer::canTradeItemAtAll(PlayerTypes eWhoTo, TradeData item) const
+{
+	CvCity *pOurCapitalCity;
 
 	switch (item.m_eItemType)
 	{

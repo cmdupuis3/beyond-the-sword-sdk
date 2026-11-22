@@ -11901,9 +11901,40 @@ void CvPlayerAI::AI_doReligion()
 	}
 }
 
+#ifdef BRIDGED_PROFILE
+// Times the parts of AI_doDiplo(): the time from one mark to the next goes to the row of
+// the first, with the number of times that part was reached.
+static BridgedProfileSample* g_pDiploSection = NULL;
+static unsigned long long g_uiDiploSectionStart = 0;
+
+static void bridgedDiploMark(BridgedProfileSample* pSample)
+{
+	const unsigned long long uiNow = bridgedProfileTicks();
+	if (g_pDiploSection != NULL)
+	{
+		bridgedProfileAdd(g_pDiploSection, uiNow - g_uiDiploSectionStart);
+	}
+	g_pDiploSection = pSample;
+	g_uiDiploSectionStart = uiNow;
+}
+
+struct BridgedDiploEnd
+{
+	~BridgedDiploEnd() { bridgedDiploMark(NULL); }
+};
+
+#define DIPLO_SECTION(name) { static BridgedProfileSample diploSample = { "diplomacy: " name }; bridgedDiploMark(&diploSample); }
+#else
+#define DIPLO_SECTION(name)
+#endif
+
+
 void CvPlayerAI::AI_doDiplo()
 {
 	PROFILE_FUNC();
+#ifdef BRIDGED_PROFILE
+	BridgedDiploEnd diploEnd;
+#endif
 
 	CLLNode<TradeData>* pNode;
 	CvDiploParameters* pDiplo;
@@ -11951,6 +11982,7 @@ void CvPlayerAI::AI_doDiplo()
 		return;
 	}
 	
+	DIPLO_SECTION("start");
 	iGoldValuePercent = AI_goldTradeValuePercent();
 
 	for (iI = 0; iI < MAX_TEAMS; iI++)
@@ -11970,9 +12002,14 @@ void CvPlayerAI::AI_doDiplo()
 					{
 						if (GET_PLAYER((PlayerTypes)iI).getTeam() != getTeam())
 						{
+							DIPLO_SECTION("deals in force");
 							for(pLoopDeal = GC.getGameINLINE().firstDeal(&iLoop); pLoopDeal != NULL; pLoopDeal = GC.getGameINLINE().nextDeal(&iLoop))
 							{
-								if (pLoopDeal->isCancelable(getID()))
+								// Differs from stock in order only: nothing below concerns a deal that is not
+								// between this player and that one, so that is asked before the cancel rules.
+								if ((((pLoopDeal->getFirstPlayer() == getID()) && (pLoopDeal->getSecondPlayer() == ((PlayerTypes)iI))) ||
+									 ((pLoopDeal->getFirstPlayer() == ((PlayerTypes)iI)) && (pLoopDeal->getSecondPlayer() == getID()))) &&
+									pLoopDeal->isCancelable(getID()))
 								{
 									if ((GC.getGameINLINE().getGameTurn() - pLoopDeal->getInitialGameTurn()) >= (GC.getDefineINT("PEACE_TREATY_LENGTH") * 2))
 									{
@@ -12083,6 +12120,7 @@ void CvPlayerAI::AI_doDiplo()
 							}
 						}
 
+						DIPLO_SECTION("gifts to team mates and vassals");
 						if (canContact((PlayerTypes)iI) && AI_isWillingToTalk((PlayerTypes)iI))
 						{
 							if (GET_PLAYER((PlayerTypes)iI).getTeam() == getTeam() || GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).isVassal(getTeam()))
@@ -12195,6 +12233,7 @@ void CvPlayerAI::AI_doDiplo()
 								}
 							}
 
+							DIPLO_SECTION("tribute from vassals, cities given back");
 							if (GET_PLAYER((PlayerTypes)iI).getTeam() != getTeam() && !(GET_TEAM(getTeam()).isHuman()) && (GET_PLAYER((PlayerTypes)iI).isHuman() || !(GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).isHuman())))
 							{
 								FAssertMsg(!(GET_PLAYER((PlayerTypes)iI).isBarbarian()), "(GET_PLAYER((PlayerTypes)iI).isBarbarian()) did not return false as expected");
@@ -12308,6 +12347,7 @@ void CvPlayerAI::AI_doDiplo()
 										}
 									}
 
+									DIPLO_SECTION("permanent alliance and vassal offers");
 									if (GET_TEAM(getTeam()).getLeaderID() == getID())
 									{
 										if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_PERMANENT_ALLIANCE) == 0)
@@ -12411,6 +12451,7 @@ void CvPlayerAI::AI_doDiplo()
 										{
 											if (GET_PLAYER((PlayerTypes)iI).canConvert(getStateReligion()))
 											{
+												DIPLO_SECTION("religion and civic pressure");
 												if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_RELIGION_PRESSURE) == 0)
 												{
 													if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_RELIGION_PRESSURE), "AI Diplo Religion Pressure") == 0)
@@ -12469,6 +12510,7 @@ void CvPlayerAI::AI_doDiplo()
 									{
 										if ((AI_getMemoryCount(((PlayerTypes)iI), MEMORY_DECLARED_WAR) == 0) && (AI_getMemoryCount(((PlayerTypes)iI), MEMORY_HIRED_WAR_ALLY) == 0))
 										{
+											DIPLO_SECTION("join war");
 											if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_JOIN_WAR) == 0)
 											{
 												if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_JOIN_WAR), "AI Diplo Join War") == 0)
@@ -12520,6 +12562,7 @@ void CvPlayerAI::AI_doDiplo()
 
 									if (GET_PLAYER((PlayerTypes)iI).isHuman() && (GET_TEAM(getTeam()).getLeaderID() == getID()) && !GET_TEAM(getTeam()).isVassal(GET_PLAYER((PlayerTypes)iI).getTeam()))
 									{
+										DIPLO_SECTION("stop trading");
 										if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_STOP_TRADING) == 0)
 										{
 											if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_STOP_TRADING), "AI Diplo Stop Trading") == 0)
@@ -12556,6 +12599,7 @@ void CvPlayerAI::AI_doDiplo()
 										{
 											if (AI_getAttitude((PlayerTypes)iI) > GC.getLeaderHeadInfo(GET_PLAYER((PlayerTypes)iI).getPersonalityType()).getNoGiveHelpAttitudeThreshold())
 											{
+												DIPLO_SECTION("give help");
 												if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_GIVE_HELP) == 0)
 												{
 													if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_GIVE_HELP), "AI Diplo Give Help") == 0)
@@ -12610,6 +12654,7 @@ void CvPlayerAI::AI_doDiplo()
 									{
 										if (GET_TEAM(GET_PLAYER((PlayerTypes)iI).getTeam()).getAssets() > (GET_TEAM(getTeam()).getAssets() / 2))
 										{
+											DIPLO_SECTION("ask for help");
 											if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_ASK_FOR_HELP) == 0)
 											{
 												if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_ASK_FOR_HELP), "AI Diplo Ask For Help") == 0)
@@ -12665,6 +12710,7 @@ void CvPlayerAI::AI_doDiplo()
 											{
 												if (AI_getAttitude((PlayerTypes)iI) <= GC.getLeaderHeadInfo(GET_PLAYER((PlayerTypes)iI).getPersonalityType()).getDemandTributeAttitudeThreshold())
 												{
+													DIPLO_SECTION("demand tribute");
 													if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_DEMAND_TRIBUTE) == 0)
 													{
 														if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_DEMAND_TRIBUTE), "AI Diplo Demand Tribute") == 0)
@@ -12862,6 +12908,7 @@ void CvPlayerAI::AI_doDiplo()
 
 									if (GET_TEAM(getTeam()).getLeaderID() == getID())
 									{
+										DIPLO_SECTION("open borders");
 										if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_OPEN_BORDERS) == 0)
 										{
 											if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_OPEN_BORDERS), "AI Diplo Open Borders") == 0)
@@ -12902,6 +12949,7 @@ void CvPlayerAI::AI_doDiplo()
 
 									if (GET_TEAM(getTeam()).getLeaderID() == getID())
 									{
+										DIPLO_SECTION("defensive pact");
 										if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_DEFENSIVE_PACT) == 0)
 										{
 											if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_DEFENSIVE_PACT), "AI Diplo Defensive Pact") == 0)
@@ -12942,6 +12990,7 @@ void CvPlayerAI::AI_doDiplo()
 
 									if (!(GET_PLAYER((PlayerTypes)iI).isHuman()) || (GET_TEAM(getTeam()).getLeaderID() == getID()))
 									{
+										DIPLO_SECTION("trade tech");
 										if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_TRADE_TECH) == 0)
 										{
 											if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_TRADE_TECH), "AI Diplo Trade Tech") == 0)
@@ -13093,6 +13142,7 @@ void CvPlayerAI::AI_doDiplo()
 										}
 									}
 
+									DIPLO_SECTION("trade bonus");
 									if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_TRADE_BONUS) == 0)
 									{
 										if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_TRADE_BONUS), "AI Diplo Trade Bonus") == 0)
@@ -13193,6 +13243,7 @@ void CvPlayerAI::AI_doDiplo()
 										}
 									}
 
+									DIPLO_SECTION("trade map");
 									if (AI_getContactTimer(((PlayerTypes)iI), CONTACT_TRADE_MAP) == 0)
 									{
 										if (GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getContactRand(CONTACT_TRADE_MAP), "AI Diplo Trade Map") == 0)
@@ -13238,6 +13289,7 @@ void CvPlayerAI::AI_doDiplo()
 
 									if (!(GET_PLAYER((PlayerTypes)iI).isHuman()) || !(abContacted[GET_PLAYER((PlayerTypes)iI).getTeam()]))
 									{
+										DIPLO_SECTION("declare war trade");
 										int iDeclareWarTradeRand = GC.getLeaderHeadInfo(getPersonalityType()).getDeclareWarTradeRand();
 										int iMinAtWarCounter = MAX_INT;
 										for (iJ = 0; iJ < MAX_CIV_TEAMS; iJ++)
