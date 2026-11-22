@@ -105,6 +105,7 @@ public:
 	void setSymbolsDeferred(bool bNewValue)	{ m_bSymbolsDeferred = bNewValue; }
 	bool isSymbolsDeferred() const			{ return m_bSymbolsDeferred; }
 	void setSymbolsDirty()					{ m_bSymbolsDirty = true; }
+	void setSymbolsStale()					{ m_bSymbolsStale = true; }
 	void updateDeferredSymbols();
 	DllExport void updateMinimapColor();															// Exposed to Python
 	void updateSight(bool bIncrement);
@@ -351,6 +352,7 @@ protected:
 
 	bool m_bSymbolsDeferred;		// CvGame::update() is running: keep symbol updates for its end
 	bool m_bSymbolsDirty;			// some plot has a symbol update waiting
+	bool m_bSymbolsStale;			// some plot's symbols were not made because nobody could see them
 
 	void rebuildTeamIndex() const;
 	unsigned long long calculatePlotUnitTeams(const CvPlot* pPlot, unsigned long long* puiReachTeams) const;

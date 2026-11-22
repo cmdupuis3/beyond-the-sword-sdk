@@ -279,15 +279,30 @@ nothing is drawn until `CvGame::update()` returns.
   them if a plot comes to be seen some other way (the player's team joining another, for
   example).
 
-Feature symbols (forests and the like) are not touched: they are almost never asked for
-twice.
+- The graphics of a feature (a forest or jungle cut down or grown, for the most part) are
+  not made during the turns for a plot the active team has not revealed and that has no
+  revealed plot next to it. Stock makes them at once. They are made when the plot or one
+  next to it is revealed: `CvPlot::updateFeatureSymbolVisibility()` does it for the plot
+  being revealed, and `CvMap::updateDeferredSymbols()` looks at every marked plot each
+  time the exe is about to get the screen. A plot whose feature is always visible is not
+  left out; no stock feature is.
+
+Why the features matter: the exe does its own work at the end of every game turn
+(`CvDLLEngineIFaceBase::DoTurn()`), 5.9 s of the seeded huge game. Calling it a second time
+straight away costs nothing, so the time goes on what was reported to it during the turn.
+Leaving out, one kind at a time, the minimap, fog, plot layout, flag, yield, route and
+river updates changed nothing; leaving out the feature updates took it from 4.9 ms a turn
+to 0.6 ms on the standard game. On the huge game a turn with no feature update costs
+2 ms there, a turn with one 13 ms and a turn with three 28 ms.
 
 ### What a player should notice
 
 Nothing. Not checked: the map as drawn. The benchmark cannot see it, so the first game
 played with this should be watched for yield icons missing from a plot the player has
 revealed (with the yield display on, and in the city screen) and for a road or railroad
-that is not drawn, or not joined to its neighbours, after it is built or discovered.
+that is not drawn, or not joined to its neighbours, after it is built or discovered, and
+for a forest or jungle that is drawn where there is none, or missing where there is one,
+on land that has just been explored.
 
 ### How to turn it off
 
@@ -313,8 +328,23 @@ stock symbol updates and 4.19 s without, 6% less. That is about twice the time s
 inside the DLL. The rest was not looked into; these times include the exe's drawing
 between calls, and it has fewer symbols to deal with.
 
-Feature symbols take 0.75 s of the huge game's turns (724 updates) and are what is left,
-with the route symbols, of the graphics work done during turns.
+The feature change, measured later on a different game (the seeded games changed in
+between), profile builds:
+
+| | standard, 150 turns, before | after | huge, 250 turns, before | after |
+| --- | ---: | ---: | ---: | ---: |
+| feature updates during turns left out | | 75 | | 312 |
+| the exe's own work at the end of a game turn | 0.78 s | 0.38 s | 5.6 s to 5.9 s | 3.6 s |
+| time in `CvGame::doTurn()` | | | 10.4 s | 7.4 s |
+
+How much is left out depends on how much of the map the active player has seen. In the
+seeded huge game about four in ten of the feature updates during turns are on plots that
+player has not seen; a player who has traded for everybody's maps gains nothing.
+
+With all three changes, the release build on the standard game, three runs with
+`STOCK_SYMBOL_UPDATES` set and three without, taken in turn: 7.16 s with stock symbol
+updates and 5.80 s without. The machine was busier than for the measurement above, and
+three runs are few, so read that as a gain and not as its size.
 
 ## The AI does not search for paths it could do without
 

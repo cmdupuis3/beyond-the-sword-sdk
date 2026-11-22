@@ -182,6 +182,7 @@ void CvPlot::reset(int iX, int iY, bool bConstructorCall)
 	m_bYieldSymbolsSkipped = false;
 	m_bRouteSymbolDirty = false;
 	m_bRouteSymbolForce = false;
+	m_bFeatureSymbolStale = false;
 	m_bFlagDirty = false;
 	m_bPlotLayoutDirty = false;
 	m_bLayoutStateWorked = false;
@@ -677,6 +678,7 @@ void CvPlot::updateSymbols()
 	m_bYieldSymbolsSkipped = (!isRevealed(GC.getGameINLINE().getActiveTeam(), true) && !GC.getMapINLINE().isStockSymbolUpdates());
 	if (m_bYieldSymbolsSkipped)
 	{
+		GC.getMapINLINE().setSymbolsStale();
 #ifdef BRIDGED_PROFILE
 		static BridgedProfileSample kSkipped = { "symbols, yield: not made, plot not revealed" };
 		bridgedProfileAdd(&kSkipped, 0);
@@ -729,10 +731,11 @@ void CvPlot::updateSymbols()
 
 
 // Called for every plot by CvMap::updateDeferredSymbols(), in the order stock updates them
-// when a plot's revealed route changes.
-void CvPlot::updateDeferredSymbols()
+// when a plot's revealed route changes. Returns whether the plot still has symbols that
+// were left out because nobody could see them.
+bool CvPlot::updateDeferredSymbols()
 {
-	if (m_bYieldSymbolsDirty)
+	if (m_bYieldSymbolsDirty || (m_bYieldSymbolsSkipped && isRevealed(GC.getGameINLINE().getActiveTeam(), true)))
 	{
 		updateSymbols();
 	}
@@ -740,6 +743,37 @@ void CvPlot::updateDeferredSymbols()
 	{
 		updateRouteSymbol(false, false);
 	}
+	if (m_bFeatureSymbolStale && isFeatureArtSeen())
+	{
+		updateFeatureSymbol();
+	}
+
+	return (m_bYieldSymbolsSkipped || m_bFeatureSymbolStale);
+}
+
+
+// Whether the active team has revealed this plot or one next to it. The plots next to it
+// count because the engine may fit a plot's trees to those around it.
+bool CvPlot::isFeatureArtSeen() const
+{
+	const TeamTypes eTeam = GC.getGameINLINE().getActiveTeam();
+
+	if (isRevealed(eTeam, true))
+	{
+		return true;
+	}
+
+	for (int iI = 0; iI < NUM_DIRECTION_TYPES; iI++)
+	{
+		const CvPlot* pAdjacentPlot = plotDirection(getX_INLINE(), getY_INLINE(), ((DirectionTypes)iI));
+
+		if ((pAdjacentPlot != NULL) && pAdjacentPlot->isRevealed(eTeam, true))
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 
@@ -7949,6 +7983,11 @@ void CvPlot::updateFeatureSymbolVisibility()
 		return;
 	}
 
+	if (m_bFeatureSymbolStale && isFeatureArtSeen())
+	{
+		updateFeatureSymbol();		// left out when the feature changed: see there
+	}
+
 	if (m_pFeatureSymbol != NULL)
 	{
 		bool bVisible = isRevealed(GC.getGameINLINE().getActiveTeam(), true);
@@ -7980,6 +8019,28 @@ void CvPlot::updateFeatureSymbol(bool bForce)
 	}
 
 	eFeature = getFeatureType();
+
+	// Differs from stock. When a forest or jungle is cut down or grows, the engine rebuilds
+	// the trees of that plot at the end of the game turn, which takes it about ten
+	// milliseconds a plot on a huge map (see docs/behaviour-changes.md). During the turns
+	// that is left out for a plot the active team cannot see and has no revealed plot next
+	// to it, unless the plot shows a feature that is always visible. The plot is marked,
+	// and the graphics are made when it or a plot next to it is revealed
+	// (updateFeatureSymbolVisibility(), CvMap::updateDeferredSymbols()).
+	// STOCK_SYMBOL_UPDATES switches this off.
+	if (GC.getMapINLINE().isSymbolsDeferred() && !isFeatureArtSeen() &&
+		((eFeature == NO_FEATURE) || !GC.getFeatureInfo(eFeature).isVisibleAlways()) &&
+		((m_pFeatureSymbol == NULL) || gDLL->getFeatureIFace()->IsHidden(m_pFeatureSymbol)))
+	{
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample kSkipped = { "symbols, feature: not made, plot and those around not revealed" };
+		bridgedProfileAdd(&kSkipped, 0);
+#endif
+		m_bFeatureSymbolStale = true;
+		GC.getMapINLINE().setSymbolsStale();
+		return;
+	}
+	m_bFeatureSymbolStale = false;
 
 	gDLL->getEngineIFace()->RebuildTileArt(m_iX,m_iY);
 

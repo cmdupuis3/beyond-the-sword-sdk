@@ -63,7 +63,8 @@ public:
 	void updateSymbolDisplay();
 	void updateSymbolVisibility();
 	void updateSymbols();
-	void updateDeferredSymbols();
+	bool updateDeferredSymbols();
+	bool isFeatureArtSeen() const;
 
 	void updateMinimapColor();
 
@@ -516,6 +517,7 @@ protected:
 	bool m_bYieldSymbolsSkipped:1;	// the yields have changed, but no symbols were made: plot not revealed
 	bool m_bRouteSymbolDirty:1;		// updateRouteSymbol() is waiting likewise
 	bool m_bRouteSymbolForce:1;		// and has to make the route symbol anew
+	bool m_bFeatureSymbolStale:1;	// the feature has changed, but its graphics were not made: nobody could see them
 	bool m_bFlagDirty:1;
 	bool m_bPlotLayoutDirty:1;
 	bool m_bLayoutStateWorked:1;

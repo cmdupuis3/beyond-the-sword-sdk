@@ -123,6 +123,7 @@ void CvMap::reset(CvMapInitData* pInitInfo)
 	uninit();
 	m_bSymbolsDeferred = false;
 	m_bSymbolsDirty = false;
+	m_bSymbolsStale = false;
 	m_bTeamIndexDirty = true;
 	m_bAreaPlotsDirty = true;
 	m_uiRoutesSeen = 0;
@@ -425,20 +426,29 @@ bool CvMap::isStockSymbolUpdates() const
 
 
 // The symbol updates kept back while CvGame::update() ran: see CvPlot::updateSymbols().
+// Also makes the symbols that were left out because the active team could not see the
+// plot, once it can: see CvPlot::updateSymbols() and CvPlot::updateFeatureSymbol().
+// Revealing a plot does that itself; looking again here, each time the exe is about to
+// get the screen, covers every other way a plot can come to be seen.
 void CvMap::updateDeferredSymbols()
 {
 	PROFILE_FUNC();
 
-	if (!m_bSymbolsDirty)
+	if (!m_bSymbolsDirty && !m_bSymbolsStale)
 	{
 		return;
 	}
 	m_bSymbolsDirty = false;
 
+	bool bStale = false;
 	for (int iI = 0; iI < numPlotsINLINE(); iI++)
 	{
-		plotByIndexINLINE(iI)->updateDeferredSymbols();
+		if (plotByIndexINLINE(iI)->updateDeferredSymbols())
+		{
+			bStale = true;
+		}
 	}
+	m_bSymbolsStale = bStale;
 }
 
 
