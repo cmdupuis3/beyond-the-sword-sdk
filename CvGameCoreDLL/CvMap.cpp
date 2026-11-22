@@ -124,6 +124,7 @@ void CvMap::reset(CvMapInitData* pInitInfo)
 	m_bSymbolsDeferred = false;
 	m_bSymbolsDirty = false;
 	m_bTeamIndexDirty = true;
+	m_bAreaPlotsDirty = true;
 	setFoundValuesAllDirty();
 
 	//
@@ -1255,6 +1256,28 @@ void CvMap::recalculateAreas()
 }
 
 
+const std::vector<int>& CvMap::getAreaPlotIndices(int iArea) const
+{
+	if (m_bAreaPlotsDirty)
+	{
+		PROFILE("CvMap::getAreaPlotIndices: lists made");
+
+		m_aaiAreaPlots.clear();
+
+		for (int iI = 0; iI < numPlotsINLINE(); iI++)
+		{
+			m_aaiAreaPlots[m_pMapPlots[iI].getArea()].push_back(iI);
+		}
+
+		m_bAreaPlotsDirty = false;
+	}
+
+	static const std::vector<int> aiNone;
+	std::map<int, std::vector<int> >::const_iterator it = m_aaiAreaPlots.find(iArea);
+	return ((it != m_aaiAreaPlots.end()) ? it->second : aiNone);
+}
+
+
 void CvMap::resetPathDistance()
 {
 	gDLL->getFAStarIFace()->ForceReset(&GC.getStepFinder());
@@ -1328,6 +1351,8 @@ void CvMap::read(FDataStreamBase* pStream)
 	setup();
 	// the plots' owners and unit lists were read without going through setOwner() and addUnit()
 	m_bTeamIndexDirty = true;
+	// and their areas without going through setArea()
+	m_bAreaPlotsDirty = true;
 	setFoundValuesAllDirty();
 }
 

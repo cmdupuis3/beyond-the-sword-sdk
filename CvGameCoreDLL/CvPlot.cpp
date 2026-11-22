@@ -3943,6 +3943,7 @@ void CvPlot::setArea(int iNewValue)
 
 		m_iArea = iNewValue;
 		m_pPlotArea = NULL;
+		GC.getMapINLINE().setAreaPlotsDirty();
 
 		if (area() != NULL)
 		{

@@ -7653,8 +7653,11 @@ bool CvUnitAI::AI_guardBonus(int iMinValue)
 	pBestPlot = NULL;
 	pBestGuardPlot = NULL;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot))
@@ -7812,8 +7815,11 @@ bool CvUnitAI::AI_guardFort(bool bSearch)
 	CvPlot* pBestPlot = NULL;
 	CvPlot* pBestGuardPlot = NULL;
 
-	for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		const int iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		CvPlot* pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot) && !atPlot(pLoopPlot))
@@ -8158,8 +8164,11 @@ bool CvUnitAI::AI_sabotageSpy()
 	pBestPlot = NULL;
 	pBestSabotagePlot = NULL;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot))
@@ -9922,8 +9931,11 @@ bool CvUnitAI::AI_protect(int iOddsThreshold)
 	iBestValue = 0;
 	pBestPlot = NULL;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot))
@@ -11776,8 +11788,11 @@ bool CvUnitAI::AI_pillage(int iBonusValueThreshold)
 	pBestPlot = NULL;
 	pBestPillagePlot = NULL;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot) && !(pLoopPlot->isBarbarian()))
@@ -13677,8 +13692,11 @@ bool CvUnitAI::AI_irrigateTerritory()
 	eBestBuild = NO_BUILD;
 	pBestPlot = NULL;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot))
@@ -13801,8 +13819,11 @@ bool CvUnitAI::AI_fortTerritory(bool bCanal, bool bAirbase)
 	CvPlot* pBestPlot = NULL;
 
 	CvPlayerAI& kOwner = GET_PLAYER(getOwnerINLINE());
-	for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		const int iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		CvPlot* pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot))
@@ -13939,8 +13960,11 @@ bool CvUnitAI::AI_improveBonus(int iMinValue, CvPlot** ppBestPlot, BuildTypes* p
 
 	bCanRoute = canBuildRoute();
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (pLoopPlot->getOwnerINLINE() == getOwnerINLINE() && AI_plotValid(pLoopPlot))
@@ -14366,8 +14390,11 @@ bool CvUnitAI::AI_connectBonus(bool bTestTrade)
 
 	// XXX how do we make sure that we can build roads???
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot))
@@ -14508,8 +14535,11 @@ bool CvUnitAI::AI_routeTerritory(bool bImprovementOnly)
 	iBestValue = 0;
 	pBestPlot = NULL;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot))
@@ -16710,6 +16740,22 @@ bool CvUnitAI::AI_plotValid(CvPlot* pPlot)
 	}
 
 	return false;
+}
+
+
+// The plots AI_plotValid() can say yes to, as plot indices in plot index order, when that is
+// fewer than every plot: for a land unit that cannot move over all terrain, the plots of its
+// area. NULL when any plot can be valid. A scan of the map that does nothing for a plot
+// AI_plotValid() rejects can go through this list instead: it meets the same valid plots in
+// the same order. The unit must stay on its plot while the list is in use.
+const std::vector<int>* CvUnitAI::AI_plotValidScanList() const
+{
+	if ((getDomainType() == DOMAIN_LAND) && !canMoveAllTerrain())
+	{
+		return &(GC.getMapINLINE().getAreaPlotIndices(getArea()));
+	}
+
+	return NULL;
 }
 
 

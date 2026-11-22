@@ -284,6 +284,13 @@ public:
 	void updatePlotTeams(const CvPlot* pPlot);
 	void setTeamIndexDirty();
 
+	// The indices of the plots in an area, in plot index order, for scans that only want the
+	// plots of one area (a land unit's AI looking for a plot it can reach). Worked out again
+	// for the whole map after any plot changes area (CvPlot::setArea) or a game is loaded.
+	// Empty for an area with no plots. The list stays valid until the next area change.
+	const std::vector<int>& getAreaPlotIndices(int iArea) const;
+	void setAreaPlotsDirty() { m_bAreaPlotsDirty = true; }
+
 	// City-site scores kept by the players: which plots need another look, a bit per player.
 	// See CvPlayerAI::AI_refreshFoundValues().
 	void foundValuesChanged(const CvPlot* pPlot, int iScoreRange, int iDeadlockRange);
@@ -331,6 +338,9 @@ protected:
 	mutable std::vector<unsigned long long> m_aiPlotUnitTeams;			// per plot: as for the blocks
 	mutable std::vector<unsigned long long> m_aiPlotOwnerTeams;
 	mutable std::vector<unsigned long long> m_aiPlotReachTeams;			// per plot, TEAM_REACH_WORDS words: teams with such a unit that reaches that far
+
+	mutable bool m_bAreaPlotsDirty;
+	mutable std::map<int, std::vector<int> > m_aaiAreaPlots;	// by area ID: see getAreaPlotIndices()
 
 	bool m_bSymbolsDeferred;		// CvGame::update() is running: keep symbol updates for its end
 	bool m_bSymbolsDirty;			// some plot has a symbol update waiting
