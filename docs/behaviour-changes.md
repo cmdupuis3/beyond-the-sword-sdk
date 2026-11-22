@@ -471,3 +471,27 @@ Measured with all seven set, profile builds, seeded games, the same state hash o
 turn: the time `CvCity::doTurn()` spends outside the city AI and the production choice
 falls from 2.36 s to 1.74 s on the huge game (17,320 city turns) and from 0.45 s to 0.36 s
 on the standard one (3,834). That is about 1% of the time in the DLL.
+
+## The score update asks Python for each player's score once
+
+### What changed
+
+A player's score is worked out by Python (`calculateScore` in `CvGameUtils.py`).
+`CvGame::updateScore()` ranks the players by score, and stock asked for the score again on
+every pass of the ranking for each player not ranked yet: 171 calls for 18 players. It now
+asks once per player before the ranking starts and ranks the answers, with the same rule
+for equal scores (the player with the higher number first).
+
+### What differs from the stock game
+
+Nothing in the stock game or in a mod that has left `calculateScore` as it is: the ranks,
+the scores kept and the score history that the ranking sets do not go into the
+calculation. A mod whose `calculateScore` reads those while they are being set would now
+get the values from before the update for every player. There is no switch.
+
+### What it does, measured
+
+Profile builds, the seeded standard game, the same state hash on every turn in profile and
+release builds: `CvPlayer::calculateScore()` falls from 71,991 calls and 0.22 s to 6,678
+calls and 0.06 s, about 2% of the time in the DLL. The huge game had 160,056 calls and
+1.08 s before and was not run again.

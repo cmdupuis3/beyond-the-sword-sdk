@@ -2353,6 +2353,7 @@ void CvGame::updateScore(bool bForce)
 {
 	bool abPlayerScored[MAX_CIV_PLAYERS];
 	bool abTeamScored[MAX_CIV_TEAMS];
+	int aiPlayerScore[MAX_CIV_PLAYERS];
 	int iScore;
 	int iBestScore;
 	PlayerTypes eBestPlayer;
@@ -2366,9 +2367,16 @@ void CvGame::updateScore(bool bForce)
 
 	setScoreDirty(false);
 
+	// A player's score is worked out by Python (calculateScore in CvGameUtils.py), so it is
+	// asked for once per player here. Stock asked again, on every pass of the ranking below,
+	// for each player not ranked yet: 171 calls for 18 players. Nothing the ranking sets (the
+	// ranks, the scores kept and the score history) goes into the stock calculation, so the
+	// answers are the same. A mod whose calculateScore reads the ranks or scores being set
+	// here would get the ones from before this update for every player.
 	for (iI = 0; iI < MAX_CIV_PLAYERS; iI++)
 	{
 		abPlayerScored[iI] = false;
+		aiPlayerScore[iI] = GET_PLAYER((PlayerTypes)iI).calculateScore(false);
 	}
 
 	for (iI = 0; iI < MAX_CIV_PLAYERS; iI++)
@@ -2380,7 +2388,7 @@ void CvGame::updateScore(bool bForce)
 		{
 			if (!abPlayerScored[iJ])
 			{
-				iScore = GET_PLAYER((PlayerTypes)iJ).calculateScore(false);
+				iScore = aiPlayerScore[iJ];
 
 				if (iScore >= iBestScore)
 				{
