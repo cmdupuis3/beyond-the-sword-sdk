@@ -2065,15 +2065,24 @@ int routeValid(FAStarNode* parent, FAStarNode* node, int data, const void* point
 
 	ePlayer = ((PlayerTypes)(gDLL->getFAStarIFace()->GetInfo(finder)));
 
-	if (!(pNewPlot->isOwned()) || (pNewPlot->getTeam() == GET_PLAYER(ePlayer).getTeam()))
+	return isRouteFinderPlot(ePlayer, pNewPlot) ? TRUE : FALSE;
+}
+
+
+// The route finder's test of a plot it steps into (routeValid()): the plot is unowned or
+// the player's team's, and has the best route the player has or can build there. It does
+// not depend on the plot stepped from.
+bool isRouteFinderPlot(PlayerTypes ePlayer, CvPlot* pPlot)
+{
+	if (!(pPlot->isOwned()) || (pPlot->getTeam() == GET_PLAYER(ePlayer).getTeam()))
 	{
-		if (pNewPlot->getRouteType() == GET_PLAYER(ePlayer).getBestRoute(pNewPlot))
+		if (pPlot->getRouteType() == GET_PLAYER(ePlayer).getBestRoute(pPlot))
 		{
-			return TRUE;
+			return true;
 		}
 	}
 
-	return FALSE;
+	return false;
 }
 
 

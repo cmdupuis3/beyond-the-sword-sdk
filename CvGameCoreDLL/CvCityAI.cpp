@@ -4820,8 +4820,93 @@ CvCity* CvCityAI::AI_getRouteToCity() const
 }
 
 
+//
+// The nearest city of the team in this city's area that is not joined to it by routes.
+//
+// Stock asks the exe's route finder for a path to each such city in turn. No path is used,
+// only whether one exists, and the finder's step test (routeValid()) looks at the plot
+// stepped into alone. So a city is reachable exactly when it lies in the set of plots a
+// flood from this city reaches through plots that pass the test, and one flood answers
+// for every city. The flood is done here, at the first city asked about, and tests each
+// plot once: the exe tests a plot again for each neighbour it is reached from, and each
+// test works out the best route buildable on the plot (CvPlayer::getBestRoute()).
+//
+// Nothing is kept from one call to the next: the test depends on gold, technologies and
+// connected bonuses as well as on the map, and those change between two cities' turns.
+//
+// ROUTE_VERIFY: a global define for profile builds. Set, the exe's finder is asked as
+// well and the answers that differ are counted.
+//
+namespace
+{
+	std::vector<int> s_aiRouteFloodStamp;		// iStamp: reached; -iStamp: tested and refused
+	std::vector<CvPlot*> s_apRouteFloodQueue;
+	int s_iRouteFloodStamp = 0;
+
+	void floodRouteFinderPlots(PlayerTypes ePlayer, CvPlot* pStart)
+	{
+		CvMap& kMap = GC.getMapINLINE();
+
+		if ((int)s_aiRouteFloodStamp.size() != kMap.numPlotsINLINE())
+		{
+			s_aiRouteFloodStamp.assign(kMap.numPlotsINLINE(), 0);
+			s_iRouteFloodStamp = 0;
+		}
+		if (++s_iRouteFloodStamp == MAX_INT)
+		{
+			std::fill(s_aiRouteFloodStamp.begin(), s_aiRouteFloodStamp.end(), 0);
+			s_iRouteFloodStamp = 1;
+		}
+
+		// the finder takes the plot it starts from without testing it
+		s_apRouteFloodQueue.clear();
+		s_apRouteFloodQueue.push_back(pStart);
+		s_aiRouteFloodStamp[kMap.plotNumINLINE(pStart->getX_INLINE(), pStart->getY_INLINE())] = s_iRouteFloodStamp;
+
+		for (size_t iNext = 0; iNext < s_apRouteFloodQueue.size(); iNext++)
+		{
+			CvPlot* pPlot = s_apRouteFloodQueue[iNext];
+
+			for (int iI = 0; iI < NUM_DIRECTION_TYPES; iI++)
+			{
+				CvPlot* pAdjacentPlot = plotDirection(pPlot->getX_INLINE(), pPlot->getY_INLINE(), ((DirectionTypes)iI));
+
+				if (pAdjacentPlot == NULL)
+				{
+					continue;
+				}
+
+				int& iStamp = s_aiRouteFloodStamp[kMap.plotNumINLINE(pAdjacentPlot->getX_INLINE(), pAdjacentPlot->getY_INLINE())];
+
+				if ((iStamp == s_iRouteFloodStamp) || (iStamp == -s_iRouteFloodStamp))
+				{
+					continue;
+				}
+
+				if (isRouteFinderPlot(ePlayer, pAdjacentPlot))
+				{
+					iStamp = s_iRouteFloodStamp;
+					s_apRouteFloodQueue.push_back(pAdjacentPlot);
+				}
+				else
+				{
+					iStamp = -s_iRouteFloodStamp;
+				}
+			}
+		}
+	}
+
+	bool isRouteFloodReached(const CvPlot* pPlot)
+	{
+		return (s_aiRouteFloodStamp[GC.getMapINLINE().plotNumINLINE(pPlot->getX_INLINE(), pPlot->getY_INLINE())] == s_iRouteFloodStamp);
+	}
+}
+
+
 void CvCityAI::AI_updateRouteToCity()
 {
+	PROFILE_FUNC();
+
 	CvCity* pLoopCity;
 	CvCity* pBestCity;
 	int iValue;
@@ -4829,7 +4914,20 @@ void CvCityAI::AI_updateRouteToCity()
 	int iLoop;
 	int iI;
 
-	gDLL->getFAStarIFace()->ForceReset(&GC.getRouteFinder());
+	bool bFlooded = false;
+
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample aSamples[2] = { { "route verify: answers checked" }, { "route verify: ROUTE ANSWER DIFFERS" } };
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("ROUTE_VERIFY") != 0) ? 1 : 0;
+	}
+	if (iVerify != 0)
+	{
+		gDLL->getFAStarIFace()->ForceReset(&GC.getRouteFinder());
+	}
+#endif
 
 	iBestValue = MAX_INT;
 	pBestCity = NULL;
@@ -4844,7 +4942,27 @@ void CvCityAI::AI_updateRouteToCity()
 				{
 					if (pLoopCity->area() == area())
 					{
-						if (!(gDLL->getFAStarIFace()->GeneratePath(&GC.getRouteFinder(), getX_INLINE(), getY_INLINE(), pLoopCity->getX_INLINE(), pLoopCity->getY_INLINE(), false, getOwnerINLINE(), true)))
+						if (!bFlooded)
+						{
+							floodRouteFinderPlots(getOwnerINLINE(), plot());
+							bFlooded = true;
+						}
+
+						const bool bReached = isRouteFloodReached(pLoopCity->plot());
+
+#ifdef BRIDGED_PROFILE
+						if (iVerify != 0)
+						{
+							const bool bPath = gDLL->getFAStarIFace()->GeneratePath(&GC.getRouteFinder(), getX_INLINE(), getY_INLINE(), pLoopCity->getX_INLINE(), pLoopCity->getY_INLINE(), false, getOwnerINLINE(), true);
+							bridgedProfileAdd(&aSamples[0], 0);
+							if (bPath != bReached)
+							{
+								bridgedProfileAdd(&aSamples[1], 0);
+							}
+						}
+#endif
+
+						if (!bReached)
 						{
 							iValue = plotDistance(getX_INLINE(), getY_INLINE(), pLoopCity->getX_INLINE(), pLoopCity->getY_INLINE());
 
