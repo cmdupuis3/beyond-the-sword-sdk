@@ -441,3 +441,33 @@ stock happened to settle the same way, so the seeded games are unchanged.
 ### How to check
 
 Profile builds count the choices and the ties ("collateral damage:" in the profile).
+
+## Optional: a city's turn without its Python callbacks
+
+Nothing changes unless a mod asks for it.
+
+Every city asks Python seven times each turn whether Python wants to do a part of the
+turn itself: `doGrowth`, `doCulture`, `doPlotCulture`, `doProduction`, `doReligion`,
+`doGreatPeople` and `doMeltdown` in `CvGameUtils.py`. In the stock game, and in a mod that
+has left them as they are, each only answers no. A mod can switch each one off with a
+global define set to 1, in its `PythonCallbackDefines.xml` for example:
+
+| define | callback left out |
+| --- | --- |
+| `SKIP_DO_GROWTH_CALLBACK` | `doGrowth` |
+| `SKIP_DO_CULTURE_CALLBACK` | `doCulture` |
+| `SKIP_DO_PLOT_CULTURE_CALLBACK` | `doPlotCulture` |
+| `SKIP_DO_PRODUCTION_CALLBACK` | `doProduction` |
+| `SKIP_DO_RELIGION_CALLBACK` | `doReligion` |
+| `SKIP_DO_GREAT_PEOPLE_CALLBACK` | `doGreatPeople` |
+| `SKIP_DO_MELTDOWN_CALLBACK` | `doMeltdown` |
+
+A define that is missing or 0 leaves its callback on, as in stock. Setting one for a
+callback that the mod's Python does use switches that Python off, so check
+`CvGameUtils.py` first: a callback can be left out if all it does is `return False`. The
+`cityDoTurn` event is not affected.
+
+Measured with all seven set, profile builds, seeded games, the same state hash on every
+turn: the time `CvCity::doTurn()` spends outside the city AI and the production choice
+falls from 2.36 s to 1.74 s on the huge game (17,320 city turns) and from 0.45 s to 0.36 s
+on the standard one (3,834). That is about 1% of the time in the DLL.

@@ -847,6 +847,27 @@ void CvCity::kill(bool bUpdatePlotGroups)
 }
 
 
+// A city's turn asks Python seven times whether it wants to do a part of the turn itself:
+// doGrowth, doCulture, doPlotCulture, doProduction, doReligion, doGreatPeople and
+// doMeltdown in CvGameUtils.py. In the stock game and in most mods all seven only say no,
+// and the asking costs about six microseconds each for every city every turn. A mod can
+// switch each one off by setting its define (SKIP_DO_GROWTH_CALLBACK and so on) to 1.
+// Without the define the callback is made, as in stock.
+static bool isCityTurnCallback(const char* szSkipDefine)
+{
+	return (GC.getDefineINT(szSkipDefine) == 0);
+}
+
+
+// A row in profile builds for each part of CvCity::doTurn(). The time also stays in the
+// row of CvCity::doTurn() itself.
+#ifdef BRIDGED_PROFILE
+#define CITY_TURN_PART(name) static BridgedProfileSample sample = { "city turn: " name }; BridgedProfileManual partTime(&sample);
+#else
+#define CITY_TURN_PART(name)
+#endif
+
+
 void CvCity::doTurn()
 {
 	PROFILE("CvCity::doTurn()");
@@ -866,27 +887,58 @@ void CvCity::doTurn()
 	setAirliftTargeted(false);
 	setCurrAirlift(0);
 
-	AI_doTurn();
+	{
+		CITY_TURN_PART("AI");
+		AI_doTurn();
+	}
 
-	bool bAllowNoProduction = !doCheckProduction();
+	bool bAllowNoProduction;
+	{
+		CITY_TURN_PART("check production");
+		bAllowNoProduction = !doCheckProduction();
+	}
 
-	doGrowth();
+	{
+		CITY_TURN_PART("growth");
+		doGrowth();
+	}
 
-	doCulture();
+	{
+		CITY_TURN_PART("culture");
+		doCulture();
+	}
 
-	doPlotCulture(false, getOwnerINLINE(), getCommerceRate(COMMERCE_CULTURE));
+	{
+		CITY_TURN_PART("plot culture");
+		doPlotCulture(false, getOwnerINLINE(), getCommerceRate(COMMERCE_CULTURE));
+	}
 
-	doProduction(bAllowNoProduction);
+	{
+		CITY_TURN_PART("production");
+		doProduction(bAllowNoProduction);
+	}
 
-	doDecay();
+	{
+		CITY_TURN_PART("decay");
+		doDecay();
+	}
 
-	doReligion();
+	{
+		CITY_TURN_PART("religion");
+		doReligion();
+	}
 
-	doGreatPeople();
+	{
+		CITY_TURN_PART("great people and meltdown");
+		doGreatPeople();
 
-	doMeltdown();
+		doMeltdown();
+	}
 
-	updateEspionageVisibility(true);
+	{
+		CITY_TURN_PART("espionage visibility");
+		updateEspionageVisibility(true);
+	}
 
 	if (!isDisorder())
 	{
@@ -961,7 +1013,10 @@ void CvCity::doTurn()
 	}
 
 	// ONEVENT - Do turn
-	CvEventReporter::getInstance().cityDoTurn(this, getOwnerINLINE());
+	{
+		CITY_TURN_PART("Python event alone");
+		CvEventReporter::getInstance().cityDoTurn(this, getOwnerINLINE());
+	}
 
 	// XXX
 #ifdef _DEBUG
@@ -11251,15 +11306,18 @@ void CvCity::doGrowth()
 {
 	int iDiff;
 
-	CyCity* pyCity = new CyCity(this);
-	CyArgsList argsList;
-	argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
-	long lResult=0;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "doGrowth", argsList.makeFunctionArgs(), &lResult);
-	delete pyCity;	// python fxn must not hold on to this pointer 
-	if (lResult == 1)
+	if (isCityTurnCallback("SKIP_DO_GROWTH_CALLBACK"))
 	{
-		return;
+		CyCity* pyCity = new CyCity(this);
+		CyArgsList argsList;
+		argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
+		long lResult=0;
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "doGrowth", argsList.makeFunctionArgs(), &lResult);
+		delete pyCity;	// python fxn must not hold on to this pointer 
+		if (lResult == 1)
+		{
+			return;
+		}
 	}
 
 	iDiff = foodDifference();
@@ -11298,15 +11356,18 @@ void CvCity::doGrowth()
 
 void CvCity::doCulture()
 {
-	CyCity* pyCity = new CyCity(this);
-	CyArgsList argsList;
-	argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
-	long lResult=0;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "doCulture", argsList.makeFunctionArgs(), &lResult);
-	delete pyCity;	// python fxn must not hold on to this pointer 
-	if (lResult == 1)
+	if (isCityTurnCallback("SKIP_DO_CULTURE_CALLBACK"))
 	{
-		return;
+		CyCity* pyCity = new CyCity(this);
+		CyArgsList argsList;
+		argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
+		long lResult=0;
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "doCulture", argsList.makeFunctionArgs(), &lResult);
+		delete pyCity;	// python fxn must not hold on to this pointer 
+		if (lResult == 1)
+		{
+			return;
+		}
 	}
 
 	changeCultureTimes100(getOwnerINLINE(), getCommerceRateTimes100(COMMERCE_CULTURE), false, true);
@@ -11320,18 +11381,21 @@ void CvCity::doPlotCulture(bool bUpdate, PlayerTypes ePlayer, int iCultureRate)
 	int iCultureRange;
 	CultureLevelTypes eCultureLevel = (CultureLevelTypes)0;
 
-	CyCity* pyCity = new CyCity(this);
-	CyArgsList argsList;
-	argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
-	argsList.add(bUpdate);
-	argsList.add(ePlayer);
-	argsList.add(iCultureRate);
-	long lResult=0;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "doPlotCulture", argsList.makeFunctionArgs(), &lResult);
-	delete pyCity;	// python fxn must not hold on to this pointer 
-	if (lResult == 1)
+	if (isCityTurnCallback("SKIP_DO_PLOT_CULTURE_CALLBACK"))
 	{
-		return;
+		CyCity* pyCity = new CyCity(this);
+		CyArgsList argsList;
+		argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
+		argsList.add(bUpdate);
+		argsList.add(ePlayer);
+		argsList.add(iCultureRate);
+		long lResult=0;
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "doPlotCulture", argsList.makeFunctionArgs(), &lResult);
+		delete pyCity;	// python fxn must not hold on to this pointer 
+		if (lResult == 1)
+		{
+			return;
+		}
 	}
 
 	FAssert(NO_PLAYER != ePlayer);
@@ -11522,15 +11586,18 @@ bool CvCity::doCheckProduction()
 
 void CvCity::doProduction(bool bAllowNoProduction)
 {
-	CyCity* pyCity = new CyCity(this);
-	CyArgsList argsList;
-	argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
-	long lResult=0;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "doProduction", argsList.makeFunctionArgs(), &lResult);
-	delete pyCity;	// python fxn must not hold on to this pointer 
-	if (lResult == 1)
+	if (isCityTurnCallback("SKIP_DO_PRODUCTION_CALLBACK"))
 	{
-		return;
+		CyCity* pyCity = new CyCity(this);
+		CyArgsList argsList;
+		argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
+		long lResult=0;
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "doProduction", argsList.makeFunctionArgs(), &lResult);
+		delete pyCity;	// python fxn must not hold on to this pointer 
+		if (lResult == 1)
+		{
+			return;
+		}
 	}
 
 	if (!isHuman() || isProductionAutomated())
@@ -11640,15 +11707,18 @@ void CvCity::doReligion()
 	int iLoop;
 	int iI, iJ;
 
-	CyCity* pyCity = new CyCity(this);
-	CyArgsList argsList;
-	argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
-	long lResult=0;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "doReligion", argsList.makeFunctionArgs(), &lResult);
-	delete pyCity;	// python fxn must not hold on to this pointer 
-	if (lResult == 1)
+	if (isCityTurnCallback("SKIP_DO_RELIGION_CALLBACK"))
 	{
-		return;
+		CyCity* pyCity = new CyCity(this);
+		CyArgsList argsList;
+		argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
+		long lResult=0;
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "doReligion", argsList.makeFunctionArgs(), &lResult);
+		delete pyCity;	// python fxn must not hold on to this pointer 
+		if (lResult == 1)
+		{
+			return;
+		}
 	}
 
 	if (getReligionCount() == 0)
@@ -11700,15 +11770,18 @@ void CvCity::doReligion()
 
 void CvCity::doGreatPeople()
 {
-	CyCity* pyCity = new CyCity(this);
-	CyArgsList argsList;
-	argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
-	long lResult=0;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "doGreatPeople", argsList.makeFunctionArgs(), &lResult);
-	delete pyCity;	// python fxn must not hold on to this pointer 
-	if (lResult == 1)
+	if (isCityTurnCallback("SKIP_DO_GREAT_PEOPLE_CALLBACK"))
 	{
-		return;
+		CyCity* pyCity = new CyCity(this);
+		CyArgsList argsList;
+		argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
+		long lResult=0;
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "doGreatPeople", argsList.makeFunctionArgs(), &lResult);
+		delete pyCity;	// python fxn must not hold on to this pointer 
+		if (lResult == 1)
+		{
+			return;
+		}
 	}
 
 	if (isDisorder())
@@ -11767,15 +11840,18 @@ void CvCity::doMeltdown()
 	CvWString szBuffer;
 	int iI;
 
-	CyCity* pyCity = new CyCity(this);
-	CyArgsList argsList;
-	argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
-	long lResult=0;
-	gDLL->getPythonIFace()->callFunction(PYGameModule, "doMeltdown", argsList.makeFunctionArgs(), &lResult);
-	delete pyCity;	// python fxn must not hold on to this pointer 
-	if (lResult == 1)
+	if (isCityTurnCallback("SKIP_DO_MELTDOWN_CALLBACK"))
 	{
-		return;
+		CyCity* pyCity = new CyCity(this);
+		CyArgsList argsList;
+		argsList.add(gDLL->getPythonIFace()->makePythonObject(pyCity));	// pass in city class
+		long lResult=0;
+		gDLL->getPythonIFace()->callFunction(PYGameModule, "doMeltdown", argsList.makeFunctionArgs(), &lResult);
+		delete pyCity;	// python fxn must not hold on to this pointer 
+		if (lResult == 1)
+		{
+			return;
+		}
 	}
 
 	for (iI = 0; iI < GC.getNumBuildingInfos(); iI++)
