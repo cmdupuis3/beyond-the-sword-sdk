@@ -63,6 +63,7 @@ public:
 	void updateSymbolDisplay();
 	void updateSymbolVisibility();
 	void updateSymbols();
+	void cityBuildsChanged() const;
 	bool updateDeferredSymbols();
 	bool isFeatureArtSeen() const;
 

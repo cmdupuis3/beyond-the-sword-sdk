@@ -93,6 +93,7 @@ public:
 	BuildTypes AI_getBestBuild(int iIndex);
 	int AI_countBestBuilds(CvArea* pArea);
 	void AI_updateBestBuild();
+	bool AI_isBestBuildKept() const;
 
 	virtual int AI_cityValue() const;
     
@@ -230,6 +231,7 @@ protected:
 	int m_aiBestBuildValue[NUM_CITY_PLOTS];
 
 	BuildTypes m_aeBestBuild[NUM_CITY_PLOTS];
+	int m_iBestBuildTurn;		// the game turn AI_updateBestBuild() last ran; not saved
 
 	bool* m_pbEmphasize;
 	

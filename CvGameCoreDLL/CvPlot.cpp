@@ -777,6 +777,29 @@ bool CvPlot::isFeatureArtSeen() const
 }
 
 
+// Tells the cities that have this plot in their radius that it has changed in a way their
+// choice of builds depends on: see CvCityAI::AI_isBestBuildKept(). Tier 2.
+void CvPlot::cityBuildsChanged() const
+{
+#ifndef REPRODUCE_BTS
+	for (int iI = 0; iI < NUM_CITY_PLOTS; iI++)
+	{
+		CvPlot* pLoopPlot = plotCity(getX_INLINE(), getY_INLINE(), iI);
+
+		if (pLoopPlot != NULL)
+		{
+			CvCity* pLoopCity = pLoopPlot->getPlotCity();
+
+			if (pLoopCity != NULL)
+			{
+				pLoopCity->setBestBuildDirty();
+			}
+		}
+	}
+#endif
+}
+
+
 void CvPlot::updateMinimapColor()
 {
 	PROFILE_FUNC();
@@ -4354,6 +4377,7 @@ void CvPlot::setIrrigated(bool bNewValue)
 	if (isIrrigated() != bNewValue)
 	{
 		m_bIrrigated = bNewValue;
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 
 		for (iDX = -1; iDX <= 1; iDX++)
 		{
@@ -4703,6 +4727,7 @@ void CvPlot::setOwner(PlayerTypes eNewValue, bool bCheckUnits, bool bUpdatePlotG
 			GC.getMapINLINE().changeBlockOwnedPlots(getX_INLINE(), getY_INLINE(), getTeam(), -1);
 
 			m_eOwner = eNewValue;
+			cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 
 			GC.getMapINLINE().changeBlockOwnedPlots(getX_INLINE(), getY_INLINE(), getTeam(), 1);
 			GC.getMapINLINE().foundValuesChanged(this, 2, 6);	// see CvPlayerAI::AI_refreshFoundValues()
@@ -4851,6 +4876,8 @@ void CvPlot::setPlotType(PlotTypes eNewValue, bool bRecalculate, bool bRebuildGr
 
 	if (getPlotType() != eNewValue)
 	{
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
+
 		if ((getPlotType() == PLOT_OCEAN) || (eNewValue == PLOT_OCEAN))
 		{
 			erase();
@@ -5113,6 +5140,7 @@ void CvPlot::setTerrainType(TerrainTypes eNewValue, bool bRecalculate, bool bReb
 		}
 
 		m_eTerrainType = eNewValue;
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 		GC.getMapINLINE().foundValuesChanged(this, 3, 7);	// see CvPlayerAI::AI_refreshFoundValues()
 
 		updateYield();
@@ -5188,6 +5216,7 @@ void CvPlot::setFeatureType(FeatureTypes eNewValue, int iVariety)
 		}
 
 		m_eFeatureType = eNewValue;
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 		GC.getMapINLINE().foundValuesChanged(this, 3, 7);	// see CvPlayerAI::AI_refreshFoundValues()
 		m_iFeatureVariety = iVariety;
 
@@ -5336,6 +5365,7 @@ void CvPlot::setBonusType(BonusTypes eNewValue)
 
 		updatePlotGroupBonus(false);
 		m_eBonusType = eNewValue;
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 		GC.getMapINLINE().foundValuesChanged(this, 3, 7);	// see CvPlayerAI::AI_refreshFoundValues()
 		updatePlotGroupBonus(true);
 
@@ -5389,6 +5419,7 @@ void CvPlot::setImprovementType(ImprovementTypes eNewValue)
 
 		updatePlotGroupBonus(false);
 		m_eImprovementType = eNewValue;
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 		updatePlotGroupBonus(true);
 
 		if (getImprovementType() == NO_IMPROVEMENT)
@@ -5500,6 +5531,7 @@ void CvPlot::setRouteType(RouteTypes eNewValue, bool bUpdatePlotGroups)
 
 		updatePlotGroupBonus(false);
 		m_eRouteType = eNewValue;
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 		updatePlotGroupBonus(true);
 		GC.getMapINLINE().noteRoute(eNewValue);
 
@@ -5577,6 +5609,7 @@ void CvPlot::setPlotCity(CvCity* pNewValue)
 		// a city coming or going changes where cities can be founded and which plots are in a
 		// city's radius: see CvPlayerAI::AI_refreshFoundValues()
 		GC.getMapINLINE().foundValuesChanged(this, 4, 8);
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 
 		if (isCity())
 		{
@@ -5711,6 +5744,8 @@ void CvPlot::updateWorkingCity()
 
 	if (pOldWorkingCity != pBestCity)
 	{
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
+
 		if (pOldWorkingCity != NULL)
 		{
 			pOldWorkingCity->setWorkingPlot(this, false);

@@ -38,6 +38,10 @@ public:
 
 	void updateVisibility();
 
+	// Something the city's choice of builds for its plots depends on has changed:
+	// see CvCityAI::AI_isBestBuildKept().
+	void setBestBuildDirty()				{ m_bBestBuildDirty = true; }
+
 	void createGreatPeople(UnitTypes eGreatPersonUnit, bool bIncrementThreshold, bool bIncrementExperience);		// Exposed to Python
 
 	void doTask(TaskTypes eTask, int iData1 = -1, int iData2 = -1, bool bOption = false, bool bAlt = false, bool bShift = false, bool bCtrl = false);		// Exposed to Python
@@ -1132,6 +1136,7 @@ protected:
 	int*	m_aiCommerceRank;
 	bool*	m_abCommerceRankValid;
 	int m_iAssignChangeCount;	// advances whenever a worked plot or a specialist count changes; not saved
+	bool m_bBestBuildDirty;		// see CvCityAI::AI_isBestBuildKept(); not saved
 
 	void doGrowth();
 	void doCulture();

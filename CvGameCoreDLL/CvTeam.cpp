@@ -4843,6 +4843,15 @@ void CvTeam::setHasTech(TechTypes eIndex, bool bNewValue, PlayerTypes ePlayer, b
 			}
 
 			m_pabHasTech[eIndex] = bNewValue;
+
+			// a technology brings builds, shows bonuses and changes yields: see CvCityAI::AI_isBestBuildKept()
+			for (int iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
+			{
+				if (GET_PLAYER((PlayerTypes)iPlayer).isAlive() && (GET_PLAYER((PlayerTypes)iPlayer).getTeam() == getID()))
+				{
+					GET_PLAYER((PlayerTypes)iPlayer).cityBuildsChanged();
+				}
+			}
 			CvInfoTables::teamTechsChanged(getID());
 
 			for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)

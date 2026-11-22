@@ -458,6 +458,7 @@ void CvCity::reset(int iID, PlayerTypes eOwner, int iX, int iY, bool bConstructo
 	m_bWallOverride = false;
 	m_bInfoDirty = true;
 	m_bLayoutDirty = false;
+	m_bBestBuildDirty = true;
 	m_bPlundered = false;
 
 	m_eOwner = eOwner;
@@ -5126,6 +5127,7 @@ void CvCity::setPopulation(int iNewValue)
 	if (iOldPopulation != iNewValue)
 	{
 		m_iPopulation = iNewValue;
+		setBestBuildDirty();	// see CvCityAI::AI_isBestBuildKept()
 
 		FAssert(getPopulation() >= 0);
 

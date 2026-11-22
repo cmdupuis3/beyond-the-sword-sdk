@@ -23,6 +23,7 @@ The entries below, by tier:
 | AI groups find their paths with the K-Mod pathfinder | 2 | `PATH_EXE_ONLY` (profile builds) |
 | A player's workers act as a team | 2 | `WORKER_STOCK_CHOICE` |
 | The AI does not search for paths it could do without | 2 | `PATH_STOCK_SEARCHES` |
+| A city keeps the builds it chose for its plots | 2 | `BEST_BUILD_STOCK` |
 | AI turns do not wait for the screen | 1 | `STOCK_TURN_SLICES` |
 | Yield and route symbols are made once before the screen is drawn | 1 | `STOCK_SYMBOL_UPDATES` |
 | Collateral damage ties go to the unit first on the plot | 1 | none |
@@ -669,3 +670,86 @@ with and without them, in profile and release builds:
   from one another by more than that, so the figure is indicative.
 
 The huge game was not run.
+
+## A city keeps the builds it chose for its plots
+
+Tier 2. On the branch `cmd/non-repro`.
+
+### What changed
+
+Every turn the stock game has every city work out again which build it wants on each plot
+in its radius and how much it wants it (`CvCityAI::AI_updateBestBuild()`); the workers
+choose their jobs from that. It is about a twentieth of the time of a late game, and most
+turns nothing a city looks at has changed except where the workers are.
+
+A city now keeps what it chose (`CvCityAI::AI_isBestBuildKept()`) until one of these:
+
+- a plot in its radius changes owner, working city, terrain, feature, bonus, improvement,
+  route or irrigation, or a city is founded or lost there (`CvPlot::cityBuildsChanged()`);
+- its population or what it emphasizes changes;
+- its owner's team gets a technology, or its owner changes a civic
+  (`CvPlayer::cityBuildsChanged()`);
+- it has kept them long enough: 4 game turns at normal speed. The time is scaled by the
+  game speed's time for a worker's build (`iBuildPercent`), so it is 2 turns in a quick
+  game, 6 in an epic one and 12 in a marathon: a build takes that much longer there and
+  the cities change that much more slowly.
+
+### What differs from the stock game
+
+What a city keeps goes stale in the part that follows the workers. The value of each build
+is divided by the number of workers already on their way to the city, and the food the
+city counts on includes the builds being worked on. So workers choose among the cities
+with figures that can be up to three turns old at normal speed. A build that can no longer
+be made is not started: the workers check that themselves, as they always did.
+
+- The turn a city last worked its builds out is not in the saved game. A loaded game works
+  them all out on the next turn, and can go on differently from the same game played
+  without saving.
+- A network game works them out every turn, as stock does: a player who joins late loads
+  the game and the others do not, and they would disagree.
+- Working the builds out while a human takes their turn, so that they are fresh and cost
+  nothing, would make the game depend on how long the human took. That is tier 3 and is
+  not done here.
+
+### How to turn it off
+
+Set the global define `BEST_BUILD_STOCK` to 1: every city works its builds out every turn.
+`BEST_BUILD_KEEP_TURNS` sets the number of turns at normal speed (4 if it is missing).
+
+### What it does, measured
+
+Seeded games, all players AI, profile builds.
+
+| | standard, 150 turns | the same at marathon speed | huge, 250 turns |
+| --- | ---: | ---: | ---: |
+| city turns | 3,873 | 1,758 | 17,356 |
+| builds kept | 1,933 (50%) | 1,451 (83%) | 7,630 (44%) |
+| worked out because something changed | 1,778 | 262 | 9,230 |
+| worked out because kept long enough | 162 | 45 | 496 |
+| time in `AI_updateBestBuild()`, before | 0.37 s | | 2.61 s |
+| the same, after | 0.22 s | | 1.25 s |
+
+The huge game's figure from before is from an earlier profile of the game it then was.
+The games differ from the ones before from turn 27 (standard) on, so the two columns of
+the next table are different games, not one game measured twice:
+
+| standard game, 150 turns | every turn (`BEST_BUILD_STOCK`) | kept |
+| --- | ---: | ---: |
+| builds finished by workers | 577 | 633 |
+| turns of building | 1,900 | 2,009 |
+| plots moved by workers | 1,934 | 1,846 |
+| builds begun on a plot with another build unfinished | 44 | 34 |
+| units and cities on turn 150 | 226 and 54 | 224 and 54 |
+
+The huge game has 1,092 units and 130 cities on turn 250, where it had 989 and 129.
+
+The checks, as "How the tiers are checked" asks:
+
+- the `--tier 1` DLL has the stock DLL's two hashes on all 151 turns of the standard game;
+- with `BEST_BUILD_STOCK` set the default DLL has the two hashes of the default build
+  before this change on all 151 turns;
+- without it, three runs of the profile build and one of the release build have the same
+  two hashes on all 151 turns: turn 150 is `8e353b22` / `e1367f42`. The huge game's turn 250
+  is `2179c206` / `1277dcc6`, from one run.
+
+Not checked: the huge game a second time, and the tier 1 DLL on the huge game.

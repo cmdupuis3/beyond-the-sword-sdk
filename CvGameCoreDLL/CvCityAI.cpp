@@ -129,6 +129,9 @@ void CvCityAI::AI_reset()
 	{
 		m_aeBestBuild[iI] = NO_BUILD;
 	}
+
+	m_bBestBuildDirty = true;
+	m_iBestBuildTurn = -1;
 	
 	for (iI = 0; iI < NUM_YIELD_TYPES; iI++)
 	{
@@ -178,7 +181,25 @@ void CvCityAI::AI_doTurn()
 
 	AI_updateWorkersNeededHere();
 
-	AI_updateBestBuild();
+	// tier 2: a city that has nothing new to go on keeps the builds it chose
+	if (!AI_isBestBuildKept())
+	{
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample aSamples[2] = {
+			{ "best build: worked out, something changed or first time" },
+			{ "best build: worked out, kept long enough" },
+		};
+		bridgedProfileAdd(&aSamples[(m_bBestBuildDirty || (m_iBestBuildTurn < 0)) ? 0 : 1], 0);
+#endif
+		AI_updateBestBuild();
+	}
+#ifdef BRIDGED_PROFILE
+	else
+	{
+		static BridgedProfileSample kKept = { "best build: kept" };
+		bridgedProfileAdd(&kKept, 0);
+	}
+#endif
 
 	AI_updateRouteToCity();
 
@@ -5036,6 +5057,7 @@ void CvCityAI::AI_setEmphasize(EmphasizeTypes eIndex, bool bNewValue)
 	if (AI_isEmphasize(eIndex) != bNewValue)
 	{
 		m_pbEmphasize[eIndex] = bNewValue;
+		setBestBuildDirty();	// see AI_isBestBuildKept()
 		m_bYieldValueContextValid = false;	// see AI_yieldValueContext()
 
 		if (GC.getEmphasizeInfo(eIndex).isAvoidGrowth())
@@ -5238,9 +5260,87 @@ int CvCityAI::AI_countBestBuilds(CvArea* pArea)
 
 
 // Improved worker AI provided by Blake - thank you!
+//
+// How many game turns a city keeps the builds it has chosen for its plots.
+//
+// Stock works the builds out again for every city every turn (AI_updateBestBuild(), about
+// a twentieth of the time of a late game), and most turns nothing a city looks at has
+// changed but where the workers are. A city now keeps what it chose until
+//   - a plot in its radius changes owner, working city, terrain, feature, bonus,
+//     improvement, route or irrigation, or a city is founded or lost there,
+//   - its population or what it emphasizes changes,
+//   - its owner's team gets a technology or its owner changes a civic, or
+//   - it has kept them long enough: BEST_BUILD_KEEP_TURNS game turns at normal speed (4
+//     unless the define says otherwise), scaled by the game speed's time for a worker's
+//     build, so 2 turns in a quick game, 6 in an epic one and 12 in a marathon. A build
+//     takes that much longer there, and the cities change that much more slowly.
+// What goes stale in between is the part that follows the workers: the values are divided
+// by the number of workers already on their way to the city, and the food the city counts
+// on includes the builds being worked on. Workers therefore choose among the cities with
+// figures up to three turns old at normal speed; they still check that a build can be made
+// before starting.
+//
+// The turn the builds were last worked out is not in the saved game, so a loaded game
+// works them all out on the next turn, and can go differently from the same game played
+// without saving. A network game works them out every turn, as stock does, because a
+// player who joins late loads the game and the others do not.
+//
+// Tier 2 (see BridgedTiers.h): a REPRODUCE_BTS build works them out every turn. The define
+// BEST_BUILD_STOCK does the same in a default build.
+//
+static int bestBuildKeepTurns()
+{
+#ifdef REPRODUCE_BTS
+	return 0;
+#else
+	static int iTurns = -1;		// at normal speed
+
+	if (iTurns == -1)
+	{
+		if (GC.getDefineINT("BEST_BUILD_STOCK") != 0)
+		{
+			iTurns = 0;
+		}
+		else
+		{
+			iTurns = GC.getDefineINT("BEST_BUILD_KEEP_TURNS");
+			if (iTurns <= 0)
+			{
+				iTurns = 4;
+			}
+		}
+	}
+
+	// the speed belongs to the game, not to the DLL, so it is asked for each time
+	return ((iTurns * GC.getGameSpeedInfo(GC.getGameINLINE().getGameSpeedType()).getBuildPercent()) / 100);
+#endif
+}
+
+
+bool CvCityAI::AI_isBestBuildKept() const
+{
+	const int iKeepTurns = bestBuildKeepTurns();
+
+	if ((iKeepTurns <= 1) || m_bBestBuildDirty || (m_iBestBuildTurn < 0))
+	{
+		return false;
+	}
+
+	if (GC.getGameINLINE().isNetworkMultiPlayer())
+	{
+		return false;
+	}
+
+	return ((GC.getGameINLINE().getGameTurn() - m_iBestBuildTurn) < iKeepTurns);
+}
+
+
 void CvCityAI::AI_updateBestBuild()
 {
 	PROFILE_FUNC();
+
+	m_bBestBuildDirty = false;		// see AI_isBestBuildKept()
+	m_iBestBuildTurn = GC.getGameINLINE().getGameTurn();
 
 	// the city-wide inputs of AI_yieldValue() are kept until this function returns
 	AI_beginYieldValueContext();

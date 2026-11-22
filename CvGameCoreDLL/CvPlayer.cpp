@@ -11612,6 +11612,21 @@ int CvPlayer::getCivicUpkeep(CivicTypes* paeCivics, bool bIgnoreAnarchy) const
 }
 
 
+// Something every city of the player's choice of builds depends on has changed: see
+// CvCityAI::AI_isBestBuildKept(). Tier 2.
+void CvPlayer::cityBuildsChanged()
+{
+#ifndef REPRODUCE_BTS
+	int iLoop;
+
+	for (CvCity* pLoopCity = firstCity(&iLoop); pLoopCity != NULL; pLoopCity = nextCity(&iLoop))
+	{
+		pLoopCity->setBestBuildDirty();
+	}
+#endif
+}
+
+
 void CvPlayer::setCivics(CivicOptionTypes eIndex, CivicTypes eNewValue)
 {
 	CvWString szBuffer;
@@ -11628,6 +11643,7 @@ void CvPlayer::setCivics(CivicOptionTypes eIndex, CivicTypes eNewValue)
 	if (eOldCivic != eNewValue)
 	{
 		m_paeCivics[eIndex] = eNewValue;
+		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 		invalidateAttitudeCache();	// see CvPlayerAI::AI_getAttitudeVal()
 
 		if (eOldCivic != NO_CIVIC)
