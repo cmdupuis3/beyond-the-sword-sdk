@@ -4034,6 +4034,8 @@ bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToP
 		}
 
 #ifdef BRIDGED_PROFILE
+		g_szPathProbeFunction = NULL;	// see the top of CvUnitAI.cpp
+		g_iPathProbeLine = 0;
 		bridgedProfileAdd(&aServedSamples[0], 0);
 		if (pathVerifyMode() != 0)
 		{
@@ -4054,6 +4056,8 @@ bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToP
 		}
 
 #ifdef BRIDGED_PROFILE
+		g_szPathProbeFunction = NULL;
+		g_iPathProbeLine = 0;
 		bridgedProfileAdd(&aServedSamples[1], 0);
 #endif
 	}

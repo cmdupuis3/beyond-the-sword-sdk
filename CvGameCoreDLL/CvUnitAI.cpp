@@ -24,6 +24,19 @@
 
 #define FOUND_RANGE				(7)
 
+#ifdef BRIDGED_PROFILE
+// For the profile: every generatePath() in this file first notes the function and line it is
+// asked from, so that the K-Mod pathfinder can list its work by who asked (the "path site"
+// rows, see KmodPathFinder::GeneratePath). CvSelectionGroup::generatePath() clears the note.
+#include "KmodPathFinder.h"
+inline void pathProbeNote(const char* szFunction, int iLine)
+{
+	g_szPathProbeFunction = szFunction;
+	g_iPathProbeLine = iLine;
+}
+#define generatePath(first, ...)	generatePath((pathProbeNote(__FUNCTION__, __LINE__), first) __VA_OPT__(,) __VA_ARGS__)
+#endif
+
 // Public Functions...
 
 CvUnitAI::CvUnitAI()

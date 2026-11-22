@@ -10,11 +10,61 @@
 #include "FProfiler.h"
 
 #ifdef BRIDGED_PROFILE
+#include <map>
+#include <stdio.h>
 // For the profile: how much searching a request takes, and how much of that is looking
 // through the open list for the next node. Added up by ProcessNode for the request in hand.
 static unsigned int s_uiProfileNodes = 0;
 static unsigned int s_uiProfileOpenNodes = 0;
 static unsigned long long s_uiProfileOpenTicks = 0;
+
+// The nodes processed for the request, by the turn of the path on which the node is reached.
+// A request limited to so many turns would not process the nodes of later turns.
+#define PATH_PROBE_TURN_BUCKETS		(8)
+static unsigned int s_auiProfileTurnNodes[PATH_PROBE_TURN_BUCKETS];
+static const char* const s_aszProfileTurnBucket[PATH_PROBE_TURN_BUCKETS] = { "t1", "t2", "t3", "t4", "t5", "t6-9", "t10", "t11+" };
+
+static int pathProbeTurnBucket(int iTurns)
+{
+	return ((iTurns <= 5) ? (std::max(1, iTurns) - 1) : ((iTurns <= 9) ? 5 : ((iTurns == 10) ? 6 : 7)));
+}
+
+const char* g_szPathProbeFunction = NULL;
+int g_iPathProbeLine = 0;
+
+// How many of the units differ: by unit type alone (bPromotions false), or by unit type,
+// moves and promotions. Units that do not differ get the same answers from the path functions.
+static unsigned int pathProbeKinds(const std::vector<CvPathUnit>& aUnits, bool bPromotions)
+{
+	unsigned int uiKinds = 0;
+
+	for (size_t i = 0; i < aUnits.size(); i++)
+	{
+		bool bSeen = false;
+
+		for (size_t j = 0; (j < i) && !bSeen; j++)
+		{
+			bSeen = (aUnits[i].pUnit->getUnitType() == aUnits[j].pUnit->getUnitType());
+
+			if (bSeen && bPromotions)
+			{
+				bSeen = (aUnits[i].iMaxMoves == aUnits[j].iMaxMoves);
+
+				for (int iPromotion = 0; bSeen && (iPromotion < GC.getNumPromotionInfos()); iPromotion++)
+				{
+					bSeen = (aUnits[i].pUnit->isHasPromotion((PromotionTypes)iPromotion) == aUnits[j].pUnit->isHasPromotion((PromotionTypes)iPromotion));
+				}
+			}
+		}
+
+		if (!bSeen)
+		{
+			uiKinds++;
+		}
+	}
+
+	return uiKinds;
+}
 #endif
 
 CvPathSettings::CvPathSettings(const CvSelectionGroup* pGroup, int iFlags, int iMaxPath, int iHW)
@@ -159,6 +209,7 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 	s_uiProfileNodes = 0;
 	s_uiProfileOpenNodes = 0;
 	s_uiProfileOpenTicks = 0;
+	memset(s_auiProfileTurnNodes, 0, sizeof(s_auiProfileTurnNodes));
 #endif
 
 	if (!pathDestValid(x2, y2, &settings, 0))
@@ -308,6 +359,73 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 				{
 					bridgedProfileAdd(&aProbeBig[0], uiRequestTicks);
 					bridgedProfileAdd(&aProbeBig[1], 0, s_uiProfileNodes);
+				}
+			}
+		}
+
+		// probe: the searched requests by who asked (with the nodes by the turn they are
+		// reached on), by the group's domain, and by how many units the group has; for groups
+		// of two or more, how many of the units differ
+		{
+			struct ProbeSite
+			{
+				BridgedProfileSample kRequests;
+				BridgedProfileSample akNodes[PATH_PROBE_TURN_BUCKETS];
+			};
+			static std::map<int, ProbeSite> aSites;		// by line of CvUnitAI.cpp; 0: asked from elsewhere
+			char szName[64];
+
+			ProbeSite& kSite = aSites[(g_szPathProbeFunction != NULL) ? g_iPathProbeLine : 0];
+			const char* szFunction = ((g_szPathProbeFunction != NULL) ? g_szPathProbeFunction : "elsewhere");
+
+			if (!kSite.kRequests.bRegistered)
+			{
+				sprintf(szName, "path site %.40s:%d", szFunction, g_iPathProbeLine);
+				kSite.kRequests.szName = szName;
+			}
+			bridgedProfileAdd(&kSite.kRequests, uiRequestTicks);
+
+			for (int i = 0; i < PATH_PROBE_TURN_BUCKETS; i++)
+			{
+				if (s_auiProfileTurnNodes[i] > 0)
+				{
+					if (!kSite.akNodes[i].bRegistered)
+					{
+						sprintf(szName, "path site nodes %.30s:%d %s", szFunction, g_iPathProbeLine, s_aszProfileTurnBucket[i]);
+						kSite.akNodes[i].szName = szName;
+					}
+					bridgedProfileAdd(&kSite.akNodes[i], 0, s_auiProfileTurnNodes[i]);
+				}
+			}
+
+			static BridgedProfileSample aDomain[3] = { { "path by domain: land" }, { "path by domain: sea" }, { "path by domain: other" } };
+			static BridgedProfileSample aDomainNodes[3] = { { "path nodes by domain: land" }, { "path nodes by domain: sea" }, { "path nodes by domain: other" } };
+			const DomainTypes eDomain = settings.pGroup->getDomainType();
+			const int iDomain = ((eDomain == DOMAIN_LAND) ? 0 : ((eDomain == DOMAIN_SEA) ? 1 : 2));
+			bridgedProfileAdd(&aDomain[iDomain], uiRequestTicks);
+			bridgedProfileAdd(&aDomainNodes[iDomain], 0, s_uiProfileNodes);
+
+			if (settings.pKept != NULL)
+			{
+				static BridgedProfileSample aUnits[4] = {
+					{ "path by units in the group: 1" }, { "path by units in the group: 2-3" }, { "path by units in the group: 4-7" }, { "path by units in the group: 8 or more" } };
+				static BridgedProfileSample aUnitNodes[4] = {
+					{ "path nodes by units in the group: 1" }, { "path nodes by units in the group: 2-3" }, { "path nodes by units in the group: 4-7" }, { "path nodes by units in the group: 8 or more" } };
+				static BridgedProfileSample aStack[4] = {
+					{ "path probe, groups of 2 or more: nodes" }, { "path probe, groups of 2 or more: nodes x units" },
+					{ "path probe, groups of 2 or more: nodes x unit types" }, { "path probe, groups of 2 or more: nodes x kinds of unit" } };
+				const unsigned int uiUnits = (unsigned int)kept.aUnits.size();
+				const int iUnitBucket = ((uiUnits <= 1) ? 0 : ((uiUnits <= 3) ? 1 : ((uiUnits <= 7) ? 2 : 3)));
+
+				bridgedProfileAdd(&aUnits[iUnitBucket], uiRequestTicks);
+				bridgedProfileAdd(&aUnitNodes[iUnitBucket], 0, s_uiProfileNodes);
+
+				if ((uiUnits >= 2) && (s_uiProfileNodes > 0))
+				{
+					bridgedProfileAdd(&aStack[0], 0, s_uiProfileNodes);
+					bridgedProfileAdd(&aStack[1], 0, s_uiProfileNodes * uiUnits);
+					bridgedProfileAdd(&aStack[2], 0, s_uiProfileNodes * pathProbeKinds(kept.aUnits, false));
+					bridgedProfileAdd(&aStack[3], 0, s_uiProfileNodes * pathProbeKinds(kept.aUnits, true));
 				}
 			}
 		}
@@ -525,6 +643,10 @@ bool KmodPathFinder::ProcessNode()
 #endif
 
 	FAStarNode* parent_node = (*best_it);
+
+#ifdef BRIDGED_PROFILE
+	s_auiProfileTurnNodes[pathProbeTurnBucket(parent_node->m_iData2)]++;
+#endif
 
 	// erase the node from the open_list.
 	// Note: this needs to be done before pushing new entries, otherwise the iterator will be invalid.

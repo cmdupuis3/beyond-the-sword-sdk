@@ -78,6 +78,14 @@ struct CvPathSettings
 
 class FAStarNode;
 
+#ifdef BRIDGED_PROFILE
+// For the profile: where in CvUnitAI.cpp the request being served was asked (see the top of
+// that file), so that the path work can be listed by who asked. NULL and 0 for a request
+// from anywhere else.
+extern const char* g_szPathProbeFunction;
+extern int g_iPathProbeLine;
+#endif
+
 class KmodPathFinder
 {
 public:
