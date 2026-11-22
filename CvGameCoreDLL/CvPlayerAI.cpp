@@ -7658,7 +7658,7 @@ int CvPlayerAI::AI_baseBonusVal(BonusTypes eBonus) const
 							iTempValue += 40;
 						}
 					}
-					if ((eBestRoute != NO_ROUTE) && (GC.getRouteInfo(getBestRoute()).getValue() <= GC.getRouteInfo(eRoute).getValue()))
+					if ((eBestRoute != NO_ROUTE) && (GC.getRouteInfo(eBestRoute).getValue() <= GC.getRouteInfo(eRoute).getValue()))
 					{
 						iValue += iTempValue;
 					}
