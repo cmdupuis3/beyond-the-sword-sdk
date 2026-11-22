@@ -145,6 +145,32 @@ private:
 	unsigned long long m_uiStart;
 };
 
+// The row for a Python function the DLL calls, made the first time it is asked for. Its
+// name is szKind, then the module without "Cv" and "Interface", then the function:
+// "python: Game.doGrowth" for CvGameInterface.doGrowth(). With an empty module it is szKind
+// and szName only, as for "python event: unitMove".
+BridgedProfileSample* bridgedProfilePythonSample(const char* szKind, const char* szModule, const char* szName);
+
+// Times one call of CvDLLPythonIFaceBase::callFunction() into the row of the function
+// called: see the callFunction macro at the end of CvDLLPythonIFaceBase.h. The time also
+// stays in whatever scope is open.
+class BridgedProfilePythonCall
+{
+public:
+	BridgedProfilePythonCall(const char* szModule, const char* szName) :
+		m_szModule(szModule),
+		m_pSample(bridgedProfilePythonSample("python: ", szModule, szName)),
+		m_uiStart(bridgedProfileTicks()) {}
+	~BridgedProfilePythonCall() { bridgedProfileAdd(m_pSample, bridgedProfileTicks() - m_uiStart); }
+
+	const char* getModule() const { return m_szModule; }
+
+private:
+	const char* m_szModule;
+	BridgedProfileSample* m_pSample;
+	unsigned long long m_uiStart;
+};
+
 class BridgedProfileScope
 {
 public:

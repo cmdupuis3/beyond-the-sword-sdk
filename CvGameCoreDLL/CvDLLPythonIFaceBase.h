@@ -164,4 +164,13 @@ int CvDLLPythonIFaceBase::putStringSeqInArray(PyObject* src, T** aDst)
 	return size;
 }
 
+#ifdef BRIDGED_PROFILE
+// Profile builds time every call into Python, into a row for the function called. The timer
+// is a temporary in the first argument, so it starts before the other arguments are handed
+// over and stops when the full expression the call is in has been evaluated. This has to
+// stay below the declarations of callFunction() above.
+#define callFunction(szModule, szName, ...) \
+	callFunction(BridgedProfilePythonCall((szModule), (szName)).getModule(), (szName) __VA_OPT__(,) __VA_ARGS__)
+#endif
+
 #endif	//  CvDLLPythonIFaceBase_h

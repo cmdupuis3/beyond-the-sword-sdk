@@ -167,6 +167,80 @@ void bridgedProfileRegister(BridgedProfileSample* pSample)
 	g_pBridgedProfileHead = pSample;
 }
 
+BridgedProfileSample* bridgedProfilePythonSample(const char* szKind, const char* szModule, const char* szName)
+{
+	// The rows are found by their name, not by the address of szName: most callers pass a
+	// string literal, but an event's name is in a Python string that is made for the call.
+	// No memory is taken from the heap, so that a profile build asks for the same blocks
+	// in the same order as a release build.
+	enum
+	{
+		NUM_ROWS = 512,		// a power of 2; the stock game calls about 120 functions and events
+	};
+	static BridgedProfileSample aRows[NUM_ROWS];
+	static BridgedProfileSample kOther = { "python: calls with no row left for them" };
+
+	// the module without "Cv" in front and "Interface" behind
+	if (szModule == NULL)
+	{
+		szModule = "";
+	}
+	if ((szModule[0] == 'C') && (szModule[1] == 'v'))
+	{
+		szModule += 2;
+	}
+	int iModuleLength = (int)strlen(szModule);
+	if ((iModuleLength > 9) && (strcmp(szModule + iModuleLength - 9, "Interface") == 0))
+	{
+		iModuleLength -= 9;
+	}
+
+	char szRow[sizeof(aRows[0].szNameCopy)];
+	if (iModuleLength > 0)
+	{
+		_snprintf(szRow, sizeof(szRow), "%s%.*s.%s", szKind, iModuleLength, szModule, ((szName != NULL) ? szName : "?"));
+	}
+	else
+	{
+		_snprintf(szRow, sizeof(szRow), "%s%s", szKind, ((szName != NULL) ? szName : "?"));
+	}
+	szRow[sizeof(szRow) - 1] = '\0';
+
+	unsigned int uiHash = 2166136261u;
+	for (char* pChar = szRow; *pChar != '\0'; pChar++)
+	{
+		// the name as bridgedProfileRegister() keeps it, so that it can be compared below
+		if ((*pChar < ' ') || (*pChar > '~'))
+		{
+			*pChar = '?';
+		}
+		uiHash = (uiHash ^ (unsigned char)(*pChar)) * 16777619u;
+	}
+
+	unsigned int uiSlot = uiHash & (NUM_ROWS - 1);
+
+	for (int iProbe = 0; iProbe < NUM_ROWS; iProbe++)
+	{
+		BridgedProfileSample& kRow = aRows[uiSlot];
+
+		if (!kRow.bRegistered)
+		{
+			kRow.szName = szRow;
+			bridgedProfileRegister(&kRow);	// copies the name
+			return &kRow;
+		}
+
+		if (strcmp(kRow.szNameCopy, szRow) == 0)
+		{
+			return &kRow;
+		}
+
+		uiSlot = (uiSlot + 1) & (NUM_ROWS - 1);
+	}
+
+	return &kOther;
+}
+
 static int bridgedProfileCompare(const void* pA, const void* pB)
 {
 	const BridgedProfileSample* pSampleA = *(const BridgedProfileSample* const*)pA;

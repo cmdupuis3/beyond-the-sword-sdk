@@ -21,7 +21,37 @@ bool CvDllPythonEvents::postEvent(CyArgsList& eventData)
 	eventData.add(gDLL->getChtLvl() > 0);
 
 	long lResult = -1;
-	bool bOK = gDLL->getPythonIFace()->callFunction(PYEventModule, "onEvent", eventData.makeFunctionArgs(), &lResult);
+	void* pArgs = eventData.makeFunctionArgs();
+
+#ifdef BRIDGED_PROFILE
+	// Every event goes to the same Python function, so each also has a row by its own name.
+	// The name is the first of the event's arguments, and the arguments are themselves the
+	// one argument of the Python function.
+	const char* szEvent = "?";
+	PyObject* pFirst = (PyObject*)pArgs;
+	for (int iDepth = 0; (iDepth < 2) && (pFirst != NULL) && !PyString_Check(pFirst); iDepth++)
+	{
+		if (PyTuple_Check(pFirst) && (PyTuple_Size(pFirst) > 0))
+		{
+			pFirst = PyTuple_GetItem(pFirst, 0);
+		}
+		else if (PyList_Check(pFirst) && (PyList_Size(pFirst) > 0))
+		{
+			pFirst = PyList_GetItem(pFirst, 0);
+		}
+		else
+		{
+			pFirst = NULL;
+		}
+	}
+	if ((pFirst != NULL) && PyString_Check(pFirst))
+	{
+		szEvent = PyString_AsString(pFirst);
+	}
+	BridgedProfileManual eventTime(bridgedProfilePythonSample("python event: ", "", szEvent));
+#endif
+
+	bool bOK = gDLL->getPythonIFace()->callFunction(PYEventModule, "onEvent", pArgs, &lResult);
 
 	return (bOK && lResult==1);
 }
