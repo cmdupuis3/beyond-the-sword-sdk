@@ -303,8 +303,20 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 			end_node = &GetNode(x2,  y2);
 	}
 
+#ifdef BRIDGED_PROFILE
+	// probe of failed searches: the open nodes the request starts with, and the heuristics
+	const unsigned int uiProfileOpenAtStart = (unsigned int)open_list.size();
+	const unsigned long long uiProfileRecalcStart = bridgedProfileTicks();
+#endif
 	if (bRecalcHeuristics)
 		RecalculateHeuristics();
+#ifdef BRIDGED_PROFILE
+	if (bRecalcHeuristics)
+	{
+		static BridgedProfileSample kRecalc = { "path probe: heuristics worked out again; calls = open nodes" };
+		bridgedProfileAdd(&kRecalc, bridgedProfileTicks() - uiProfileRecalcStart, uiProfileOpenAtStart);
+	}
+#endif
 
 	while (ProcessNode())
 	{
@@ -446,6 +458,40 @@ bool KmodPathFinder::GeneratePath(int x1, int y1, int x2, int y2)
 		{
 			bridgedProfileAdd(&aFailed[0], uiRequestTicks);
 			bridgedProfileAdd(&aFailed[1], 0, s_uiProfileNodes);
+
+			// probe: the failed searches by how many nodes they processed, by whether the
+			// tree was new, carried on or already searched out (no open nodes to start with),
+			// by whether the destination was reached beyond the turn limit, and by who asked
+			{
+				static BridgedProfileSample aBySize[5] = {
+					{ "path fail: 0 nodes processed" }, { "path fail: 1-9 nodes" }, { "path fail: 10-99 nodes" }, { "path fail: 100-999 nodes" }, { "path fail: 1000 nodes or more" } };
+				static BridgedProfileSample aBySizeNodes[5] = {
+					{ "path fail nodes: 0 nodes processed" }, { "path fail nodes: 1-9 nodes" }, { "path fail nodes: 10-99 nodes" }, { "path fail nodes: 100-999 nodes" }, { "path fail nodes: 1000 nodes or more" } };
+				const unsigned int uiNodes = s_uiProfileNodes;
+				const int iSize = ((uiNodes == 0) ? 0 : ((uiNodes < 10) ? 1 : ((uiNodes < 100) ? 2 : ((uiNodes < 1000) ? 3 : 4))));
+				bridgedProfileAdd(&aBySize[iSize], uiRequestTicks);
+				bridgedProfileAdd(&aBySizeNodes[iSize], 0, uiNodes);
+
+				static BridgedProfileSample aByTree[3] = {
+					{ "path fail: started a tree" }, { "path fail: carried on a tree with open nodes" }, { "path fail: carried on a tree already searched out" } };
+				const int iTree = (bProfileNewTree ? 0 : ((uiProfileOpenAtStart > 0) ? 1 : 2));
+				bridgedProfileAdd(&aByTree[iTree], uiRequestTicks);
+
+				static BridgedProfileSample aByLimit[3] = {
+					{ "path fail: no turn limit" }, { "path fail: turn limit, destination not reached" }, { "path fail: turn limit, destination reached in more turns" } };
+				const int iLimit = ((settings.iMaxPath < 0) ? 0 : ((end_node == NULL) ? 1 : 2));
+				bridgedProfileAdd(&aByLimit[iLimit], uiRequestTicks);
+
+				static std::map<int, BridgedProfileSample> aFailSites;
+				BridgedProfileSample& kFailSite = aFailSites[(g_szPathProbeFunction != NULL) ? g_iPathProbeLine : 0];
+				if (!kFailSite.bRegistered)
+				{
+					char szFailName[64];
+					sprintf(szFailName, "path fail site %.40s:%d", ((g_szPathProbeFunction != NULL) ? g_szPathProbeFunction : "elsewhere"), g_iPathProbeLine);
+					kFailSite.szName = szFailName;
+				}
+				bridgedProfileAdd(&kFailSite, uiRequestTicks);
+			}
 		}
 	}
 #endif
