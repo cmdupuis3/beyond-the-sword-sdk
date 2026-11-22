@@ -18,6 +18,7 @@ import pefile
 
 ROOT = support.ROOT
 LOCK = json.loads((ROOT / 'tools/link-lock.json').read_text())
+DEFAULT_PROFILE = ROOT / 'pgo/CvGameCoreDLL.profdata'
 
 
 def main():
@@ -30,7 +31,8 @@ def main():
         parser.add_argument('--' + name, type=Path, help='override the prepared dependency path')
     parser.add_argument('--icu70-dir', type=Path, help='required for the pinned Linux LLVM package')
     parser.add_argument('--output-dir', type=Path,
-                        help='default tmp/dll-build, or tmp/dll-build-profile with --profile')
+                        help='default tmp/dll-build, with -no-pgo, -pgo-train or (for --pgo-use) -pgo '
+                             'added to the name, and then -profile with --profile')
     parser.add_argument('--profile', action='store_true',
                         help='time the SDK PROFILE scopes inside the DLL (see FProfiler.h)')
     parser.add_argument('--no-lto', dest='lto', action='store_false',
@@ -39,18 +41,29 @@ def main():
     pgo.add_argument('--pgo-train', action='store_true',
                      help='build the DLL that counts what runs, for run_bench.py --pgo-train')
     pgo.add_argument('--pgo-use', type=Path, metavar='PROFDATA',
-                     help='optimise with a profile merged by llvm-profdata from training runs')
+                     help='optimise with this profile, merged by llvm-profdata from training runs, '
+                          'instead of the one in the repository (pgo/CvGameCoreDLL.profdata)')
+    pgo.add_argument('--no-pgo', action='store_true',
+                     help='do not optimise with a profile (a --profile build does not anyway)')
     parser.add_argument('--jobs', type=int, default=4)
     parser.add_argument('--cmake', default='cmake')
     args = parser.parse_args()
+    # The build is optimised with the profile kept in the repository unless told otherwise.
+    # A --profile build is not: its timing scopes change the hottest functions, about 420
+    # of them, so that profile does not fit them and they would be optimised without it.
+    own_profile = args.pgo_use is not None
+    if not (own_profile or args.pgo_train or args.no_pgo or args.profile):
+        args.pgo_use = DEFAULT_PROFILE
     if args.pgo_use is not None and not args.pgo_use.is_file():
-        parser.error(f'not found: {args.pgo_use}')
+        parser.error(f'not found: {args.pgo_use} (--no-pgo builds without a profile)')
     if args.output_dir is None:
         name = 'tmp/dll-build'
         if args.pgo_train:
             name += '-pgo-train'
-        elif args.pgo_use is not None:
+        elif own_profile:
             name += '-pgo'
+        elif args.no_pgo and not args.profile:
+            name += '-no-pgo'
         args.output_dir = ROOT / (name + ('-profile' if args.profile else ''))
     for name, path in support.dependency_paths(args.deps_dir).items():
         if getattr(args, name) is None:
@@ -221,6 +234,9 @@ def main():
             if not big_object:
                 exception_metadata[lto_object.name] = eh_metadata.inspect_object(lto_object)
         log = (attempt / 'build.log').read_text()
+        # Functions whose shape has changed since the profile was collected. The compiler
+        # says so as it compiles a unit, so this counts the units compiled this time only.
+        mismatched = len(re.findall(r'\(hash mismatch\)', log))
         libraries = [args.vc71 / 'lib' / name for name in ['msvcrt.lib', 'msvcprt.lib', 'oldnames.lib']]
         libraries += [args.windows_sdk / 'lib' / name for name in ['Kernel32.Lib', 'User32.Lib', 'WinMM.Lib']]
         libraries += [ROOT / 'CvGameCoreDLL/Python24/libs/python24.lib',
@@ -232,7 +248,9 @@ def main():
                       units=len(expected_sources), adapter_units=len(adapter_sources),
                       link_time_optimisation=args.lto,
                       profile_guided_optimisation=('train' if args.pgo_train else 'use' if args.pgo_use else 'off'),
+                      pgo_profile=(str(args.pgo_use) if args.pgo_use else None),
                       pgo_profile_sha256=(support.digest(args.pgo_use) if args.pgo_use else None),
+                      pgo_mismatched_functions=mismatched,
                       exception_route='Static Clang EH3 to VC7.1 frame adapter; no supplemental CRT DLL',
                       legacy_eh_imports=legacy_eh_imports, provider_hashes=provider_hashes,
                       exception_metadata=exception_metadata,
@@ -269,7 +287,13 @@ def main():
         support.write_json(report_path, report)
     print(json.dumps({'build_pass': report['pass'], 's3_complete': False,
                       'units': report['units'], 'required_exports': report['required_exports'],
+                      'profile_guided_optimisation': report['profile_guided_optimisation'],
+                      'pgo_mismatched_functions': report['pgo_mismatched_functions'],
                       'report': str(report_path)}, indent=2))
+    if report['pgo_mismatched_functions']:
+        print(f"{report['pgo_mismatched_functions']} functions have changed since the profile was collected "
+              'and were optimised without it. Collect a new profile after larger changes: see '
+              '"Profile-guided optimisation" in README.md.', file=sys.stderr)
 
 
 if __name__ == '__main__':

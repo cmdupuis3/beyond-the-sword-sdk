@@ -48,7 +48,8 @@ python tools/build_dll.py `
 
 ```
 
-Both builds produce `tmp/dll-build/CvGameCoreDLL.dll`. Copy it into your test
+Both builds produce `tmp/dll-build/CvGameCoreDLL.dll`, optimised with the profile in
+`pgo/` (see [Profile-guided optimisation](#profile-guided-optimisation)). Copy it into your test
 mod's `Assets/`, preserving the original game DLL. The static exception adapter
 uses the original MSVCR71/MSVCP71 providers and needs no supplemental modern CRT.
 Its supported metadata, ABI evidence and exception diagnostics are documented
@@ -73,23 +74,43 @@ CMake configuration. `build_support.py` provides shared hashing and PE metadata.
 pins additional tools and link inputs, and `windows-toolchain-lock.json` pins
 the Windows LLVM package.
 
-## Profile-guided optimisation (optional)
+## Profile-guided optimisation
 
-The build can be optimised with a record of which code a real game runs. This is off by
-default and the normal build does not need it. It takes three steps on Windows: build a
-training DLL, play the seeded benchmark game with it, and build again with the profile.
+The build is optimised with a record of which code a real game runs. The record is
+`pgo/CvGameCoreDLL.profdata`. It was collected on the seeded standard game (150 turns)
+and the seeded huge game (250 turns), all players AI, with the source as it was at commit
+`b7e3534`. `tools/build_dll.py` uses it unless told otherwise:
+
+| option | profile used | output folder |
+| --- | --- | --- |
+| none | the one in the repository | `tmp/dll-build` |
+| `--no-pgo` | none | `tmp/dll-build-no-pgo` |
+| `--pgo-use FILE` | `FILE` | `tmp/dll-build-pgo` |
+| `--pgo-train` | none: this builds the DLL that collects a profile | `tmp/dll-build-pgo-train` |
+| `--profile` | none, unless `--pgo-use` is given | `tmp/dll-build-profile` |
+
+A `--profile` build leaves the profile out because its timing scopes change about 420 of
+the hottest functions, and the profile no longer fits a function that has changed. The
+times it reports are therefore those of a DLL built without the profile.
+
+A profile goes stale as the source changes: a function whose shape has changed is
+optimised without it. The build counts those functions, as `pgo_mismatched_functions` in
+what it prints and in `report.json`, and says so when there are any. The count covers the
+units compiled in that run only, and leaves out functions defined in headers. A few
+changed functions do not matter. After larger changes collect a new profile: build a
+training DLL, play the two seeded games with it, merge the two files it writes over the
+one in the repository, and build again.
 
 ```powershell
 python tools/build_dll.py --bts-dir "$BtsDir" --llvm-bin "C:/LLVM-23.1.2/bin" --pgo-train
-python bench/run_bench.py --dll tmp/dll-build-pgo-train/CvGameCoreDLL.dll --label train --turns 150 --pgo-train
-& "C:/LLVM-23.1.2/bin/llvm-profdata.exe" merge -o tmp/pgo/train.profdata bench/results/train.profraw
-python tools/build_dll.py --bts-dir "$BtsDir" --llvm-bin "C:/LLVM-23.1.2/bin" --pgo-use tmp/pgo/train.profdata
+python bench/run_bench.py --dll tmp/dll-build-pgo-train/CvGameCoreDLL.dll --label train-standard --turns 150 --pgo-train
+python bench/run_bench.py --dll tmp/dll-build-pgo-train/CvGameCoreDLL.dll --label train-huge --turns 250 --world-size WORLDSIZE_HUGE --timeout 2400 --pgo-train
+& "C:/LLVM-23.1.2/bin/llvm-profdata.exe" merge -o pgo/CvGameCoreDLL.profdata bench/results/train-standard.profraw bench/results/train-huge.profraw
+python tools/build_dll.py --bts-dir "$BtsDir" --llvm-bin "C:/LLVM-23.1.2/bin"
 ```
 
-The result is `tmp/dll-build-pgo/CvGameCoreDLL.dll`. Several `.profraw` files can be given
-to one `llvm-profdata merge`, and it pays to train on more than one game: a profile from
-the standard game alone does little for a huge map (see the table below). For the huge
-game add `--turns 250 --world-size WORLDSIZE_HUGE --timeout 2400` to the training run.
+It pays to train on more than one game: a profile from the standard game alone does
+little for a huge map (see the table below). The huge game takes a few minutes.
 
 The training DLL writes the profile itself (`bridgedPgoTurn()` in `CvGameCoreDLL.cpp`),
 every tenth game turn, to the file named by the `BRIDGED_PGO_RAW` environment variable.
@@ -102,9 +123,7 @@ if the compiler is changed.
 
 The training DLL is for collecting a profile only. Its link-time object is too large for
 `tools/eh_metadata.py` to read, so its exception metadata is not checked; the DLL built
-from the profile is checked like any other. A profile goes stale as the source changes:
-functions that no longer match are optimised without it, so collect a new one after
-larger changes.
+from the profile is checked like any other.
 
 Measured on the seeded games, all players AI. Every DLL, the training one included, plays
 the same game: the same state hash on all 151 turns of the standard game and all 251 of
@@ -116,9 +135,9 @@ turn late in the huge game.
 
 | | standard, 150 turns | | huge, 250 turns | |
 | --- | ---: | ---: | ---: | ---: |
-| normal build | 5.00 s | | 53.9 s | |
+| built without a profile (`--no-pgo`) | 5.00 s | | 53.9 s | |
 | trained on the standard game | 4.85 s | 3.0% less | 52.4 s | 2.9% less |
-| trained on the standard and the huge game | 4.67 s | 6.7% less | 47.4 s | 12.1% less |
+| trained on the standard and the huge game (the profile in the repository) | 4.67 s | 6.7% less | 47.4 s | 12.1% less |
 
 These figures move by a few percent from one set of runs to the next: an earlier set of
 eight runs of the standard game gave 6.2% less for the DLL trained on that game, and 1.8%
