@@ -216,6 +216,7 @@ protected:
 	const std::vector<int>* AI_plotValidScanList() const;
 	int AI_maxStepsPerTurn() const;
 	int AI_minPathTurns(const CvPlot* pPlot, int iMaxStepsPerTurn) const;
+	int AI_exploreRangeValue(CvPlot* pPlot, int iValue, int iDX, int iDY, int iSearchRange, int iImpassableCount);
 
 	int AI_finalOddsThreshold(CvPlot* pPlot, int iOddsThreshold);
 
