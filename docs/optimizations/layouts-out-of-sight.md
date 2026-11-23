@@ -17,7 +17,8 @@ and a plot whenever a citizen starts or stops working it, so after a round of AI
 most are. That frame is about three quarters of the time the exe keeps between two calls
 of `CvGame::update()`, up to 1.7 s on the huge map late in the game.
 
-- A city or plot the active team can see says yes at once, as before. One in the fog says
+- A city or plot the active team can see says yes at once, as before (since then only if
+  it is also near the camera: see [layouts off the screen](layouts-off-screen.md)). One in the fog says
   yes only within an allowance of 2 cities and 16 plots for each call of
   `CvGame::update()` (`CvMap::takeLayoutUpdate()`); the rest stay marked and are made in
   the frames that follow, during the player's own turn.

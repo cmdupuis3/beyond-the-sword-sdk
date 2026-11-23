@@ -15,6 +15,7 @@
 | [City-site scores kept between turns](found-value-cache.md) | 1 | shrinks | early | medium |
 | [Define lookups kept by name](define-lookup-cache.md) | 1 | not measured | const | medium |
 | [Feature graphics left until seen](feature-graphics-when-seen.md) | 1 | shrinks | early | medium |
+| [Layouts off the screen made a few at a time](layouts-off-screen.md) | 1 | grows | late | medium |
 | [Layouts out of sight made a few at a time](layouts-out-of-sight.md) | 1 | grows | late | medium |
 | [Optional Python callbacks](python-callbacks-optional.md) | 1 | flat | late | medium |
 | [Path request lookups made once](path-request-lookups.md) | 1 | flat | late | medium |
