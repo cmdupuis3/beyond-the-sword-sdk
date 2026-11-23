@@ -9625,6 +9625,13 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
 			if(bCheckPlotVisible && pNewPlot->isVisibleToWatchingHuman())
 				bShow = true;
 
+			// an AI unit is put on its new plot, not walked there, unless the AI's turns are
+			// shown: see CvGame::isAITurnsShown()
+			if (bShow && !isHuman() && !GC.getGameINLINE().isAITurnsShown())
+			{
+				bShow = false;
+			}
+
 			if (bShow)
 			{
 				QueueMove(pNewPlot);
@@ -12860,7 +12867,8 @@ bool CvUnit::isCombatVisible(const CvUnit* pDefender) const
 			}
 			else if (NULL != pDefender && pDefender->isHuman())
 			{
-				if (!GET_PLAYER(pDefender->getOwnerINLINE()).isOption(PLAYEROPTION_QUICK_DEFENSE))
+				// an AI attack is settled at once unless the AI's turns are shown: see CvGame::isAITurnsShown()
+				if (GC.getGameINLINE().isAITurnsShown() && !GET_PLAYER(pDefender->getOwnerINLINE()).isOption(PLAYEROPTION_QUICK_DEFENSE))
 				{
 					bVisible = true;
 				}

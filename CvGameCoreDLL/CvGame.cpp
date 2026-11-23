@@ -2139,6 +2139,31 @@ enum SliceWaitTypes
 
 static const int MAX_SLICE_PASSES = 500;
 
+//
+// In a single-player game the other players' turns are not played out for the human. Stock
+// walks an AI unit from plot to plot where the human can see it and wants to (the "show
+// enemy moves" and "show friendly moves" options), and plays an AI attack on a human's unit
+// unless "quick combat (defense)" is on; each of those keeps the turn waiting for the screen
+// (SLICE_WAIT_ACTION_SHOWN below). Now an AI unit is put where it moved to and a fight is
+// settled at once, as stock does for what the human cannot see, so that the players after
+// the human take their turns in one call of update() and the human sees the outcome of all
+// of them together. The turns themselves are the same and in the same order. A human's own
+// units, automated ones too, are shown as before. SHOW_AI_TURNS=1 shows the AI's turns as
+// stock does; so does STOCK_TURN_SLICES, and a multiplayer game always does.
+//
+bool CvGame::isAITurnsShown() const
+{
+	static int iShown = -1;
+
+	if (iShown == -1)
+	{
+		iShown = (((GC.getDefineINT("SHOW_AI_TURNS") != 0) || (GC.getDefineINT("STOCK_TURN_SLICES") != 0)) ? 1 : 0);
+	}
+
+	return ((iShown != 0) || isGameMultiPlayer());
+}
+
+
 int CvGame::nextSliceWait(bool bNewGameTurn, int iStartRequests, int iPasses, DWORD uiStartTime)
 {
 	static int iStock = -1;

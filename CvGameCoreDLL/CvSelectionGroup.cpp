@@ -501,6 +501,11 @@ void CvSelectionGroup::doTurn()
 
 bool CvSelectionGroup::showMoves() const
 {
+	if (!GC.getGameINLINE().isAITurnsShown())
+	{
+		return false;	// no mission timers for the AI's groups: see CvGame::isAITurnsShown()
+	}
+
 	if (GC.getGameINLINE().isMPOption(MPOPTION_SIMULTANEOUS_TURNS) || GC.getGameINLINE().isSimultaneousTeamTurns())
 	{
 		return false;
