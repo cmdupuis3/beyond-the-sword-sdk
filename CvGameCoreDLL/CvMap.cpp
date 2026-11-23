@@ -263,7 +263,7 @@ void CvMap::setup()
 
 	// The K-Mod pathfinder (CvSelectionGroup::path_finder) sizes itself to the map when it is
 	// next used. Anything it has kept is from the map this one replaces.
-	CvSelectionGroup::path_finder.Reset();
+	CvSelectionGroup::dropPathSearch();
 }
 
 

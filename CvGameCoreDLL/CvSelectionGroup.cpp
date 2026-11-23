@@ -3212,9 +3212,10 @@ bool CvSelectionGroup::groupAttack(int iX, int iY, int iFlags, bool& bFailedAlre
 
 	if (iFlags & MOVE_THROUGH_ENEMY)
 	{
-		if (generatePath(plot(), pDestPlot, iFlags))
+		CvPlot* pStepPlot = getPathStep(pDestPlot, iFlags);
+		if (pStepPlot != NULL)
 		{
-			pDestPlot = getPathFirstPlot();
+			pDestPlot = pStepPlot;
 		}
 	}
 
@@ -3230,7 +3231,7 @@ bool CvSelectionGroup::groupAttack(int iX, int iY, int iFlags, bool& bFailedAlre
 	{
 		if ((getDomainType() == DOMAIN_AIR) || (stepDistance(getX(), getY(), pDestPlot->getX_INLINE(), pDestPlot->getY_INLINE()) == 1))
 		{
-			if ((iFlags & MOVE_DIRECT_ATTACK) || (getDomainType() == DOMAIN_AIR) || (iFlags & MOVE_THROUGH_ENEMY) || (generatePath(plot(), pDestPlot, iFlags) && (getPathFirstPlot() == pDestPlot)))
+			if ((iFlags & MOVE_DIRECT_ATTACK) || (getDomainType() == DOMAIN_AIR) || (iFlags & MOVE_THROUGH_ENEMY) || (getPathStep(pDestPlot, iFlags) == pDestPlot))
 			{
 				int iAttackOdds;
 				CvUnit* pBestAttackUnit = AI_getBestGroupAttacker(pDestPlot, true, iAttackOdds);
@@ -3392,12 +3393,12 @@ bool CvSelectionGroup::groupPathTo(int iX, int iY, int iFlags)
 	}
 	else
 	{
-		if (!generatePath(plot(), pDestPlot, iFlags))
+		pPathPlot = getPathStep(pDestPlot, iFlags);
+
+		if (pPathPlot == NULL)
 		{
 			return false;
 		}
-
-		pPathPlot = getPathFirstPlot();
 
 		if (groupAmphibMove(pPathPlot, iFlags))
 		{
@@ -3422,6 +3423,8 @@ bool CvSelectionGroup::groupPathTo(int iX, int iY, int iFlags)
 		bEndMove = true;
     
 	groupMove(pPathPlot, iFlags & MOVE_THROUGH_ENEMY, NULL, bEndMove);
+
+	pathStepTaken(pPathPlot);
 
 	return true;
 }
@@ -4043,6 +4046,200 @@ bool CvSelectionGroup::isStockPathSearches()
 #endif
 }
 
+//
+// The path a group is following.
+//
+// A group on a move mission asks for its path anew on every plot of the way (groupPathTo()),
+// and each time the K-Mod pathfinder has to search from scratch, because its tree starts at
+// the plot the group has just left. Nothing else has happened in between. The group's own
+// step is the only change, and the rest of the path it found is as good a path from the new
+// plot as a new search would find. So the path is kept, plot by plot, and the group takes
+// its next step from it (getPathStep()).
+//
+// Whatever drops the pathfinder's tree drops the path too, the group's own steps along it
+// excepted: another unit moving, appearing or dying, a promotion, war or peace, a change of
+// the group's units, a new game turn. The path is used only by the same group for the same
+// destination and flags, on the plot it expects the group on, and with the movement points
+// it expects the group to have there.
+//
+// Tier 2 (see BridgedTiers.h): where two paths cost the same a new search can choose the
+// other one, and the stock pathfinder can cost the rest of a path differently once it starts
+// from a plot in the middle of it. PATH_SEARCH_EVERY_STEP=1 searches at every step.
+//
+struct CvKeptPath
+{
+	CvKeptPath() : pGroup(NULL), iFlags(0), pDestPlot(NULL), uiAt(0) {}
+
+	const CvSelectionGroup* pGroup;		// NULL: no path is kept
+	int iFlags;
+	const CvPlot* pDestPlot;
+	std::vector<const CvPlot*> apPlots;	// from the plot the path was found on to the destination
+	std::vector<int> aiMoves;			// the movement points the path has on arriving at each
+	size_t uiAt;						// where on it the group is
+};
+
+static CvKeptPath s_keptPath;
+
+// the flags the pathfinder's tree does not depend on: see KmodPathFinder::SetSettings()
+static const int KEPT_PATH_FLAGS = ~(MOVE_DIRECT_ATTACK | MOVE_DECLARE_WAR);
+
+static void dropKeptPath()
+{
+	s_keptPath.pGroup = NULL;
+	s_keptPath.apPlots.clear();
+	s_keptPath.aiMoves.clear();
+	s_keptPath.uiAt = 0;
+}
+
+bool CvSelectionGroup::isPathSearchedEveryStep()
+{
+#ifdef REPRODUCE_BTS
+	return true;
+#else
+	static int iEveryStep = -1;
+	if (iEveryStep == -1)
+	{
+		iEveryStep = ((GC.getDefineINT("PATH_SEARCH_EVERY_STEP") != 0) ? 1 : 0);
+	}
+	return (iEveryStep != 0);
+#endif
+}
+
+// The search tree and the path kept are of no use any more: something has changed that paths
+// depend on.
+void CvSelectionGroup::dropPathSearch()
+{
+	path_finder.Reset();
+	dropKeptPath();
+}
+
+// A unit is about to move, appear (no old plot) or go (no new plot). That changes where
+// groups can go, what they would have to attack and where they are in danger, so the
+// pathfinder's tree is dropped. The path kept stays if this is the group it belongs to, or
+// its cargo, taking the next step of it.
+void CvSelectionGroup::unitMoves(const CvUnit* pUnit, const CvPlot* pOldPlot, const CvPlot* pNewPlot)
+{
+	path_finder.Reset();
+
+	if (s_keptPath.pGroup == NULL)
+	{
+		return;
+	}
+
+	if ((s_keptPath.uiAt + 1 < s_keptPath.apPlots.size()) && (pOldPlot == s_keptPath.apPlots[s_keptPath.uiAt]) && (pNewPlot == s_keptPath.apPlots[s_keptPath.uiAt + 1]))
+	{
+		if (pUnit->getGroup() == s_keptPath.pGroup)
+		{
+			return;
+		}
+
+		const CvUnit* pTransportUnit = pUnit->getTransportUnit();
+		if ((pTransportUnit != NULL) && (pTransportUnit->getGroup() == s_keptPath.pGroup))
+		{
+			return;
+		}
+	}
+
+	dropKeptPath();
+}
+
+// The plot the group is to step onto next on its way to pDestPlot, or NULL if there is no
+// path. From the path kept if it holds, else from a search, whose path is then kept.
+CvPlot* CvSelectionGroup::getPathStep(const CvPlot* pDestPlot, int iFlags)
+{
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample aStepSamples[4] = { { "path step: taken from the path kept" }, { "path step: searched, no path kept for the group" },
+		{ "path step: searched, path kept was for another destination, plot or flags" }, { "path step: searched, movement points not as the path kept has them" } };
+	int iStepSample = 1;
+#endif
+
+	if (!isPathSearchedEveryStep() && (s_keptPath.pGroup == this))
+	{
+		if ((s_keptPath.pDestPlot == pDestPlot) && ((s_keptPath.iFlags & KEPT_PATH_FLAGS) == (iFlags & KEPT_PATH_FLAGS)) &&
+			(s_keptPath.uiAt + 1 < s_keptPath.apPlots.size()) && (s_keptPath.apPlots[s_keptPath.uiAt] == plot()))
+		{
+			// what the pathfinder would start a search with: see KmodPathFinder::GeneratePath()
+			CvPathSettings kSettings(this, iFlags);
+			FAStarNode kStartNode;
+			memset((void*)&kStartNode, 0, sizeof(kStartNode));
+			pathAdd(NULL, &kStartNode, ASNC_INITIALADD, &kSettings, NULL);
+
+			if (kStartNode.m_iData1 == s_keptPath.aiMoves[s_keptPath.uiAt])
+			{
+#ifdef BRIDGED_PROFILE
+				bridgedProfileAdd(&aStepSamples[0], 0);
+#endif
+				return const_cast<CvPlot*>(s_keptPath.apPlots[s_keptPath.uiAt + 1]);
+			}
+#ifdef BRIDGED_PROFILE
+			iStepSample = 3;
+#endif
+		}
+#ifdef BRIDGED_PROFILE
+		else
+		{
+			iStepSample = 2;
+		}
+#endif
+	}
+
+	dropKeptPath();
+
+	if (!generatePath(plot(), pDestPlot, iFlags))
+	{
+		return NULL;
+	}
+
+	CvPlot* pStepPlot = getPathFirstPlot();
+
+	if (!isPathSearchedEveryStep() && isKmodPathGroup(this) && path_finder.IsPathComplete())
+	{
+#ifdef BRIDGED_PROFILE
+		bridgedProfileAdd(&aStepSamples[iStepSample], 0);
+#endif
+		for (const FAStarNode* pNode = path_finder.GetEndNode(); pNode != NULL; pNode = pNode->m_pParent)
+		{
+			s_keptPath.apPlots.push_back(GC.getMapINLINE().plotSorenINLINE(pNode->m_iX, pNode->m_iY));
+			s_keptPath.aiMoves.push_back(pNode->m_iData1);
+		}
+		std::reverse(s_keptPath.apPlots.begin(), s_keptPath.apPlots.end());
+		std::reverse(s_keptPath.aiMoves.begin(), s_keptPath.aiMoves.end());
+
+		if ((s_keptPath.apPlots.size() > 1) && (s_keptPath.apPlots[0] == plot()))
+		{
+			s_keptPath.pGroup = this;
+			s_keptPath.iFlags = iFlags;
+			s_keptPath.pDestPlot = pDestPlot;
+			s_keptPath.uiAt = 0;
+		}
+		else
+		{
+			dropKeptPath();
+		}
+	}
+
+	return pStepPlot;
+}
+
+// The group has been moved onto the plot getPathStep() gave, or has tried to.
+void CvSelectionGroup::pathStepTaken(const CvPlot* pStepPlot)
+{
+	if (s_keptPath.pGroup != this)
+	{
+		return;
+	}
+
+	if ((getNumUnits() > 0) && (plot() == pStepPlot) && (s_keptPath.uiAt + 1 < s_keptPath.apPlots.size()) && (s_keptPath.apPlots[s_keptPath.uiAt + 1] == pStepPlot))
+	{
+		s_keptPath.uiAt++;
+	}
+	else
+	{
+		dropKeptPath();
+	}
+}
+
+
 bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToPlot, int iFlags, bool bReuse, int* piPathTurns, int iMaxPath) const
 {
 	PROFILE("CvSelectionGroup::generatePath()")
@@ -4134,6 +4331,11 @@ bool CvSelectionGroup::generatePath( const CvPlot* pFromPlot, const CvPlot* pToP
 void CvSelectionGroup::resetPath()
 {
 	// the pathfinder that generatePath() would use for this group
+	if (s_keptPath.pGroup == this)
+	{
+		dropKeptPath();
+	}
+
 	if (isKmodPathGroup(this))
 	{
 		path_finder.Reset();
@@ -4206,6 +4408,10 @@ bool CvSelectionGroup::addUnit(CvUnit* pUnit, bool bMinimalChange)
 	if (path_finder.GetGroup() == this)
 	{
 		path_finder.Reset();
+	}
+	if (s_keptPath.pGroup == this)
+	{
+		dropKeptPath();
 	}
 
 	if(!bMinimalChange)
@@ -4280,6 +4486,10 @@ CLLNode<IDInfo>* CvSelectionGroup::deleteUnitNode(CLLNode<IDInfo>* pNode)
 	if (path_finder.GetGroup() == this)
 	{
 		path_finder.Reset();
+	}
+	if (s_keptPath.pGroup == this)
+	{
+		dropKeptPath();
 	}
 
 	return pNextUnitNode;

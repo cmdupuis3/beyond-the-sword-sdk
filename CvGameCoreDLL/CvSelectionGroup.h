@@ -143,6 +143,12 @@ public:
 	bool generatePath( const CvPlot* pFromPlot, const CvPlot* pToPlot, int iFlags = 0, bool bReuse = false, int* piPathTurns = NULL, int iMaxPath = -1) const;
 	// PATH_STOCK_SEARCHES: see docs/behaviour-changes.md
 	static bool isStockPathSearches();	// Exposed to Python
+	// The path a group on a move mission is following: see getPathStep() in CvSelectionGroup.cpp.
+	CvPlot* getPathStep(const CvPlot* pDestPlot, int iFlags);
+	void pathStepTaken(const CvPlot* pStepPlot);
+	static bool isPathSearchedEveryStep();
+	static void dropPathSearch();
+	static void unitMoves(const CvUnit* pUnit, const CvPlot* pOldPlot, const CvPlot* pNewPlot);
 	void resetPath();																																										// Exposed to Python
 
 	DllExport void clearUnits();

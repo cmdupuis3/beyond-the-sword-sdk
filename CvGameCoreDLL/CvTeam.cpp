@@ -3522,7 +3522,7 @@ void CvTeam::setAtWar(TeamTypes eIndex, bool bNewValue)
 
 	// War and peace change whose territory and whose units block a group. A search tree the
 	// K-Mod pathfinder has kept was made under the old terms.
-	CvSelectionGroup::path_finder.Reset();
+	CvSelectionGroup::dropPathSearch();
 }
 
 

@@ -8752,7 +8752,7 @@ void CvGame::doUpdateCacheOnTurn()
 	// The K-Mod pathfinder keeps its search tree for as long as requests come from the same
 	// group on the same plot. Between turns the map changes under it (borders, routes, the
 	// units of every other player), so a tree is never carried from one turn into the next.
-	CvSelectionGroup::path_finder.Reset();
+	CvSelectionGroup::dropPathSearch();
 }
 
 VoteSelectionData* CvGame::getVoteSelection(int iID) const
