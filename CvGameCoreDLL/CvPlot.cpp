@@ -9615,16 +9615,20 @@ bool CvPlot::isLayoutDirty() const
 }
 
 // Whether the exe is to make the plot's layout anew now: at once for a plot the active team
-// can see, and for one in the fog when its turn comes. See CvMap::takeLayoutUpdate().
+// can see on or near the screen (CvMap::isLayoutAtOnce()), and for one in the fog or off the
+// screen when its turn comes. See CvMap::takeLayoutUpdate().
 bool CvPlot::isLayoutDue() const
 {
 	if (!m_bLayoutDue)
 	{
-		if (!GC.getMapINLINE().isStockLayoutUpdates() && !isActiveVisible(true) && !GC.getMapINLINE().takeLayoutUpdate(false))
+		if (!GC.getMapINLINE().isStockLayoutUpdates() && !GC.getMapINLINE().isLayoutAtOnce(this) && !GC.getMapINLINE().takeLayoutUpdate(false))
 		{
 			return false;
 		}
 
+#ifdef BRIDGED_PROFILE
+		GC.getMapINLINE().countLayoutMade(this, false);
+#endif
 		m_bLayoutDue = true;
 	}
 

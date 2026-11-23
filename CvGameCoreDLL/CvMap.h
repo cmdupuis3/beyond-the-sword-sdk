@@ -99,10 +99,16 @@ public:
 	DllExport void updateSymbolVisibility();
 	void updateSymbols();
 
-	// Layouts of cities and plots out of the active team's sight are made a few at a time.
+	// Layouts of cities and plots out of the active team's sight, or in it and off the screen,
+	// are made a few at a time.
 	bool isStockLayoutUpdates() const;		// the STOCK_LAYOUT_UPDATES define: do as stock does
+	bool isLayoutAtOnce(const CvPlot* pPlot) const;
+	bool isNearCamera(const CvPlot* pPlot) const;
 	bool takeLayoutUpdate(bool bCity) const;
 	void resetLayoutUpdates();
+#ifdef BRIDGED_PROFILE
+	void countLayoutMade(const CvPlot* pPlot, bool bCity) const;
+#endif
 
 	// Yield and route symbols asked for while CvGame::update() runs are made once, when it
 	// is about to give the exe the screen back: see CvPlot::updateSymbols().

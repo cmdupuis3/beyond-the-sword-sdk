@@ -7388,7 +7388,8 @@ void CvCity::setInfoDirty(bool bNewValue)
 // marked each time it grows, shrinks or gets a building, so in a round of AI turns most
 // cities are. A city the active team has not found is not drawn (updateVisibility()), so
 // the answer for it waits until it is found: the mark stays, and the exe asks again. A city
-// in the fog waits for its turn (CvMap::takeLayoutUpdate()); its billboard does not.
+// in the fog, or in sight and off the screen (CvMap::isLayoutAtOnce()), waits for its turn
+// (CvMap::takeLayoutUpdate()); its billboard does not.
 // STOCK_LAYOUT_UPDATES=1 gives the stock answer.
 //
 bool CvCity::isLayoutDirty() const
@@ -7400,11 +7401,14 @@ bool CvCity::isLayoutDirty() const
 
 	if (!m_bLayoutDue)
 	{
-		if (!GC.getMapINLINE().isStockLayoutUpdates() && !plot()->isActiveVisible(true) && !GC.getMapINLINE().takeLayoutUpdate(true))
+		if (!GC.getMapINLINE().isStockLayoutUpdates() && !GC.getMapINLINE().isLayoutAtOnce(plot()) && !GC.getMapINLINE().takeLayoutUpdate(true))
 		{
 			return false;
 		}
 
+#ifdef BRIDGED_PROFILE
+		GC.getMapINLINE().countLayoutMade(plot(), true);
+#endif
 		m_bLayoutDue = true;
 	}
 

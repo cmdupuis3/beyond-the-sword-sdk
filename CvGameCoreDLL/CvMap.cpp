@@ -29,6 +29,7 @@
 #include "CyArgsList.h"
 
 #include "CvDLLEngineIFaceBase.h"
+#include "CvDLLInterfaceIFaceBase.h"
 #include "CvDLLIniParserIFaceBase.h"
 #include "CvDLLFAStarIFaceBase.h"
 #include "CvDLLFAStarIFaceBase.h"
@@ -435,8 +436,9 @@ bool CvMap::isStockLayoutUpdates() const
 // second on a huge one late in the game: about three quarters of the time the exe keeps
 // between two calls of CvGame::update().
 //
-// A city or plot the active team can see says yes at once, as before. One it cannot see
-// (in the fog, where the layout is drawn as it was last made) says yes only while this
+// A city or plot the active team can see and that is on the screen or near it says yes at
+// once, as before (isLayoutAtOnce()). One it cannot see (in the fog, where the layout is
+// drawn as it was last made), or can see but is not looking at, says yes only while this
 // allowance lasts, a few for each call of CvGame::update(); the rest stay marked and are
 // asked again in the next frames. So their layouts are brought up to date over the next
 // seconds, during the player's own turn, and no frame has to make them all.
@@ -466,6 +468,100 @@ void CvMap::resetLayoutUpdates()
 	m_iCityLayoutUpdates = CITY_LAYOUT_UPDATES_PER_CALL;
 	m_iPlotLayoutUpdates = PLOT_LAYOUT_UPDATES_PER_CALL;
 }
+
+
+//
+// Whether the layout of a city or plot there is made as soon as the exe asks. It is when the
+// active team can see the plot and the plot is on the screen or near it. The player's own
+// land is always in their sight and most of it is off the screen, so after a round of turns
+// many of the layouts in sight are ones the player is not looking at. Those wait for
+// their turn with the ones in the fog (takeLayoutUpdate()), and are made at once when the
+// camera comes to them: the exe asks again before every frame.
+// LAYOUTS_IN_SIGHT_AT_ONCE=1 makes everything in sight at once, as before.
+//
+bool CvMap::isLayoutAtOnce(const CvPlot* pPlot) const
+{
+	return (pPlot->isActiveVisible(true) && isNearCamera(pPlot));
+}
+
+
+//
+// Whether a plot is on the screen or near it: within LAYOUT_CAMERA_RANGE_X plots either side
+// of the plot the camera looks at and LAYOUT_CAMERA_RANGE_Y plots above or below it. The DLL
+// cannot ask how far the camera is zoomed out or how large the window is, so the range is a
+// fixed one, wider than the view at the zoom a game starts with; the defines of the same
+// names change it. With the camera zoomed far out, the plots at the edges of the screen are
+// beyond it and wait for their turn. In the globe view every plot is near.
+// The camera is looked up once per clock tick, so a frame's questions share one answer.
+//
+static const int LAYOUT_CAMERA_RANGE_X = 14;
+static const int LAYOUT_CAMERA_RANGE_Y = 9;
+
+bool CvMap::isNearCamera(const CvPlot* pPlot) const
+{
+	static int iInSight = -1;
+	static int iRangeX = LAYOUT_CAMERA_RANGE_X;
+	static int iRangeY = LAYOUT_CAMERA_RANGE_Y;
+	static DWORD uiTime = 0;
+	static const CvPlot* pLookAt = NULL;
+
+	if (iInSight == -1)
+	{
+		iInSight = ((GC.getDefineINT("LAYOUTS_IN_SIGHT_AT_ONCE") != 0) ? 1 : 0);
+
+		if (GC.getDefineINT("LAYOUT_CAMERA_RANGE_X") > 0)
+		{
+			iRangeX = GC.getDefineINT("LAYOUT_CAMERA_RANGE_X");
+		}
+		if (GC.getDefineINT("LAYOUT_CAMERA_RANGE_Y") > 0)
+		{
+			iRangeY = GC.getDefineINT("LAYOUT_CAMERA_RANGE_Y");
+		}
+	}
+
+	if (iInSight != 0)
+	{
+		return true;
+	}
+
+	const DWORD uiNow = GetTickCount();
+
+	if ((uiNow != uiTime) || (uiTime == 0))
+	{
+		uiTime = uiNow;
+		pLookAt = (gDLL->getEngineIFace()->isGlobeviewUp() ? NULL : gDLL->getInterfaceIFace()->getLookAtPlot());
+	}
+
+	if (pLookAt == NULL)
+	{
+		return true;
+	}
+
+	return ((xDistance(pPlot->getX_INLINE(), pLookAt->getX_INLINE()) <= iRangeX) &&
+		(yDistance(pPlot->getY_INLINE(), pLookAt->getY_INLINE()) <= iRangeY));
+}
+
+
+#ifdef BRIDGED_PROFILE
+// Counts a layout the exe has just been told to make, by where it is.
+void CvMap::countLayoutMade(const CvPlot* pPlot, bool bCity) const
+{
+	static BridgedProfileSample aSamples[2][3] = {
+		{
+			{ "layout made, city: in sight and near the camera" },
+			{ "layout made, city: in sight, off the screen" },
+			{ "layout made, city: in the fog" },
+		},
+		{
+			{ "layout made, plot: in sight and near the camera" },
+			{ "layout made, plot: in sight, off the screen" },
+			{ "layout made, plot: in the fog" },
+		},
+	};
+
+	bridgedProfileAdd(&aSamples[bCity ? 0 : 1][pPlot->isActiveVisible(true) ? (isNearCamera(pPlot) ? 0 : 1) : 2], 0);
+}
+#endif
 
 
 bool CvMap::isStockSymbolUpdates() const
