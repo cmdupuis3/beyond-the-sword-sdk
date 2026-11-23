@@ -253,6 +253,398 @@ static int bridgedProfileCompare(const void* pA, const void* pB)
 }
 
 //
+// Where the exe's time goes between two calls of CvGame::update().
+//
+// The exe has no PROFILE scopes and cannot be read (the Steam one is encrypted on disk). So
+// while the exe has the game's thread, a second thread stops it about once a millisecond
+// and notes where it is: in which module, whether Python is on its stack, and which
+// PROFILE scope is open if the exe has called back into this DLL. The counts are written
+// with the log, to the file named by BRIDGED_PROFILE_LOG with ".exe.tsv" added.
+//
+// Between stopping the thread and letting it go on, the sampler only reads memory: the
+// stopped thread may hold the heap or loader lock.
+//
+struct BridgedExeModule
+{
+	DWORD uiBase;
+	DWORD uiEnd;
+	char szName[48];
+	unsigned int uiSamples;
+	unsigned int uiPythonSamples;	// of those, with Python on the stack
+	unsigned int uiScopeSamples;	// of those, with a PROFILE scope of this DLL open
+};
+
+struct BridgedExeAddress
+{
+	DWORD uiAddress;
+	unsigned int uiSamples;
+	unsigned int uiPythonSamples;
+};
+
+struct BridgedExeScope
+{
+	const BridgedProfileSample* pSample;
+	unsigned int uiSamples;
+};
+
+static const int BRIDGED_EXE_MODULES = 96;
+static const int BRIDGED_EXE_ADDRESS_BITS = 15;
+static const int BRIDGED_EXE_SCOPES = 256;
+static const DWORD BRIDGED_EXE_STACK_BYTES = 0x10000;
+
+static volatile LONG g_lBridgedExeSampling = 0;
+static HANDLE g_hBridgedExeThread = NULL;		// the game's thread
+static DWORD g_uiBridgedExeStackBase = 0;
+static DWORD g_auiBridgedExePythonText[2] = { 0, 0 };
+static BridgedExeModule g_aBridgedExeModules[BRIDGED_EXE_MODULES];
+static int g_iBridgedExeModules = 0;
+static BridgedExeAddress g_aBridgedExeAddresses[1 << BRIDGED_EXE_ADDRESS_BITS];
+static BridgedExeScope g_aBridgedExeScopes[BRIDGED_EXE_SCOPES];
+static unsigned int g_uiBridgedExeSamples = 0;
+static unsigned int g_uiBridgedExeNoScopeSamples = 0;
+static unsigned int g_uiBridgedExeDropped = 0;
+
+// Each sample's stack: the words on it that point into the code of the exe or of this DLL,
+// from the top down. Most are return addresses, so they say what the exe was doing, and which
+// function of this DLL it had called. Written raw, to be counted outside the game.
+static const int BRIDGED_EXE_STACK_WORDS = 62;
+static const int BRIDGED_EXE_STACKS = 30000;
+struct BridgedExeStack
+{
+	DWORD uiAddress;
+	DWORD uiWords;
+	DWORD auiWords[BRIDGED_EXE_STACK_WORDS];
+};
+static BridgedExeStack g_aBridgedExeStacks[BRIDGED_EXE_STACKS];
+static volatile LONG g_lBridgedExeStacks = 0;
+static DWORD g_auiBridgedExeExeText[2] = { 0, 0 };
+static DWORD g_auiBridgedExeDllText[2] = { 0, 0 };
+static DWORD g_uiBridgedExeDllBase = 0;
+
+// The code section of a loaded module, from its headers.
+static void bridgedExeTextRange(DWORD uiBase, DWORD* puiStart, DWORD* puiEnd)
+{
+	const IMAGE_DOS_HEADER* pDos = (const IMAGE_DOS_HEADER*)uiBase;
+	const IMAGE_NT_HEADERS* pNt = (const IMAGE_NT_HEADERS*)(uiBase + pDos->e_lfanew);
+	*puiStart = uiBase + pNt->OptionalHeader.BaseOfCode;
+	*puiEnd = *puiStart + pNt->OptionalHeader.SizeOfCode;
+}
+
+static int bridgedExeModule(DWORD uiAddress)
+{
+	for (int iI = 0; iI < g_iBridgedExeModules; iI++)
+	{
+		if (uiAddress >= g_aBridgedExeModules[iI].uiBase && uiAddress < g_aBridgedExeModules[iI].uiEnd)
+		{
+			return iI;
+		}
+	}
+	if (g_iBridgedExeModules == BRIDGED_EXE_MODULES)
+	{
+		return -1;
+	}
+
+	BridgedExeModule& kModule = g_aBridgedExeModules[g_iBridgedExeModules];
+	memset(&kModule, 0, sizeof(kModule));
+
+	MEMORY_BASIC_INFORMATION kInfo;
+	char szPath[MAX_PATH];
+	if (VirtualQuery((LPCVOID)uiAddress, &kInfo, sizeof(kInfo)) == 0)
+	{
+		return -1;
+	}
+	if (kInfo.Type == MEM_IMAGE && GetModuleFileNameA((HMODULE)kInfo.AllocationBase, szPath, MAX_PATH) != 0)
+	{
+		const IMAGE_DOS_HEADER* pDos = (const IMAGE_DOS_HEADER*)kInfo.AllocationBase;
+		const IMAGE_NT_HEADERS* pNt = (const IMAGE_NT_HEADERS*)((DWORD)kInfo.AllocationBase + pDos->e_lfanew);
+		const char* szName = strrchr(szPath, '\\');
+		kModule.uiBase = (DWORD)kInfo.AllocationBase;
+		kModule.uiEnd = kModule.uiBase + pNt->OptionalHeader.SizeOfImage;
+		strncpy(kModule.szName, (szName != NULL) ? (szName + 1) : szPath, sizeof(kModule.szName) - 1);
+	}
+	else
+	{
+		// code that is in no module: made at run time
+		kModule.uiBase = (DWORD)kInfo.AllocationBase;
+		kModule.uiEnd = (DWORD)kInfo.BaseAddress + (DWORD)kInfo.RegionSize;
+		strncpy(kModule.szName, "(no module)", sizeof(kModule.szName) - 1);
+	}
+	return g_iBridgedExeModules++;
+}
+
+static DWORD WINAPI bridgedExeSampler(LPVOID)
+{
+	for (;;)
+	{
+		Sleep(1);
+		if (g_lBridgedExeSampling == 0)
+		{
+			continue;
+		}
+		if (SuspendThread(g_hBridgedExeThread) == (DWORD)-1)
+		{
+			continue;
+		}
+
+		CONTEXT kContext;
+		kContext.ContextFlags = CONTEXT_CONTROL;
+		const bool bSampled = ((g_lBridgedExeSampling != 0) && GetThreadContext(g_hBridgedExeThread, &kContext));
+		const BridgedProfileSample* pScope = NULL;
+		int iPythonPointers = 0;
+		BridgedExeStack* pStack = ((g_lBridgedExeStacks < BRIDGED_EXE_STACKS) ? &g_aBridgedExeStacks[g_lBridgedExeStacks] : NULL);
+		if (pStack != NULL)
+		{
+			pStack->uiWords = 0;
+		}
+		if (bSampled)
+		{
+			pScope = g_pBridgedProfileCurrent;
+			if (kContext.Esp < g_uiBridgedExeStackBase && (g_uiBridgedExeStackBase - kContext.Esp) < 0x100000)
+			{
+				const DWORD* pWord = (const DWORD*)(kContext.Esp & ~3u);
+				const DWORD* pEnd = (const DWORD*)std::min(g_uiBridgedExeStackBase, (kContext.Esp & ~3u) + BRIDGED_EXE_STACK_BYTES);
+				for (; pWord < pEnd; pWord++)
+				{
+					if (*pWord >= g_auiBridgedExePythonText[0] && *pWord < g_auiBridgedExePythonText[1])
+					{
+						iPythonPointers++;
+					}
+					if (pStack != NULL && pStack->uiWords < (DWORD)BRIDGED_EXE_STACK_WORDS &&
+						((*pWord >= g_auiBridgedExeExeText[0] && *pWord < g_auiBridgedExeExeText[1]) || (*pWord >= g_auiBridgedExeDllText[0] && *pWord < g_auiBridgedExeDllText[1])))
+					{
+						pStack->auiWords[pStack->uiWords++] = *pWord;
+					}
+				}
+			}
+		}
+		ResumeThread(g_hBridgedExeThread);
+
+		if (!bSampled)
+		{
+			continue;
+		}
+
+		const bool bPython = (iPythonPointers >= 2);
+		if (pStack != NULL)
+		{
+			pStack->uiAddress = kContext.Eip;
+			g_lBridgedExeStacks++;
+		}
+		g_uiBridgedExeSamples++;
+
+		const int iModule = bridgedExeModule(kContext.Eip);
+		if (iModule != -1)
+		{
+			g_aBridgedExeModules[iModule].uiSamples++;
+			if (bPython)
+			{
+				g_aBridgedExeModules[iModule].uiPythonSamples++;
+			}
+			if (pScope != NULL)
+			{
+				g_aBridgedExeModules[iModule].uiScopeSamples++;
+			}
+		}
+
+		if (pScope == NULL)
+		{
+			g_uiBridgedExeNoScopeSamples++;
+		}
+		else
+		{
+			for (int iI = 0; iI < BRIDGED_EXE_SCOPES; iI++)
+			{
+				if (g_aBridgedExeScopes[iI].pSample == pScope || g_aBridgedExeScopes[iI].pSample == NULL)
+				{
+					g_aBridgedExeScopes[iI].pSample = pScope;
+					g_aBridgedExeScopes[iI].uiSamples++;
+					break;
+				}
+			}
+		}
+
+		bool bKept = false;
+		unsigned int uiSlot = (kContext.Eip * 2654435761u) >> (32 - BRIDGED_EXE_ADDRESS_BITS);
+		for (int iI = 0; iI < 64; iI++)
+		{
+			BridgedExeAddress& kAddress = g_aBridgedExeAddresses[uiSlot];
+			if (kAddress.uiAddress == kContext.Eip || kAddress.uiAddress == 0)
+			{
+				kAddress.uiAddress = kContext.Eip;
+				kAddress.uiSamples++;
+				if (bPython)
+				{
+					kAddress.uiPythonSamples++;
+				}
+				bKept = true;
+				break;
+			}
+			uiSlot = (uiSlot + 1) & ((1u << BRIDGED_EXE_ADDRESS_BITS) - 1);
+		}
+		if (!bKept)
+		{
+			g_uiBridgedExeDropped++;
+		}
+	}
+}
+
+// One row for each time the exe had the thread: how long the call of CvGame::update() before
+// it took, and how long the exe then kept the thread.
+struct BridgedExeFrame
+{
+	int iGameTurn;
+	int iUnits;
+	unsigned int uiCallMs;
+	unsigned long long uiExeTicks;
+};
+static const int BRIDGED_EXE_FRAMES = 8192;
+static BridgedExeFrame g_aBridgedExeFrames[BRIDGED_EXE_FRAMES];
+static int g_iBridgedExeFrames = 0;
+
+void bridgedProfileExeFrame(int iGameTurn, int iUnits, unsigned int uiCallMs, unsigned long long uiExeTicks)
+{
+	if (g_iBridgedExeFrames < BRIDGED_EXE_FRAMES)
+	{
+		BridgedExeFrame& kFrame = g_aBridgedExeFrames[g_iBridgedExeFrames++];
+		kFrame.iGameTurn = iGameTurn;
+		kFrame.iUnits = iUnits;
+		kFrame.uiCallMs = uiCallMs;
+		kFrame.uiExeTicks = uiExeTicks;
+	}
+}
+
+// Called by CvGame::update(): false on the way in, true on the way out.
+void bridgedProfileExeHasThread(bool bExe)
+{
+	if (g_hBridgedExeThread == NULL)
+	{
+		if (getenv("BRIDGED_PROFILE_LOG") == NULL)
+		{
+			return;
+		}
+		if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &g_hBridgedExeThread, THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT | THREAD_QUERY_INFORMATION, FALSE, 0))
+		{
+			g_hBridgedExeThread = NULL;
+			return;
+		}
+		g_uiBridgedExeStackBase = (DWORD)((NT_TIB*)NtCurrentTeb())->StackBase;
+		const HMODULE hPython = GetModuleHandleA("python24.dll");
+		if (hPython != NULL)
+		{
+			bridgedExeTextRange((DWORD)hPython, &g_auiBridgedExePythonText[0], &g_auiBridgedExePythonText[1]);
+		}
+		bridgedExeTextRange((DWORD)GetModuleHandleA(NULL), &g_auiBridgedExeExeText[0], &g_auiBridgedExeExeText[1]);
+		MEMORY_BASIC_INFORMATION kInfo;
+		if (VirtualQuery((LPCVOID)&bridgedExeTextRange, &kInfo, sizeof(kInfo)) != 0)
+		{
+			g_uiBridgedExeDllBase = (DWORD)kInfo.AllocationBase;
+			bridgedExeTextRange(g_uiBridgedExeDllBase, &g_auiBridgedExeDllText[0], &g_auiBridgedExeDllText[1]);
+		}
+		DWORD uiThreadId;
+		CreateThread(NULL, 0, bridgedExeSampler, NULL, 0, &uiThreadId);
+	}
+	g_lBridgedExeSampling = (bExe ? 1 : 0);
+}
+
+static int __cdecl bridgedExeAddressCompare(const void* pFirst, const void* pSecond)
+{
+	const unsigned int uiFirst = ((const BridgedExeAddress*)pFirst)->uiSamples;
+	const unsigned int uiSecond = ((const BridgedExeAddress*)pSecond)->uiSamples;
+	return (uiFirst < uiSecond) ? 1 : ((uiFirst > uiSecond) ? -1 : 0);
+}
+
+static void bridgedExeWrite(const char* szLogPath, double fTicksPerMs)
+{
+	if (g_hBridgedExeThread == NULL || g_uiBridgedExeSamples == 0)
+	{
+		return;
+	}
+
+	{
+		char szStackPath[MAX_PATH + 16];
+		_snprintf(szStackPath, sizeof(szStackPath) - 1, "%s.stacks.bin", szLogPath);
+		szStackPath[sizeof(szStackPath) - 1] = 0;
+		FILE* pStackFile = fopen(szStackPath, "wb");
+		if (pStackFile != NULL)
+		{
+			const DWORD auiHeader[8] = { (DWORD)GetModuleHandleA(NULL), g_auiBridgedExeExeText[0], g_auiBridgedExeExeText[1],
+				g_uiBridgedExeDllBase, g_auiBridgedExeDllText[0], g_auiBridgedExeDllText[1], (DWORD)g_lBridgedExeStacks, (DWORD)sizeof(BridgedExeStack) };
+			fwrite(auiHeader, sizeof(auiHeader), 1, pStackFile);
+			fwrite(g_aBridgedExeStacks, sizeof(BridgedExeStack), g_lBridgedExeStacks, pStackFile);
+			fclose(pStackFile);
+		}
+	}
+
+	{
+		char szFramePath[MAX_PATH + 16];
+		_snprintf(szFramePath, sizeof(szFramePath) - 1, "%s.frames.tsv", szLogPath);
+		szFramePath[sizeof(szFramePath) - 1] = 0;
+		FILE* pFrameFile = fopen(szFramePath, "w");
+		if (pFrameFile != NULL)
+		{
+			fprintf(pFrameFile, "game_turn\tunits\tcall_ms\texe_ms\n");
+			for (int iI = 0; iI < g_iBridgedExeFrames; iI++)
+			{
+				const BridgedExeFrame& kFrame = g_aBridgedExeFrames[iI];
+				fprintf(pFrameFile, "%d\t%d\t%u\t%.1f\n", kFrame.iGameTurn, kFrame.iUnits, kFrame.uiCallMs, (double)kFrame.uiExeTicks / fTicksPerMs);
+			}
+			fclose(pFrameFile);
+		}
+	}
+
+	char szPath[MAX_PATH + 16];
+	_snprintf(szPath, sizeof(szPath) - 1, "%s.exe.tsv", szLogPath);
+	szPath[sizeof(szPath) - 1] = 0;
+	FILE* pFile = fopen(szPath, "w");
+	if (pFile == NULL)
+	{
+		return;
+	}
+
+	fprintf(pFile, "samples\t%u\tnot_kept_by_address\t%u\n", g_uiBridgedExeSamples, g_uiBridgedExeDropped);
+	fprintf(pFile, "\nmodule\tsamples\twith_python_on_stack\twith_dll_scope_open\n");
+	const int iModules = g_iBridgedExeModules;
+	for (int iI = 0; iI < iModules; iI++)
+	{
+		const BridgedExeModule& kModule = g_aBridgedExeModules[iI];
+		fprintf(pFile, "%s\t%u\t%u\t%u\n", kModule.szName, kModule.uiSamples, kModule.uiPythonSamples, kModule.uiScopeSamples);
+	}
+
+	fprintf(pFile, "\ndll_scope_open\tsamples\n(none)\t%u\n", g_uiBridgedExeNoScopeSamples);
+	for (int iI = 0; iI < BRIDGED_EXE_SCOPES && g_aBridgedExeScopes[iI].pSample != NULL; iI++)
+	{
+		fprintf(pFile, "%s\t%u\n", g_aBridgedExeScopes[iI].pSample->szNameCopy, g_aBridgedExeScopes[iI].uiSamples);
+	}
+
+	// the addresses sampled most often, as module and offset
+	const int iAddresses = 1 << BRIDGED_EXE_ADDRESS_BITS;
+	BridgedExeAddress* pAddresses = (BridgedExeAddress*)malloc(iAddresses * sizeof(BridgedExeAddress));
+	if (pAddresses != NULL)
+	{
+		memcpy(pAddresses, g_aBridgedExeAddresses, iAddresses * sizeof(BridgedExeAddress));
+		qsort(pAddresses, iAddresses, sizeof(BridgedExeAddress), bridgedExeAddressCompare);
+		fprintf(pFile, "\nmodule\toffset\tsamples\twith_python_on_stack\n");
+		for (int iI = 0; iI < 400 && pAddresses[iI].uiSamples != 0; iI++)
+		{
+			const char* szName = "?";
+			DWORD uiOffset = pAddresses[iI].uiAddress;
+			for (int iJ = 0; iJ < iModules; iJ++)
+			{
+				if (uiOffset >= g_aBridgedExeModules[iJ].uiBase && uiOffset < g_aBridgedExeModules[iJ].uiEnd)
+				{
+					szName = g_aBridgedExeModules[iJ].szName;
+					uiOffset -= g_aBridgedExeModules[iJ].uiBase;
+					break;
+				}
+			}
+			fprintf(pFile, "%s\t%08x\t%u\t%u\n", szName, (unsigned int)uiOffset, pAddresses[iI].uiSamples, pAddresses[iI].uiPythonSamples);
+		}
+		free(pAddresses);
+	}
+	fclose(pFile);
+}
+
+//
 // Rewrites the log with the totals so far, slowest first, every tenth game turn.
 // Exclusive time is inclusive time minus time in nested samples; it is approximate for
 // functions that recurse through another sample.
@@ -305,6 +697,8 @@ void bridgedProfileTurn(int iGameTurn)
 		fclose(pFile);
 	}
 	free(apSamples);
+
+	bridgedExeWrite(szPath, fTicksPerMs);
 }
 #endif	// BRIDGED_PROFILE
 

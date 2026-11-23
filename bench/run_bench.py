@@ -131,7 +131,8 @@ def main():
     parser.add_argument('--template-ini', type=Path, default=DEFAULT_INI)
     parser.add_argument('--fullscreen', action='store_true')
     parser.add_argument('--profile', action='store_true',
-                        help='for a DLL built with build_dll.py --profile: write results/<label>.profile.tsv')
+                        help='for a DLL built with build_dll.py --profile: write results/<label>.profile.tsv, '
+                             'and beside it the files exe_time_report.py reads')
     parser.add_argument('--pgo-train', action='store_true',
                         help='for a DLL built with build_dll.py --pgo-train: write results/<label>.profraw')
     parser.add_argument('--define', action='append', default=[], metavar='NAME=INT',

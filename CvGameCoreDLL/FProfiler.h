@@ -89,6 +89,10 @@ struct BridgedProfileSample
 extern BridgedProfileSample* g_pBridgedProfileCurrent;
 void bridgedProfileRegister(BridgedProfileSample* pSample);
 void bridgedProfileTurn(int iGameTurn);	// call once per game turn; writes the log
+// For CvGame::update(), on its way in and out and for each time the exe had the thread: see
+// "Where the exe's time goes" in CvGameCoreDLL.cpp.
+void bridgedProfileExeHasThread(bool bExe);
+void bridgedProfileExeFrame(int iGameTurn, int iUnits, unsigned int uiCallMs, unsigned long long uiExeTicks);
 
 inline unsigned long long bridgedProfileTicks()
 {

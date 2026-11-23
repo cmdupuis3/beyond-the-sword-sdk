@@ -2143,11 +2143,16 @@ int CvGame::nextSliceWait(bool bNewGameTurn, int iStartRequests, int iPasses, DW
 {
 	static int iStock = -1;
 	static int iFrameMs = -1;
+	static int iAutoplayFrameMs = AUTOPLAY_FRAME_MS;
 
 	if (iStock == -1)
 	{
 		iStock = ((GC.getDefineINT("STOCK_TURN_SLICES") != 0) ? 1 : 0);
 		iFrameMs = std::max(0, GC.getDefineINT("TURN_LOOP_FRAME_MS"));
+		if (GC.getDefineINT("AUTOPLAY_FRAME_MS") > 0)
+		{
+			iAutoplayFrameMs = GC.getDefineINT("AUTOPLAY_FRAME_MS");
+		}
 	}
 
 	if ((iStock != 0) || isGameMultiPlayer())
@@ -2167,7 +2172,7 @@ int CvGame::nextSliceWait(bool bNewGameTurn, int iStartRequests, int iPasses, DW
 
 	const DWORD uiElapsed = GetTickCount() - uiStartTime;
 
-	if (bNewGameTurn && (uiElapsed >= AUTOPLAY_FRAME_MS))
+	if (bNewGameTurn && (uiElapsed >= (DWORD)iAutoplayFrameMs))
 	{
 		return SLICE_WAIT_GAME_TURN;
 	}
@@ -2243,8 +2248,15 @@ void CvGame::update()
 			{ "exe, between calls of CvGame::update: after a call of 1 s or more" },
 		};
 		bridgedProfileAdd(&aBetweenSamples[(uiLastCallMs < 100) ? 0 : ((uiLastCallMs < 250) ? 1 : ((uiLastCallMs < 1000) ? 2 : 3))], bridgedProfileTicks() - uiLastReturn);
+		int iUnits = 0;
+		for (int iI = 0; iI < MAX_PLAYERS; iI++)
+		{
+			iUnits += GET_PLAYER((PlayerTypes)iI).getNumUnits();
+		}
+		bridgedProfileExeFrame(getGameTurn(), iUnits, uiLastCallMs, bridgedProfileTicks() - uiLastReturn);
 	}
 	const DWORD uiCallStart = GetTickCount();
+	bridgedProfileExeHasThread(false);
 #endif
 	{
 		PROFILE("CvGame::update");
@@ -2291,6 +2303,7 @@ void CvGame::update()
 #ifdef BRIDGED_PROFILE
 	uiLastCallMs = GetTickCount() - uiCallStart;
 	uiLastReturn = bridgedProfileTicks();
+	bridgedProfileExeHasThread(true);
 #endif
 }
 

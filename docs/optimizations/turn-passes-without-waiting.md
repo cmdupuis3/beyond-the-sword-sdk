@@ -27,7 +27,8 @@ Nothing in the game state. Nothing is drawn while the other players' turns run u
 move or fight is being shown, so the window does not repaint in a long turn;
 `TURN_LOOP_FRAME_MS` draws a frame every so many milliseconds, at about a fifth of a second
 each. A popup raised during the other players' turns appears when they are over. With no
-human player the exe draws at the end of a game turn once a second has passed.
+human player the exe draws at the end of a game turn once a second has passed
+(`AUTOPLAY_FRAME_MS`, in milliseconds).
 
 ## Measured
 Seeded games, all players AI, time for the turns, same state hash on every turn.
