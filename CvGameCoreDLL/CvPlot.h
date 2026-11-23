@@ -419,6 +419,8 @@ public:
 	DllExport bool isLayoutDirty() const;							// The plot layout contains bonuses and improvements --- it is, like the city layout, passively computed by LSystems
 	DllExport void setLayoutDirty(bool bDirty);
 	DllExport bool isLayoutStateDifferent() const;
+	void getLayoutShown(bool& bWorked, bool& bBonusWorked, bool& bImprovement) const;
+	bool isLayoutDue() const;
 	DllExport void setLayoutStateToCurrent();
 	bool updatePlotBuilder();
 
@@ -522,6 +524,10 @@ protected:
 	bool m_bFlagDirty:1;
 	bool m_bPlotLayoutDirty:1;
 	bool m_bLayoutStateWorked:1;
+	mutable bool m_bLayoutShownWorked:1;		// what the layout last made shows of the plot being worked:
+	mutable bool m_bLayoutShownBonusWorked:1;	// see isLayoutStateDifferent()
+	mutable bool m_bLayoutShownImprovement:1;
+	mutable bool m_bLayoutDue:1;				// the exe has been told to make the layout anew: see isLayoutDue()
 
 	char /*PlayerTypes*/ m_eOwner;
 	short /*PlotTypes*/ m_ePlotType;

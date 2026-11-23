@@ -99,6 +99,11 @@ public:
 	DllExport void updateSymbolVisibility();
 	void updateSymbols();
 
+	// Layouts of cities and plots out of the active team's sight are made a few at a time.
+	bool isStockLayoutUpdates() const;		// the STOCK_LAYOUT_UPDATES define: do as stock does
+	bool takeLayoutUpdate(bool bCity) const;
+	void resetLayoutUpdates();
+
 	// Yield and route symbols asked for while CvGame::update() runs are made once, when it
 	// is about to give the exe the screen back: see CvPlot::updateSymbols().
 	bool isStockSymbolUpdates() const;		// the STOCK_SYMBOL_UPDATES define: do as stock does
@@ -351,6 +356,8 @@ protected:
 	mutable std::map<int, std::vector<int> > m_aaiAreaPlots;	// by area ID: see getAreaPlotIndices()
 
 	bool m_bSymbolsDeferred;		// CvGame::update() is running: keep symbol updates for its end
+	mutable int m_iCityLayoutUpdates;	// layouts out of the active team's sight that the exe may still
+	mutable int m_iPlotLayoutUpdates;	// make before the next call of CvGame::update(): see takeLayoutUpdate()
 	bool m_bSymbolsDirty;			// some plot has a symbol update waiting
 	bool m_bSymbolsStale;			// some plot's symbols were not made because nobody could see them
 

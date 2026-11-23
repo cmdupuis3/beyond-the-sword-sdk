@@ -458,6 +458,7 @@ void CvCity::reset(int iID, PlayerTypes eOwner, int iX, int iY, bool bConstructo
 	m_bWallOverride = false;
 	m_bInfoDirty = true;
 	m_bLayoutDirty = false;
+	m_bLayoutDue = false;
 	m_bBestBuildDirty = true;
 	m_bPlundered = false;
 
@@ -7371,7 +7372,7 @@ void CvCity::setWallOverride(bool bOverride)
 
 bool CvCity::isInfoDirty() const
 {
-	return m_bInfoDirty;
+	return (m_bInfoDirty && isDrawnForActiveTeam());	// see isLayoutDirty()
 }
 
 
@@ -7381,15 +7382,51 @@ void CvCity::setInfoDirty(bool bNewValue)
 }
 
 
+//
+// The exe asks this of every city before it draws, and lays the city's buildings out anew
+// if the answer is yes; isInfoDirty() does the same for the city's billboard. A city is
+// marked each time it grows, shrinks or gets a building, so in a round of AI turns most
+// cities are. A city the active team has not found is not drawn (updateVisibility()), so
+// the answer for it waits until it is found: the mark stays, and the exe asks again. A city
+// in the fog waits for its turn (CvMap::takeLayoutUpdate()); its billboard does not.
+// STOCK_LAYOUT_UPDATES=1 gives the stock answer.
+//
 bool CvCity::isLayoutDirty() const
 {
-	return m_bLayoutDirty;
+	if (!m_bLayoutDirty || !isDrawnForActiveTeam())
+	{
+		return false;
+	}
+
+	if (!m_bLayoutDue)
+	{
+		if (!GC.getMapINLINE().isStockLayoutUpdates() && !plot()->isActiveVisible(true) && !GC.getMapINLINE().takeLayoutUpdate(true))
+		{
+			return false;
+		}
+
+		m_bLayoutDue = true;
+	}
+
+	return true;
+}
+
+
+bool CvCity::isDrawnForActiveTeam() const
+{
+	const TeamTypes eActiveTeam = GC.getGameINLINE().getActiveTeam();
+
+	return ((eActiveTeam == NO_TEAM) || isRevealed(eActiveTeam, true) || GC.getMapINLINE().isStockLayoutUpdates());
 }
 
 
 void CvCity::setLayoutDirty(bool bNewValue)
 {
 	m_bLayoutDirty = bNewValue;
+	if (!bNewValue)
+	{
+		m_bLayoutDue = false;
+	}
 }
 
 

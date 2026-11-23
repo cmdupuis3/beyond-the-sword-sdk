@@ -124,6 +124,8 @@ void CvMap::reset(CvMapInitData* pInitInfo)
 	m_bSymbolsDeferred = false;
 	m_bSymbolsDirty = false;
 	m_bSymbolsStale = false;
+	m_iCityLayoutUpdates = 0;
+	m_iPlotLayoutUpdates = 0;
 	m_bTeamIndexDirty = true;
 	m_bAreaPlotsDirty = true;
 	m_uiRoutesSeen = 0;
@@ -409,6 +411,60 @@ void CvMap::updateSymbols()
 	{
 		plotByIndexINLINE(iI)->updateSymbols();
 	}
+}
+
+
+bool CvMap::isStockLayoutUpdates() const
+{
+	static int iStock = -1;
+
+	if (iStock == -1)
+	{
+		iStock = ((GC.getDefineINT("STOCK_LAYOUT_UPDATES") != 0) ? 1 : 0);
+	}
+
+	return (iStock != 0);
+}
+
+
+//
+// Before it draws, the exe asks every city and every plot whether its layout has to be made
+// anew (the buildings and houses of a city, the improvement and bonus of a plot), and makes
+// all of those that say yes in that one frame. After a round of AI turns that is most cities
+// and many plots, and the frame takes from a tenth of a second on a small map to over a
+// second on a huge one late in the game: about three quarters of the time the exe keeps
+// between two calls of CvGame::update().
+//
+// A city or plot the active team can see says yes at once, as before. One it cannot see
+// (in the fog, where the layout is drawn as it was last made) says yes only while this
+// allowance lasts, a few for each call of CvGame::update(); the rest stay marked and are
+// asked again in the next frames. So their layouts are brought up to date over the next
+// seconds, during the player's own turn, and no frame has to make them all.
+// STOCK_LAYOUT_UPDATES=1 has everything say yes at once.
+//
+static const int CITY_LAYOUT_UPDATES_PER_CALL = 2;
+static const int PLOT_LAYOUT_UPDATES_PER_CALL = 16;
+
+bool CvMap::takeLayoutUpdate(bool bCity) const
+{
+	int& iLeft = (bCity ? m_iCityLayoutUpdates : m_iPlotLayoutUpdates);
+
+	if (iLeft <= 0)
+	{
+		return false;
+	}
+
+	iLeft--;
+
+	return true;
+}
+
+
+// Called at the end of CvGame::update().
+void CvMap::resetLayoutUpdates()
+{
+	m_iCityLayoutUpdates = CITY_LAYOUT_UPDATES_PER_CALL;
+	m_iPlotLayoutUpdates = PLOT_LAYOUT_UPDATES_PER_CALL;
 }
 
 

@@ -548,6 +548,7 @@ public:
 	DllExport bool isInfoDirty() const;
 	DllExport void setInfoDirty(bool bNewValue);
 
+	bool isDrawnForActiveTeam() const;	// see isLayoutDirty()
 	DllExport bool isLayoutDirty() const;
 	DllExport void setLayoutDirty(bool bNewValue);
 
@@ -1048,6 +1049,7 @@ protected:
 	bool m_bWallOverride;
 	bool m_bInfoDirty;
 	bool m_bLayoutDirty;
+	mutable bool m_bLayoutDue;	// the exe has been told to make the layout anew: see isLayoutDirty()
 	bool m_bPlundered;
 
 	PlayerTypes m_eOwner;

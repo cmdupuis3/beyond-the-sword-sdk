@@ -2324,6 +2324,7 @@ void CvGame::update()
 
 		GC.getMapINLINE().setSymbolsDeferred(false);
 		GC.getMapINLINE().updateDeferredSymbols();
+		GC.getMapINLINE().resetLayoutUpdates();
 	}
 #ifdef BRIDGED_PROFILE
 	uiLastCallMs = GetTickCount() - uiCallStart;

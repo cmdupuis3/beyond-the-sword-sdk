@@ -186,6 +186,10 @@ void CvPlot::reset(int iX, int iY, bool bConstructorCall)
 	m_bFlagDirty = false;
 	m_bPlotLayoutDirty = false;
 	m_bLayoutStateWorked = false;
+	m_bLayoutShownWorked = false;
+	m_bLayoutShownBonusWorked = false;
+	m_bLayoutShownImprovement = false;
+	m_bLayoutDue = false;
 	
 	m_eOwner = NO_PLAYER;
 	m_ePlotType = PLOT_OCEAN;
@@ -9570,11 +9574,16 @@ void CvPlot::setLayoutDirty(bool bDirty)
 		return;
 	}
 
-	if (isLayoutDirty() != bDirty)
+	if (!bDirty)
+	{
+		m_bLayoutDue = false;
+	}
+
+	if (m_bPlotLayoutDirty != bDirty)
 	{
 		m_bPlotLayoutDirty = bDirty;
 
-		if (isLayoutDirty() && (m_pPlotBuilder == NULL))
+		if (m_bPlotLayoutDirty && (m_pPlotBuilder == NULL))
 		{
 			if (!updatePlotBuilder())
 			{
@@ -9602,22 +9611,92 @@ bool CvPlot::updatePlotBuilder()
 
 bool CvPlot::isLayoutDirty() const
 {
-	return m_bPlotLayoutDirty;	
+	return (m_bPlotLayoutDirty && isLayoutDue());
 }
 
+// Whether the exe is to make the plot's layout anew now: at once for a plot the active team
+// can see, and for one in the fog when its turn comes. See CvMap::takeLayoutUpdate().
+bool CvPlot::isLayoutDue() const
+{
+	if (!m_bLayoutDue)
+	{
+		if (!GC.getMapINLINE().isStockLayoutUpdates() && !isActiveVisible(true) && !GC.getMapINLINE().takeLayoutUpdate(false))
+		{
+			return false;
+		}
+
+		m_bLayoutDue = true;
+	}
+
+	return true;
+}
+
+//
+// The exe asks this of every plot with a layout before it draws, and makes the layout anew
+// if the answer is yes. Stock says yes whenever a citizen has started or stopped working the
+// plot. What the layout shows of that is narrower (getVisibleImprovementState() and
+// getVisibleBonusState()): the worked look only while the active team can see the plot, and
+// a worked bonus only under an improvement that team knows of. In a round of AI turns most
+// of the plots whose citizens change are other players', out of sight, and their layouts
+// would be made again exactly as they are. So the answer is yes only if what the layout
+// shows has changed since it was made. A change that is passed over is taken as made, as
+// stock's would have been, so that the later answers are stock's too.
+// STOCK_LAYOUT_UPDATES=1 gives the stock answer.
+//
 bool CvPlot::isLayoutStateDifferent() const
 {
-	bool bSame = true;
-	// is worked
-	bSame &= m_bLayoutStateWorked == isBeingWorked();
+	const bool bWorked = isBeingWorked();
 
-	// done
-	return !bSame;
+	if (m_bLayoutStateWorked == bWorked)
+	{
+		return false;
+	}
+
+	if (GC.getMapINLINE().isStockLayoutUpdates())
+	{
+		return true;
+	}
+
+	bool bShownWorked;
+	bool bShownBonusWorked;
+	bool bShownImprovement;
+	getLayoutShown(bShownWorked, bShownBonusWorked, bShownImprovement);
+
+	if ((bShownWorked != m_bLayoutShownWorked) || (bShownBonusWorked != m_bLayoutShownBonusWorked) || (bShownImprovement != m_bLayoutShownImprovement))
+	{
+		return isLayoutDue();
+	}
+
+	const_cast<CvPlot*>(this)->m_bLayoutStateWorked = bWorked;
+
+	return false;
 }
 
 void CvPlot::setLayoutStateToCurrent()
 {
+	bool bShownWorked;
+	bool bShownBonusWorked;
+	bool bShownImprovement;
+	getLayoutShown(bShownWorked, bShownBonusWorked, bShownImprovement);
+
+	m_bLayoutDue = false;
 	m_bLayoutStateWorked = isBeingWorked();
+	m_bLayoutShownWorked = bShownWorked;
+	m_bLayoutShownBonusWorked = bShownBonusWorked;
+	m_bLayoutShownImprovement = bShownImprovement;
+}
+
+// The parts of what the layout shows that follow the plot being worked.
+void CvPlot::getLayoutShown(bool& bWorked, bool& bBonusWorked, bool& bImprovement) const
+{
+	CvPlot* pThis = const_cast<CvPlot*>(this);	// the two functions change nothing
+	ImprovementTypes eImprovement;
+	BonusTypes eBonus;
+	bool bBonusImproved;
+
+	pThis->getVisibleImprovementState(eImprovement, bWorked);
+	pThis->getVisibleBonusState(eBonus, bBonusImproved, bBonusWorked);
+	bImprovement = (eImprovement != NO_IMPROVEMENT);
 }
 
 //------------------------------------------------------------------------------------------------
