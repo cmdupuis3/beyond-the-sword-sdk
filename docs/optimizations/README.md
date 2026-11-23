@@ -33,6 +33,7 @@
 | [City builds chosen on the human's turn](builds-on-human-turn.md) | 3 | shrinks | late | medium |
 | [AI classes and the free-list array marked final](final-ai-classes.md) | 1 | not measured | const | low |
 | [AI turns not played out for the human](ai-turns-not-played-out.md) | 1 | not measured | not measured | low |
+| [Bonus and unit counts from the plots that can count](bonus-and-unit-counts.md) | 1 | not measured | late | low |
 | [Building-value inputs once per production choice](building-value-inputs.md) | 1 | not measured | late | low |
 | [Collateral damage ties by plot order](collateral-ties.md) | 1 | not measured | not measured | low |
 | [Enemy-team word and team index loops](team-index.md) | 1 | not measured | late | low |
