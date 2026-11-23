@@ -12,7 +12,6 @@ temp_files/
 *.opensdf
 
 # BridgedCvGameCore outputs; inherited tracked dependencies remain tracked.
-/AGENTS.md
 /.planning/
 /probes/
 /verification/
