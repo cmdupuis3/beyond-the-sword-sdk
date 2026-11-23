@@ -32,7 +32,7 @@
 #define PATH_DAMAGE_WEIGHT										(500)
 CvPlot* plotCity(int iX, int iY, int iIndex)
 {
-	return GC.getMapINLINE().plotINLINE((iX + GC.getCityPlotX()[iIndex]), (iY + GC.getCityPlotY()[iIndex]));
+	return GC.getMapINLINE().plotINLINE((iX + CvPlotTables::aiCityPlotX[iIndex]), (iY + CvPlotTables::aiCityPlotY[iIndex]));
 }
 
 int plotCityXY(int iDX, int iDY)
@@ -43,7 +43,7 @@ int plotCityXY(int iDX, int iDY)
 	}
 	else
 	{
-		return GC.getXYCityPlot((iDX + CITY_PLOTS_RADIUS), (iDY + CITY_PLOTS_RADIUS));
+		return CvPlotTables::aaiXYCityPlot[iDX + CITY_PLOTS_RADIUS][iDY + CITY_PLOTS_RADIUS];
 	}
 }
 

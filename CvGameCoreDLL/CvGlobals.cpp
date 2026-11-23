@@ -229,114 +229,7 @@ CvGlobals::~CvGlobals()
 //
 void CvGlobals::init()
 {
-	//
-	// These vars are used to initialize the globals.
-	//
-
-	int aiPlotDirectionX[NUM_DIRECTION_TYPES] =
-	{
-		0,	// DIRECTION_NORTH
-		1,	// DIRECTION_NORTHEAST
-		1,	// DIRECTION_EAST
-		1,	// DIRECTION_SOUTHEAST
-		0,	// DIRECTION_SOUTH
-		-1,	// DIRECTION_SOUTHWEST
-		-1,	// DIRECTION_WEST
-		-1,	// DIRECTION_NORTHWEST
-	};
-
-	int aiPlotDirectionY[NUM_DIRECTION_TYPES] =
-	{
-		1,	// DIRECTION_NORTH
-		1,	// DIRECTION_NORTHEAST
-		0,	// DIRECTION_EAST
-		-1,	// DIRECTION_SOUTHEAST
-		-1,	// DIRECTION_SOUTH
-		-1,	// DIRECTION_SOUTHWEST
-		0,	// DIRECTION_WEST
-		1,	// DIRECTION_NORTHWEST
-	};
-
-	int aiPlotCardinalDirectionX[NUM_CARDINALDIRECTION_TYPES] =
-	{
-		0,	// CARDINALDIRECTION_NORTH
-		1,	// CARDINALDIRECTION_EAST
-		0,	// CARDINALDIRECTION_SOUTH
-		-1,	// CARDINALDIRECTION_WEST
-	};
-
-	int aiPlotCardinalDirectionY[NUM_CARDINALDIRECTION_TYPES] =
-	{
-		1,	// CARDINALDIRECTION_NORTH
-		0,	// CARDINALDIRECTION_EAST
-		-1,	// CARDINALDIRECTION_SOUTH
-		0,	// CARDINALDIRECTION_WEST
-	};
-
-	int aiCityPlotX[NUM_CITY_PLOTS] =
-	{
-		0,
-		0, 1, 1, 1, 0,-1,-1,-1,
-		0, 1, 2, 2, 2, 1, 0,-1,-2,-2,-2,-1,
-	};
-
-	int aiCityPlotY[NUM_CITY_PLOTS] =
-	{
-		0,
-		1, 1, 0,-1,-1,-1, 0, 1,
-		2, 2, 1, 0,-1,-2,-2,-2,-1, 0, 1, 2,
-	};
-
-	int aiCityPlotPriority[NUM_CITY_PLOTS] =
-	{
-		0,
-		1, 2, 1, 2, 1, 2, 1, 2,
-		3, 4, 4, 3, 4, 4, 3, 4, 4, 3, 4, 4,
-	};
-
-	int aaiXYCityPlot[CITY_PLOTS_DIAMETER][CITY_PLOTS_DIAMETER] =
-	{
-		{-1, 17, 18, 19, -1,},
-
-		{16, 6, 7, 8, 20,},
-
-		{15, 5, 0, 1, 9,},
-
-		{14, 4, 3, 2, 10,},
-
-		{-1, 13, 12, 11, -1,}
-	};
-
-	DirectionTypes aeTurnRightDirection[NUM_DIRECTION_TYPES] =
-	{
-		DIRECTION_NORTHEAST,	// DIRECTION_NORTH
-		DIRECTION_EAST,				// DIRECTION_NORTHEAST
-		DIRECTION_SOUTHEAST,	// DIRECTION_EAST
-		DIRECTION_SOUTH,			// DIRECTION_SOUTHEAST
-		DIRECTION_SOUTHWEST,	// DIRECTION_SOUTH
-		DIRECTION_WEST,				// DIRECTION_SOUTHWEST
-		DIRECTION_NORTHWEST,	// DIRECTION_WEST
-		DIRECTION_NORTH,			// DIRECTION_NORTHWEST
-	};
-
-	DirectionTypes aeTurnLeftDirection[NUM_DIRECTION_TYPES] =
-	{
-		DIRECTION_NORTHWEST,	// DIRECTION_NORTH
-		DIRECTION_NORTH,			// DIRECTION_NORTHEAST
-		DIRECTION_NORTHEAST,	// DIRECTION_EAST
-		DIRECTION_EAST,				// DIRECTION_SOUTHEAST
-		DIRECTION_SOUTHEAST,	// DIRECTION_SOUTH
-		DIRECTION_SOUTH,			// DIRECTION_SOUTHWEST
-		DIRECTION_SOUTHWEST,	// DIRECTION_WEST
-		DIRECTION_WEST,				// DIRECTION_NORTHWEST
-	};
-
-	DirectionTypes aaeXYDirection[DIRECTION_DIAMETER][DIRECTION_DIAMETER] =
-	{
-		DIRECTION_SOUTHWEST, DIRECTION_WEST,	DIRECTION_NORTHWEST,
-		DIRECTION_SOUTH,     NO_DIRECTION,    DIRECTION_NORTH,
-		DIRECTION_SOUTHEAST, DIRECTION_EAST,	DIRECTION_NORTHEAST,
-	};
+	// the plot grid's tables are copied from CvPlotTables (CvGameCoreUtils.h) below
 
 	FAssertMsg(gDLL != NULL, "Civ app needs to set gDLL");
 
@@ -356,17 +249,17 @@ void CvGlobals::init()
 
 	m_pt3Origin = NiPoint3(0.0f, 0.0f, 0.0f);
 
-	COPY(m_aiPlotDirectionX, aiPlotDirectionX, int);
-	COPY(m_aiPlotDirectionY, aiPlotDirectionY, int);
-	COPY(m_aiPlotCardinalDirectionX, aiPlotCardinalDirectionX, int);
-	COPY(m_aiPlotCardinalDirectionY, aiPlotCardinalDirectionY, int);
-	COPY(m_aiCityPlotX, aiCityPlotX, int);
-	COPY(m_aiCityPlotY, aiCityPlotY, int);
-	COPY(m_aiCityPlotPriority, aiCityPlotPriority, int);
-	COPY(m_aeTurnLeftDirection, aeTurnLeftDirection, DirectionTypes);
-	COPY(m_aeTurnRightDirection, aeTurnRightDirection, DirectionTypes);
-	memcpy(m_aaiXYCityPlot, aaiXYCityPlot, sizeof(m_aaiXYCityPlot));
-	memcpy(m_aaeXYDirection, aaeXYDirection,sizeof(m_aaeXYDirection));
+	COPY(m_aiPlotDirectionX, CvPlotTables::aiPlotDirectionX, int);
+	COPY(m_aiPlotDirectionY, CvPlotTables::aiPlotDirectionY, int);
+	COPY(m_aiPlotCardinalDirectionX, CvPlotTables::aiPlotCardinalDirectionX, int);
+	COPY(m_aiPlotCardinalDirectionY, CvPlotTables::aiPlotCardinalDirectionY, int);
+	COPY(m_aiCityPlotX, CvPlotTables::aiCityPlotX, int);
+	COPY(m_aiCityPlotY, CvPlotTables::aiCityPlotY, int);
+	COPY(m_aiCityPlotPriority, CvPlotTables::aiCityPlotPriority, int);
+	COPY(m_aeTurnLeftDirection, CvPlotTables::aeTurnLeftDirection, DirectionTypes);
+	COPY(m_aeTurnRightDirection, CvPlotTables::aeTurnRightDirection, DirectionTypes);
+	memcpy(m_aaiXYCityPlot, CvPlotTables::aaiXYCityPlot, sizeof(m_aaiXYCityPlot));
+	memcpy(m_aaeXYDirection, CvPlotTables::aaeXYDirection, sizeof(m_aaeXYDirection));
 }
 
 //

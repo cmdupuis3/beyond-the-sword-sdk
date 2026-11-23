@@ -3040,7 +3040,7 @@ PlayerTypes CvPlot::calculateCulturalOwner() const
 							{
 								if (isWithinCultureRange(pLoopCity->getOwnerINLINE()))
 								{
-									iPriority = GC.getCityPlotPriority()[iI];
+									iPriority = CvPlotTables::aiCityPlotPriority[iI];
 
 									if (pLoopCity->getTeam() == GET_PLAYER(eBestPlayer).getTeam())
 									{
@@ -5729,8 +5729,8 @@ void CvPlot::updateWorkingCity()
 					{
 						// XXX use getGameTurnAcquired() instead???
 						if ((pBestCity == NULL) ||
-							  (GC.getCityPlotPriority()[iI] < GC.getCityPlotPriority()[iBestPlot]) ||
-							  ((GC.getCityPlotPriority()[iI] == GC.getCityPlotPriority()[iBestPlot]) &&
+							  (CvPlotTables::aiCityPlotPriority[iI] < CvPlotTables::aiCityPlotPriority[iBestPlot]) ||
+							  ((CvPlotTables::aiCityPlotPriority[iI] == CvPlotTables::aiCityPlotPriority[iBestPlot]) &&
 							   ((pLoopCity->getGameTurnFounded() < pBestCity->getGameTurnFounded()) ||
 							    ((pLoopCity->getGameTurnFounded() == pBestCity->getGameTurnFounded()) &&
 							     (pLoopCity->getID() < pBestCity->getID())))))

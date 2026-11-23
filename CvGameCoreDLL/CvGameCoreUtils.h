@@ -34,6 +34,117 @@ class FAStar;
 class CvInfoBase;
 
 
+// The offsets and lookups of the plot grid. They never change, so the DLL's own code reads
+// them here, where the compiler has the values; CvGlobals::init() copies them for the exe
+// and Python, which ask CvGlobals (getPlotDirectionX() and the rest).
+namespace CvPlotTables
+{
+	inline constexpr int aiPlotDirectionX[NUM_DIRECTION_TYPES] =
+	{
+		0,	// DIRECTION_NORTH
+		1,	// DIRECTION_NORTHEAST
+		1,	// DIRECTION_EAST
+		1,	// DIRECTION_SOUTHEAST
+		0,	// DIRECTION_SOUTH
+		-1,	// DIRECTION_SOUTHWEST
+		-1,	// DIRECTION_WEST
+		-1,	// DIRECTION_NORTHWEST
+	};
+
+	inline constexpr int aiPlotDirectionY[NUM_DIRECTION_TYPES] =
+	{
+		1,	// DIRECTION_NORTH
+		1,	// DIRECTION_NORTHEAST
+		0,	// DIRECTION_EAST
+		-1,	// DIRECTION_SOUTHEAST
+		-1,	// DIRECTION_SOUTH
+		-1,	// DIRECTION_SOUTHWEST
+		0,	// DIRECTION_WEST
+		1,	// DIRECTION_NORTHWEST
+	};
+
+	inline constexpr int aiPlotCardinalDirectionX[NUM_CARDINALDIRECTION_TYPES] =
+	{
+		0,	// CARDINALDIRECTION_NORTH
+		1,	// CARDINALDIRECTION_EAST
+		0,	// CARDINALDIRECTION_SOUTH
+		-1,	// CARDINALDIRECTION_WEST
+	};
+
+	inline constexpr int aiPlotCardinalDirectionY[NUM_CARDINALDIRECTION_TYPES] =
+	{
+		1,	// CARDINALDIRECTION_NORTH
+		0,	// CARDINALDIRECTION_EAST
+		-1,	// CARDINALDIRECTION_SOUTH
+		0,	// CARDINALDIRECTION_WEST
+	};
+
+	inline constexpr int aiCityPlotX[NUM_CITY_PLOTS] =
+	{
+		0,
+		0, 1, 1, 1, 0,-1,-1,-1,
+		0, 1, 2, 2, 2, 1, 0,-1,-2,-2,-2,-1,
+	};
+
+	inline constexpr int aiCityPlotY[NUM_CITY_PLOTS] =
+	{
+		0,
+		1, 1, 0,-1,-1,-1, 0, 1,
+		2, 2, 1, 0,-1,-2,-2,-2,-1, 0, 1, 2,
+	};
+
+	inline constexpr int aiCityPlotPriority[NUM_CITY_PLOTS] =
+	{
+		0,
+		1, 2, 1, 2, 1, 2, 1, 2,
+		3, 4, 4, 3, 4, 4, 3, 4, 4, 3, 4, 4,
+	};
+
+	inline constexpr int aaiXYCityPlot[CITY_PLOTS_DIAMETER][CITY_PLOTS_DIAMETER] =
+	{
+		{-1, 17, 18, 19, -1,},
+
+		{16, 6, 7, 8, 20,},
+
+		{15, 5, 0, 1, 9,},
+
+		{14, 4, 3, 2, 10,},
+
+		{-1, 13, 12, 11, -1,}
+	};
+
+	inline constexpr DirectionTypes aeTurnRightDirection[NUM_DIRECTION_TYPES] =
+	{
+		DIRECTION_NORTHEAST,	// DIRECTION_NORTH
+		DIRECTION_EAST,				// DIRECTION_NORTHEAST
+		DIRECTION_SOUTHEAST,	// DIRECTION_EAST
+		DIRECTION_SOUTH,			// DIRECTION_SOUTHEAST
+		DIRECTION_SOUTHWEST,	// DIRECTION_SOUTH
+		DIRECTION_WEST,				// DIRECTION_SOUTHWEST
+		DIRECTION_NORTHWEST,	// DIRECTION_WEST
+		DIRECTION_NORTH,			// DIRECTION_NORTHWEST
+	};
+
+	inline constexpr DirectionTypes aeTurnLeftDirection[NUM_DIRECTION_TYPES] =
+	{
+		DIRECTION_NORTHWEST,	// DIRECTION_NORTH
+		DIRECTION_NORTH,			// DIRECTION_NORTHEAST
+		DIRECTION_NORTHEAST,	// DIRECTION_EAST
+		DIRECTION_EAST,				// DIRECTION_SOUTHEAST
+		DIRECTION_SOUTHEAST,	// DIRECTION_SOUTH
+		DIRECTION_SOUTH,			// DIRECTION_SOUTHWEST
+		DIRECTION_SOUTHWEST,	// DIRECTION_WEST
+		DIRECTION_WEST,				// DIRECTION_NORTHWEST
+	};
+
+	inline constexpr DirectionTypes aaeXYDirection[DIRECTION_DIAMETER][DIRECTION_DIAMETER] =
+	{
+		DIRECTION_SOUTHWEST, DIRECTION_WEST,	DIRECTION_NORTHWEST,
+		DIRECTION_SOUTH,     NO_DIRECTION,    DIRECTION_NORTH,
+		DIRECTION_SOUTHEAST, DIRECTION_EAST,	DIRECTION_NORTHEAST,
+	};
+}
+
 #ifndef SQR
 #define SQR(x) ( (x)*(x))
 #endif
@@ -181,13 +292,13 @@ inline CvPlot* plotDirection(int iX, int iY, DirectionTypes eDirection)							//
 	}
 	else
 	{
-		return GC.getMapINLINE().plotINLINE((iX + GC.getPlotDirectionX()[eDirection]), (iY + GC.getPlotDirectionY()[eDirection]));
+		return GC.getMapINLINE().plotINLINE((iX + CvPlotTables::aiPlotDirectionX[eDirection]), (iY + CvPlotTables::aiPlotDirectionY[eDirection]));
 	}
 }
 
 inline CvPlot* plotCardinalDirection(int iX, int iY, CardinalDirectionTypes eCardinalDirection)	// Exposed to Python
 {
-	return GC.getMapINLINE().plotINLINE((iX + GC.getPlotCardinalDirectionX()[eCardinalDirection]), (iY + GC.getPlotCardinalDirectionY()[eCardinalDirection]));
+	return GC.getMapINLINE().plotINLINE((iX + CvPlotTables::aiPlotCardinalDirectionX[eCardinalDirection]), (iY + CvPlotTables::aiPlotCardinalDirectionY[eCardinalDirection]));
 }
 
 inline CvPlot* plotXY(int iX, int iY, int iDX, int iDY)																// Exposed to Python
@@ -203,7 +314,7 @@ inline DirectionTypes directionXY(int iDX, int iDY)																		// Exposed 
 	}
 	else
 	{
-		return GC.getXYDirection((iDX + DIRECTION_RADIUS), (iDY + DIRECTION_RADIUS));
+		return CvPlotTables::aaeXYDirection[iDX + DIRECTION_RADIUS][iDY + DIRECTION_RADIUS];
 	}
 }
 
