@@ -99,7 +99,7 @@ the few functions that differ are optimised without it.
 The build is optimised with a record of which code a real game runs. The record is
 `pgo/CvGameCoreDLL.profdata`. It was collected on the seeded standard game (150 turns)
 and the seeded huge game (250 turns), all players AI, with the source as it was at commit
-`3c51295`. `tools/build_dll.py` uses it unless told otherwise:
+`fe79f90`. `tools/build_dll.py` uses it unless told otherwise:
 
 | option | profile used | output folder |
 | --- | --- | --- |

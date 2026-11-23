@@ -18,7 +18,7 @@ the hottest functions. `--pgo-train` builds a DLL that counts what runs and writ
 raw profile itself (`bridgedPgoTurn()` in `CvGameCoreDLL.cpp`), every tenth game turn,
 since LLVM's profile runtime is not available for this target. It records indirect call
 targets and copy sizes as well. The profile was last collected on the source as of
-`3c51295`; the build counts the functions that no longer match it. The recipe is in
+`fe79f90`; the build counts the functions that no longer match it. The recipe is in
 `README.md`.
 
 ## What differs from stock
