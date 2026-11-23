@@ -28,6 +28,7 @@
 | [XML lists and technology masks](xml-lists-and-tech-masks.md) | 1 | not measured | late | medium |
 | [Yield-value inputs kept for a pass over the city](yield-value-inputs.md) | 1 | not measured | late | medium |
 | [Cities keep their chosen builds](city-keeps-builds.md) | 2 | flat | late | medium |
+| [Moving groups keep their path](moving-groups-keep-path.md) | 2 | grows | late | medium |
 | [Path searches the AI can do without](path-search-trimming.md) | 2 | grows | late | medium |
 | [City builds chosen on the human's turn](builds-on-human-turn.md) | 3 | shrinks | late | medium |
 | [AI turns not played out for the human](ai-turns-not-played-out.md) | 1 | not measured | not measured | low |
