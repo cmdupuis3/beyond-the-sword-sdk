@@ -726,6 +726,11 @@ void CvCityAI::AI_chooseProduction()
 {
 	PROFILE_FUNC();
 
+	// The random numbers of this choice come from a stream of the city's own: see
+	// CvAIRandScope in CvGame.h. A city that chooses twice in a turn has built something in
+	// between, which changes the numbers passed here.
+	CvAIRandScope kRandScope(AI_RAND_PRODUCTION, getOwnerINLINE(), getID(), getNumBuildings(), getOverflowProduction(), getPopulation());
+
 	// From here to the end, the city-wide values AI_buildingValueThreshold() works from are
 	// worked out once: see AI_buildingValueContext().
 	struct BuildingValueContextScope
@@ -930,7 +935,7 @@ void CvCityAI::AI_chooseProduction()
 				// if we do not have enough cities, then the highest culture city will not get special attention
 				if (iCultureRateRank > 1 || (kPlayer.getNumCities() > (iCulturalVictoryNumCultureCities + 1)))
 				{
-					if ((((iNumAreaCitySites + iNumWaterAreaCitySites) > 0) && (kPlayer.getNumCities() < 6)) && (GC.getGameINLINE().getSorenRandNum(2, "AI Less Culture More Expand") == 0))
+					if ((((iNumAreaCitySites + iNumWaterAreaCitySites) > 0) && (kPlayer.getNumCities() < 6)) && (GC.getGameINLINE().getAIRandNum(2, "AI Less Culture More Expand") == 0))
 					{
 						bImportantCity = false;
 					}
@@ -1039,7 +1044,7 @@ void CvCityAI::AI_chooseProduction()
 		}
 		
 		bChooseUnit = false;
-		if (GC.getGameINLINE().getSorenRandNum(100, "AI Build Unit Production") > AI_buildUnitProb())
+		if (GC.getGameINLINE().getAIRandNum(100, "AI Build Unit Production") > AI_buildUnitProb())
 		{
 			
 			int iBarbarianFlags = 0;
@@ -1068,7 +1073,7 @@ void CvCityAI::AI_chooseProduction()
 		
 		if ((pWaterArea != NULL) && (iWaterPercent > 30))
 		{
-			if (GC.getGameINLINE().getSorenRandNum(2, "AI Coast Raiders!") == 0)
+			if (GC.getGameINLINE().getAIRandNum(2, "AI Coast Raiders!") == 0)
 			{
 				if (kPlayer.AI_getNumAIUnits(UNITAI_ASSAULT_SEA) <= (1 + kPlayer.getNumCities() / 2))
 				{
@@ -1078,7 +1083,7 @@ void CvCityAI::AI_chooseProduction()
 					}
 				}
 			}
-			if (GC.getGameINLINE().getSorenRandNum(110, "AI arrrr!") < (iWaterPercent + 10))
+			if (GC.getGameINLINE().getAIRandNum(110, "AI arrrr!") < (iWaterPercent + 10))
 			{
 				if (kPlayer.AI_getNumAIUnits(UNITAI_PIRATE_SEA) <= kPlayer.getNumCities())
 				{
@@ -1196,7 +1201,7 @@ void CvCityAI::AI_chooseProduction()
 		if (NULL != pWaterArea)
 		{
 			if (iAreaBestFoundValue == 0 || iWaterAreaBestFoundValue > iAreaBestFoundValue
-    			|| (iWaterPercent > 60 && GC.getGameINLINE().getSorenRandNum(4, "AI Train Early Sea Explore or Settler") == 0))
+    			|| (iWaterPercent > 60 && GC.getGameINLINE().getAIRandNum(4, "AI Train Early Sea Explore or Settler") == 0))
 			{
 				if (kPlayer.AI_totalWaterAreaUnitAIs(pWaterArea, UNITAI_EXPLORE_SEA) == 0)
 				{
@@ -1329,7 +1334,7 @@ void CvCityAI::AI_chooseProduction()
 
 	if	(!bLandWar && !bAssault && (iTargetCulturePerTurn > getCommerceRate(COMMERCE_CULTURE)))
 	{
-		if (GC.getGameINLINE().getSorenRandNum(bAggressiveAI ? 3 : 2, "AI Culture Build") == 0)
+		if (GC.getGameINLINE().getAIRandNum(bAggressiveAI ? 3 : 2, "AI Culture Build") == 0)
 		{
 			if (AI_chooseBuilding(BUILDINGFOCUS_CULTURE, bAggressiveAI ? 10 : 20))
 			{
@@ -1372,7 +1377,7 @@ void CvCityAI::AI_chooseProduction()
 			}
 
 			
-			if (GC.getGame().getSorenRandNum(100, "AI start city attack stack") <= iStartAttackStackRand)
+			if (GC.getGame().getAIRandNum(100, "AI start city attack stack") <= iStartAttackStackRand)
 			{
 				if (AI_chooseUnit(UNITAI_ATTACK))
 				{
@@ -1385,7 +1390,7 @@ void CvCityAI::AI_chooseProduction()
 	//oppurunistic wonder build (1)
 	if (!bDanger && (!hasActiveWorldWonder()) && (kPlayer.getNumCities() <= 3))
 	{
-		int iWonderTime = GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getWonderConstructRand(), "Wonder Construction Rand");
+		int iWonderTime = GC.getGameINLINE().getAIRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getWonderConstructRand(), "Wonder Construction Rand");
 		iWonderTime /= 5;
 		iWonderTime += 7;
 		if (AI_chooseBuilding(BUILDINGFOCUS_WORLDWONDER, iWonderTime))
@@ -1483,7 +1488,7 @@ void CvCityAI::AI_chooseProduction()
 		
 		if (iPlotSettlerCount == 0)
 		{
-			if ((iNumSettlers < iMaxSettlers) && (!bLandWar || (GC.getGameINLINE().getSorenRandNum(2, "AI War Settler") == 0)))
+			if ((iNumSettlers < iMaxSettlers) && (!bLandWar || (GC.getGameINLINE().getAIRandNum(2, "AI War Settler") == 0)))
 			{
 				if (iPlotCityDefenderCount == 1)
 				{
@@ -1512,7 +1517,7 @@ void CvCityAI::AI_chooseProduction()
             }
         }
         
-        else if (GC.getGameINLINE().getSorenRandNum(((iCultureRateRank == 1) ? 4 : 1) + iCulturalVictoryNumCultureCities * 2 , "AI Build up Culture") < iCultureRateRank)
+        else if (GC.getGameINLINE().getAIRandNum(((iCultureRateRank == 1) ? 4 : 1) + iCulturalVictoryNumCultureCities * 2 , "AI Build up Culture") < iCultureRateRank)
         {
             if (AI_chooseBuilding(BUILDINGFOCUS_BIGCULTURE | BUILDINGFOCUS_CULTURE | BUILDINGFOCUS_WONDEROK, 40))
             {
@@ -1548,7 +1553,7 @@ void CvCityAI::AI_chooseProduction()
         
         if (bDefenseWar)
         {
-        	if (GC.getGameINLINE().getSorenRandNum(100, "AI Train Defensive Unit (Panic)") > (bGetBetterUnits ? 60 : 40))
+        	if (GC.getGameINLINE().getAIRandNum(100, "AI Train Defensive Unit (Panic)") > (bGetBetterUnits ? 60 : 40))
         	{
 				UnitTypeWeightArray panicDefenderTypes;
 				panicDefenderTypes.push_back(std::make_pair(UNITAI_RESERVE, 100));
@@ -1571,7 +1576,7 @@ void CvCityAI::AI_chooseProduction()
 	//oppurunistic wonder build
 	if (!bDanger && (!hasActiveWorldWonder() || (kPlayer.getNumCities() > 3)))
 	{
-		int iWonderTime = GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getWonderConstructRand(), "Wonder Construction Rand");
+		int iWonderTime = GC.getGameINLINE().getAIRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getWonderConstructRand(), "Wonder Construction Rand");
 		iWonderTime /= 5;
 		iWonderTime += 8;
 		if (AI_chooseBuilding(BUILDINGFOCUS_WORLDWONDER, iWonderTime))
@@ -1680,7 +1685,7 @@ void CvCityAI::AI_chooseProduction()
 			//training so many ships on the assumption that those out at sea
 			//will return...
 			
-			if ((iEscorts < ((1 + 2 * iTransports) / 3)) && (GC.getGame().getSorenRandNum(2, "AI train escort sea") == 0))
+			if ((iEscorts < ((1 + 2 * iTransports) / 3)) && (GC.getGame().getAIRandNum(2, "AI train escort sea") == 0))
 			{
 				if (AI_chooseUnit(UNITAI_ESCORT_SEA))
 				{
@@ -1698,7 +1703,7 @@ void CvCityAI::AI_chooseProduction()
 					int iAttackSea = kPlayer.AI_totalAreaUnitAIs(pArea, UNITAI_ATTACK_SEA);
 					iAttackSea += kPlayer.AI_totalAreaUnitAIs(pWaterArea, UNITAI_ATTACK_SEA);
 						
-					if ((iAttackSea < ((1 + 2 * iTransports) / 2)) && (GC.getGame().getSorenRandNum(2, "AI train attack sea") == 0))
+					if ((iAttackSea < ((1 + 2 * iTransports) / 2)) && (GC.getGame().getAIRandNum(2, "AI train attack sea") == 0))
 					{
 						if (AI_chooseUnit(UNITAI_ATTACK_SEA))
 						{
@@ -1834,13 +1839,13 @@ void CvCityAI::AI_chooseProduction()
 		}
 	}
 	
-	if (!bAlwaysPeace && !(bLandWar || bAssault) && (kPlayer.AI_isDoStrategy(AI_STRATEGY_OWABWNW) || (GC.getGame().getSorenRandNum(12, "AI consider Nuke") == 0)))
+	if (!bAlwaysPeace && !(bLandWar || bAssault) && (kPlayer.AI_isDoStrategy(AI_STRATEGY_OWABWNW) || (GC.getGame().getAIRandNum(12, "AI consider Nuke") == 0)))
 	{
 		int iTotalNukes = kPlayer.AI_totalUnitAIs(UNITAI_ICBM);
 		int iNukesWanted = 1 + 2 * std::min(kPlayer.getNumCities(), GC.getGame().getNumCities() - kPlayer.getNumCities());
-		if ((iTotalNukes < iNukesWanted) && (GC.getGame().getSorenRandNum(100, "AI train nuke MWAHAHAH") < (90 - (80 * iTotalNukes) / iNukesWanted)))
+		if ((iTotalNukes < iNukesWanted) && (GC.getGame().getAIRandNum(100, "AI train nuke MWAHAHAH") < (90 - (80 * iTotalNukes) / iNukesWanted)))
 		{
-			if ((pWaterArea != NULL) && (GC.getGame().getSorenRandNum(4, "AI train nuke carrier")))
+			if ((pWaterArea != NULL) && (GC.getGame().getAIRandNum(4, "AI train nuke carrier")))
 			{
 				if (AI_chooseUnit(UNITAI_MISSILE_CARRIER_SEA))
 				{
@@ -1868,7 +1873,7 @@ void CvCityAI::AI_chooseProduction()
         		iTrainInvaderChance = (100 - ((100 - iTrainInvaderChance) / (bCrushStrategy ? 6 : 3)));
         	}        	
         	
-            if (GC.getGameINLINE().getSorenRandNum(100, "AI Dagger Offense Unit") < iTrainInvaderChance )
+            if (GC.getGameINLINE().getAIRandNum(100, "AI Dagger Offense Unit") < iTrainInvaderChance )
             {
             	{
 					if (AI_chooseBuilding(BUILDINGFOCUS_EXPERIENCE, 20))
@@ -1915,7 +1920,7 @@ void CvCityAI::AI_chooseProduction()
 		{
 			if (kPlayer.AI_calculateUnitAIViability(UNITAI_PIRATE_SEA, DOMAIN_SEA) > 49)
 			{
-				if (GC.getGameINLINE().getSorenRandNum(100, "AI train pirate") < (iWaterPercent / (1 + iPirateCount)))
+				if (GC.getGameINLINE().getAIRandNum(100, "AI train pirate") < (iWaterPercent / (1 + iPirateCount)))
 				{
 					if (AI_chooseUnit(UNITAI_PIRATE_SEA))
 					{
@@ -1954,7 +1959,7 @@ void CvCityAI::AI_chooseProduction()
 		
 	if (iTotalFloatingDefenders < iNeededFloatingDefenders)
 	{
-		if (GC.getGameINLINE().getSorenRandNum(100, "AI Build Floating Defender") < 50)
+		if (GC.getGameINLINE().getAIRandNum(100, "AI Build Floating Defender") < 50)
 		{
 			if (AI_chooseLeastRepresentedUnit(floatingDefenderTypes))
 			{
@@ -1968,7 +1973,7 @@ void CvCityAI::AI_chooseProduction()
 	iNeededSpies += isCapital() ? 1 : 0;
 	if (iNumSpies < iNeededSpies)
 	{
-		if (GC.getGameINLINE().getSorenRandNum(100, "AI Train Spy") < 5 + 50 / (1 + iNumSpies))
+		if (GC.getGameINLINE().getAIRandNum(100, "AI Train Spy") < 5 + 50 / (1 + iNumSpies))
 		{
 			if (AI_chooseUnit(UNITAI_SPY))
 			{
@@ -1997,7 +2002,7 @@ void CvCityAI::AI_chooseProduction()
 	if ((iProductionRank <= ((kPlayer.getNumCities() > 8) ? 3 : 2))
 		&& (getPopulation() > 3))
 	{
-		int iWonderRand = 8 + GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getWonderConstructRand(), "Wonder Construction Rand");
+		int iWonderRand = 8 + GC.getGameINLINE().getAIRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getWonderConstructRand(), "Wonder Construction Rand");
 		
 		// increase chance of going for an early wonder
 		if (GC.getGameINLINE().getElapsedGameTurns() < (100 * GC.getGameSpeedInfo(GC.getGameINLINE().getGameSpeedType()).getConstructPercent() / 100) && iNumCitiesInArea > 1)
@@ -2022,7 +2027,7 @@ void CvCityAI::AI_chooseProduction()
 			iWonderRand /= 3;
 		}
 		
-		int iWonderRoll = GC.getGameINLINE().getSorenRandNum(100, "Wonder Build Rand");
+		int iWonderRoll = GC.getGameINLINE().getAIRandNum(100, "Wonder Build Rand");
 		
 		if (iProductionRank == 1)
 		{
@@ -2100,7 +2105,7 @@ void CvCityAI::AI_chooseProduction()
 //		}
 //	}
 
-	if (!bAlwaysPeace && (bDanger || (GC.getGameINLINE().getSorenRandNum(30, "AI Build Defense") < getPopulation())))
+	if (!bAlwaysPeace && (bDanger || (GC.getGameINLINE().getAIRandNum(30, "AI Build Defense") < getPopulation())))
 	{
 	    if (!bDanger)
 	    {
@@ -2196,7 +2201,7 @@ void CvCityAI::AI_chooseProduction()
 	{
 		if ((bLandWar) ||
 			  ((kPlayer.getNumCities() <= 3) && (GC.getGameINLINE().getElapsedGameTurns() < 60)) ||
-			  (GC.getGameINLINE().getSorenRandNum(100, "AI Build Unit Production") < AI_buildUnitProb()) ||
+			  (GC.getGameINLINE().getAIRandNum(100, "AI Build Unit Production") < AI_buildUnitProb()) ||
 				(isHuman() && (getGameTurnFounded() == GC.getGameINLINE().getGameTurn())))
 		{
 			if (AI_chooseUnit())
@@ -2463,7 +2468,7 @@ UnitTypes CvCityAI::AI_bestUnit(bool bAsync, AdvisorTypes eIgnoreAdvisor, UnitAI
 			}
 			else
 			{
-				aiUnitAIVal[iI] += GC.getGameINLINE().getSorenRandNum(iMilitaryWeight, "AI Best UnitAI");
+				aiUnitAIVal[iI] += GC.getGameINLINE().getAIRandNum(iMilitaryWeight, "AI Best UnitAI");
 			}
 
 			if (aiUnitAIVal[iI] > iBestValue)
@@ -2635,7 +2640,7 @@ UnitTypes CvCityAI::AI_bestUnitAI(UnitAITypes eUnitAI, bool bAsync, AdvisorTypes
 								}
 								else
 								{
-									iValue *= (GC.getGameINLINE().getSorenRandNum(50, "AI Best Unit") + 100);
+									iValue *= (GC.getGameINLINE().getAIRandNum(50, "AI Best Unit") + 100);
 									iValue /= 100;
 								}
 
@@ -2815,7 +2820,7 @@ BuildingTypes CvCityAI::AI_bestBuildingThreshold(int iFocusFlags, int iMaxTurns,
 										}
 										else
 										{
-											iTempValue = GC.getGameINLINE().getSorenRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getWonderConstructRand(), "Wonder Construction Rand");
+											iTempValue = GC.getGameINLINE().getAIRandNum(GC.getLeaderHeadInfo(getPersonalityType()).getWonderConstructRand(), "Wonder Construction Rand");
 										}
 										
 										if (bAreaAlone)
@@ -2833,7 +2838,7 @@ BuildingTypes CvCityAI::AI_bestBuildingThreshold(int iFocusFlags, int iMaxTurns,
 								}
 								else
 								{
-									iValue *= (GC.getGameINLINE().getSorenRandNum(25, "AI Best Building") + 100);
+									iValue *= (GC.getGameINLINE().getAIRandNum(25, "AI Best Building") + 100);
 									iValue /= 100;
 								}
 
@@ -4405,7 +4410,7 @@ ProjectTypes CvCityAI::AI_bestProject()
 				  (GC.getProjectInfo((ProjectTypes)iI).getEveryoneSpecialBuilding() != NO_SPECIALBUILDING) ||
 				  GC.getProjectInfo((ProjectTypes)iI).isAllowsNukes())
 			{
-				if (GC.getGameINLINE().getSorenRandNum(100, "Project Everyone") == 0)
+				if (GC.getGameINLINE().getAIRandNum(100, "Project Everyone") == 0)
 				{
 					iValue++;
 				}
@@ -6560,7 +6565,7 @@ bool CvCityAI::AI_chooseLeastRepresentedUnit(UnitTypeWeightArray &allowedTypes)
 	for (it = allowedTypes.begin(); it != allowedTypes.end(); it++)
 	{
 		iValue = it->second;
-		iValue *= 750 + GC.getGameINLINE().getSorenRandNum(250, "AI choose least represented unit");
+		iValue *= 750 + GC.getGameINLINE().getAIRandNum(250, "AI choose least represented unit");
 		iValue /= 1 + GET_PLAYER(getOwnerINLINE()).AI_totalAreaUnitAIs(area(), it->first);
 		bestTypes.insert(std::make_pair(iValue, it->first));
 	}
@@ -6613,7 +6618,7 @@ bool CvCityAI::AI_bestSpreadUnit(bool bMissionary, bool bExecutive, int iBaseCha
 					}
 				}
 
-				if (iRoll > kGame.getSorenRandNum(100, "AI choose missionary"))
+				if (iRoll > kGame.getAIRandNum(100, "AI choose missionary"))
 				{
 					int iReligionValue = kPlayer.AI_missionaryValue(area(), eReligion);
 					if (iReligionValue > 0)
@@ -6663,7 +6668,7 @@ bool CvCityAI::AI_bestSpreadUnit(bool bMissionary, bool bExecutive, int iBaseCha
 					iRoll /= 8;			
 				}
 				
-				if (iRoll > kGame.getSorenRandNum(100, "AI choose executive"))
+				if (iRoll > kGame.getAIRandNum(100, "AI choose executive"))
 				{
 					int iCorporationValue = kPlayer.AI_executiveValue(area(), eCorporation);
 					if (iCorporationValue > 0)
@@ -8837,7 +8842,7 @@ bool CvCityAI::AI_doPanic()
 			}
 			else
 			{
-				if ((GC.getGame().getSorenRandNum(2, "AI choose panic unit") == 0) && AI_chooseUnit(UNITAI_CITY_COUNTER))
+				if ((GC.getGame().getAIRandNum(2, "AI choose panic unit") == 0) && AI_chooseUnit(UNITAI_CITY_COUNTER))
 				{
 					AI_doHurry((iRatio > 140));	
 				}

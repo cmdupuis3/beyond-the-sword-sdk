@@ -3930,6 +3930,11 @@ int CvPlayerAI::AI_goldTarget() const
 
 TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAsync, TechTypes eIgnoreTech, AdvisorTypes eIgnoreAdvisor) const
 {
+	// The random numbers of this choice come from a stream of the player's own, by what is
+	// asked: see CvAIRandScope in CvGame.h. (With bAsync they come from the interface's
+	// stream, as before.)
+	CvAIRandScope kRandScope(AI_RAND_TECH, getID(), iMaxPathLength, (bIgnoreCost ? 1 : 0), eIgnoreTech, eIgnoreAdvisor);
+
 	PROFILE("CvPlayerAI::AI_bestTech");
 
 	CvCity* pCapitalCity;
@@ -4040,7 +4045,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 							{
 								iValue = 1;
 
-								int iRandomFactor = ((bAsync) ? GC.getASyncRand().get(2000, "AI Research ASYNC") : GC.getGameINLINE().getSorenRandNum(2000, "AI Research"));
+								int iRandomFactor = ((bAsync) ? GC.getASyncRand().get(2000, "AI Research ASYNC") : GC.getGameINLINE().getAIRandNum(2000, "AI Research"));
 								int iRandomMax = 2000;
 								iValue += iRandomFactor;
 
@@ -4845,7 +4850,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 									}
 								if (bEnablesUnitWonder)
 								{
-									int iWonderRandom = ((bAsync) ? GC.getASyncRand().get(400, "AI Research Wonder Unit ASYNC") : GC.getGameINLINE().getSorenRandNum(400, "AI Research Wonder Unit"));
+									int iWonderRandom = ((bAsync) ? GC.getASyncRand().get(400, "AI Research Wonder Unit ASYNC") : GC.getGameINLINE().getAIRandNum(400, "AI Research Wonder Unit"));
 									iValue += iWonderRandom + (bCapitalAlone ? 200 : 0);
 
 									iRandomMax += 400;
@@ -5038,7 +5043,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 								// if it gives at least one wonder
 								if (bEnablesWonder)
 								{
-									int iWonderRandom = ((bAsync) ? GC.getASyncRand().get(800, "AI Research Wonder Building ASYNC") : GC.getGameINLINE().getSorenRandNum(800, "AI Research Wonder Building"));
+									int iWonderRandom = ((bAsync) ? GC.getASyncRand().get(800, "AI Research Wonder Building ASYNC") : GC.getGameINLINE().getAIRandNum(800, "AI Research Wonder Building"));
 									iValue += (500 + iWonderRandom) / (bAdvancedStart ? 5 : 1);
 
 									iRandomMax += 800;
@@ -5074,7 +5079,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 								}
 								if (bEnablesProjectWonder)
 								{
-									int iWonderRandom = ((bAsync) ? GC.getASyncRand().get(200, "AI Research Wonder Project ASYNC") : GC.getGameINLINE().getSorenRandNum(200, "AI Research Wonder Project"));
+									int iWonderRandom = ((bAsync) ? GC.getASyncRand().get(200, "AI Research Wonder Project ASYNC") : GC.getGameINLINE().getAIRandNum(200, "AI Research Wonder Project"));
 									iValue += iWonderRandom;
 
 									iRandomMax += 200;
@@ -5183,7 +5188,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 														{
 															if (iI == eFavorite)
 															{
-																iReligionValue += 1 + ((bAsync) ? GC.getASyncRand().get(1200, "AI Research Religion (Favorite) ASYNC") : GC.getGameINLINE().getSorenRandNum(1200, "AI Research Religion (Favorite)"));
+																iReligionValue += 1 + ((bAsync) ? GC.getASyncRand().get(1200, "AI Research Religion (Favorite) ASYNC") : GC.getGameINLINE().getAIRandNum(1200, "AI Research Religion (Favorite)"));
 																iRandomMax += 1200;
 															}
 															else
@@ -5193,7 +5198,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 															}
 														}
 													}
-													iReligionValue += 1 + ((bAsync) ? GC.getASyncRand().get(iRoll, "AI Research Religion ASYNC") : GC.getGameINLINE().getSorenRandNum(iRoll, "AI Research Religion"));
+													iReligionValue += 1 + ((bAsync) ? GC.getASyncRand().get(iRoll, "AI Research Religion ASYNC") : GC.getGameINLINE().getAIRandNum(iRoll, "AI Research Religion"));
 													iRandomMax += iRoll;
 													iRandomFactor += iReligionValue;
 
@@ -5241,14 +5246,14 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 											{
 												if (!(GC.getGameINLINE().isCorporationFounded((CorporationTypes)iJ)))
 												{
-													iValue += 100 + ((bAsync) ? GC.getASyncRand().get(2400, "AI Research Corporation ASYNC") : GC.getGameINLINE().getSorenRandNum(2400, "AI Research Corporation"));
+													iValue += 100 + ((bAsync) ? GC.getASyncRand().get(2400, "AI Research Corporation ASYNC") : GC.getGameINLINE().getAIRandNum(2400, "AI Research Corporation"));
 												}
 											}
 										}
 
 										if (getTechFreeUnit((TechTypes) iI) != NO_UNIT)
 										{
-											int iGreatPeopleRandom = ((bAsync) ? GC.getASyncRand().get(3200, "AI Research Great People ASYNC") : GC.getGameINLINE().getSorenRandNum(3200, "AI Research Great People"));
+											int iGreatPeopleRandom = ((bAsync) ? GC.getASyncRand().get(3200, "AI Research Great People ASYNC") : GC.getGameINLINE().getAIRandNum(3200, "AI Research Great People"));
 											iValue += iGreatPeopleRandom;
 											
 											iRandomMax += 3200;
@@ -5262,7 +5267,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 											iValue += 200;
 										}
 
-										iValue += (GC.getTechInfo((TechTypes)iI).getFirstFreeTechs() * (200 + ((bCapitalAlone) ? 400 : 0) + ((bAsync) ? GC.getASyncRand().get(3200, "AI Research Free Tech ASYNC") : GC.getGameINLINE().getSorenRandNum(3200, "AI Research Free Tech"))));
+										iValue += (GC.getTechInfo((TechTypes)iI).getFirstFreeTechs() * (200 + ((bCapitalAlone) ? 400 : 0) + ((bAsync) ? GC.getASyncRand().get(3200, "AI Research Free Tech ASYNC") : GC.getGameINLINE().getAIRandNum(3200, "AI Research Free Tech"))));
 									}
 								}
 
@@ -5294,7 +5299,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 									    int iAdjustment = GC.getGameSpeedInfo(GC.getGameINLINE().getGameSpeedType()).getResearchPercent();
 								
 									    int iTurnsLeft = getResearchTurnsLeftTimes100(((TechTypes)iI), false);
-									    bool bCheapBooster = ((iTurnsLeft < (2 * iAdjustment)) && (0 == ((bAsync) ? GC.getASyncRand().get(5, "AI Choose Cheap Tech") : GC.getGameINLINE().getSorenRandNum(5, "AI Choose Cheap Tech"))));
+									    bool bCheapBooster = ((iTurnsLeft < (2 * iAdjustment)) && (0 == ((bAsync) ? GC.getASyncRand().get(5, "AI Choose Cheap Tech") : GC.getGameINLINE().getAIRandNum(5, "AI Choose Cheap Tech"))));
 									    
 									    
 										iValue *= 100000;
@@ -5308,7 +5313,7 @@ TechTypes CvPlayerAI::AI_bestTech(int iMaxPathLength, bool bIgnoreCost, bool bAs
 								{
 									if (GC.getTechInfo((TechTypes)iI).isTechTrading() || kTeam.isTechTrading())
 									{
-										if (((bAsync) ? GC.getASyncRand().get(100, "AI Tech Whore ASYNC") : GC.getGameINLINE().getSorenRandNum(100, "AI Tech Whore")) < (GC.getGameINLINE().isOption(GAMEOPTION_NO_TECH_BROKERING) ? 20 : 10))
+										if (((bAsync) ? GC.getASyncRand().get(100, "AI Tech Whore ASYNC") : GC.getGameINLINE().getAIRandNum(100, "AI Tech Whore")) < (GC.getGameINLINE().isOption(GAMEOPTION_NO_TECH_BROKERING) ? 20 : 10))
 										{
 											int iKnownCount = 0;
 											int iPossibleKnownCount = 0;

@@ -431,6 +431,9 @@ public:
 																																												
 	CvRandom& getSorenRand();																										// Exposed to Python	
 	int getSorenRandNum(int iNum, const char* pszLog);													
+	// For the AI decisions that draw from a stream of their own: see CvAIRandScope below.
+	int getAIRandNum(int iNum, const char* pszLog);
+	static bool isAIRandomStock();
 																																												
 	DllExport int calculateSyncChecksum();																								// Exposed to Python	
 	DllExport int calculateOptionsChecksum();																							// Exposed to Python	
@@ -689,6 +692,40 @@ protected:
 	CvPlot* normalizeFindLakePlot(PlayerTypes ePlayer);
 
 	void doUpdateCacheOnTurn();
+};
+
+//
+// A stream of random numbers for one AI decision.
+//
+// The stock AI draws from the game's one stream, so what a city chooses to build depends on
+// every number drawn before: on the fights of the turn, on what the cities before it chose,
+// on the order things were done in. That ties each choice to its place in the turn. While an
+// object of this class exists, CvGame::getAIRandNum() draws from a stream of the decision's
+// own instead. The stream is made from the game's seed, the game turn, what is deciding and
+// whatever of its state is passed in, and from nothing else: the same decision in the same
+// state on the same turn gets the same numbers whenever it is made, however often, and the
+// game's own stream is left as it was. Nothing is kept, so nothing goes into a saved game.
+//
+// Tier 2 (see BridgedTiers.h): the AI's choices are not the stock ones, and the game's own
+// stream runs differently from the first choice on. AI_RANDOM_STOCK=1 has every draw come
+// from the game's stream, as in a REPRODUCE_BTS build.
+//
+enum AIRandDecisions
+{
+	AI_RAND_PRODUCTION = 1,		// CvCityAI::AI_chooseProduction(): by city
+	AI_RAND_TECH,				// CvPlayerAI::AI_bestTech(): by player and what was asked
+};
+
+class CvAIRandScope
+{
+public:
+	CvAIRandScope(AIRandDecisions eDecision, int iPlayer, int iID, int iState1 = 0, int iState2 = 0, int iState3 = 0);
+	~CvAIRandScope();
+
+private:
+	CvRandom m_kRand;
+	CvRandom* m_pOuter;
+	bool m_bOpen;
 };
 
 #endif
