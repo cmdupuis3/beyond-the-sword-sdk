@@ -3221,9 +3221,15 @@ int CvPlayer::countOwnedBonuses(BonusTypes eBonus) const
 	iCount = 0;
 
 	//count bonuses outside city radius
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	// Either way a plot counts only if its bonus is eBonus, so the plots that have that bonus
+	// are all there is to look at: see CvMap::getBonusPlotIndices(). Not for NO_BONUS, which
+	// the plots without a bonus have.
+	const std::vector<int>* paiBonusPlots = ((eBonus != NO_BONUS) ? &(GC.getMapINLINE().getBonusPlotIndices(eBonus)) : NULL);
+	const int iNumLoopPlots = ((paiBonusPlots != NULL) ? (int)paiBonusPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+
+	for (iI = 0; iI < iNumLoopPlots; iI++)
 	{
-		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE((paiBonusPlots != NULL) ? (*paiBonusPlots)[iI] : iI);
 
 		if ((pLoopPlot->getOwnerINLINE() == getID()) && !pLoopPlot->isCityRadius())
 		{
@@ -3268,9 +3274,13 @@ int CvPlayer::countUnimprovedBonuses(CvArea* pArea, CvPlot* pFromPlot) const
 
 	iCount = 0;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	// A plot counts only if this team sees a bonus on it, so the plots with a bonus are all
+	// there is to look at, in plot index order as before: see CvMap::getBonusPlotIndices().
+	const std::vector<int>& aiBonusPlots = GC.getMapINLINE().getBonusPlotIndices();
+
+	for (iI = 0; iI < (int)aiBonusPlots.size(); iI++)
 	{
-		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(aiBonusPlots[iI]);
 
 		if (pLoopPlot->area() == pArea)
 		{

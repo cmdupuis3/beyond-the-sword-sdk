@@ -129,6 +129,7 @@ void CvMap::reset(CvMapInitData* pInitInfo)
 	m_iPlotLayoutUpdates = 0;
 	m_bTeamIndexDirty = true;
 	m_bAreaPlotsDirty = true;
+	m_bBonusPlotsDirty = true;
 	m_uiRoutesSeen = 0;
 	setFoundValuesAllDirty();
 
@@ -1441,6 +1442,94 @@ const std::vector<int>& CvMap::getAreaPlotIndices(int iArea) const
 }
 
 
+//
+// The plots with a bonus.
+//
+// CvPlayer::countOwnedBonuses() and countUnimprovedBonuses() count plots by tests that a plot
+// with no bonus cannot pass, whoever asks: a team sees no bonus where there is none. They go
+// through these lists instead of the whole map and test each plot as before. The lists hold
+// what is on the plot, not what a team can see of it.
+//
+void CvMap::rebuildBonusPlots() const
+{
+	PROFILE("CvMap::getBonusPlotIndices: lists made");
+
+	m_aiBonusPlots.clear();
+	m_aaiBonusPlots.resize(GC.getNumBonusInfos());
+
+	for (size_t i = 0; i < m_aaiBonusPlots.size(); i++)
+	{
+		m_aaiBonusPlots[i].clear();
+	}
+
+	for (int iI = 0; iI < numPlotsINLINE(); iI++)
+	{
+		const BonusTypes eBonus = m_pMapPlots[iI].getBonusType();
+
+		if (eBonus != NO_BONUS)
+		{
+			m_aiBonusPlots.push_back(iI);
+
+			if ((eBonus >= 0) && (eBonus < (int)m_aaiBonusPlots.size()))
+			{
+				m_aaiBonusPlots[eBonus].push_back(iI);
+			}
+		}
+	}
+
+	m_bBonusPlotsDirty = false;
+}
+
+
+const std::vector<int>& CvMap::getBonusPlotIndices() const
+{
+	if (m_bBonusPlotsDirty)
+	{
+		rebuildBonusPlots();
+	}
+#ifdef BRIDGED_PROFILE
+	else if (isMapCountsVerify())
+	{
+		// the lists as kept against the lists made now
+		static BridgedProfileSample kWrong = { "bonus plots verify: LISTS DIFFER FROM THE MAP" };
+		const std::vector<int> aiKept(m_aiBonusPlots);
+		const std::vector<std::vector<int> > aaiKept(m_aaiBonusPlots);
+		rebuildBonusPlots();
+		if ((aiKept != m_aiBonusPlots) || (aaiKept != m_aaiBonusPlots))
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
+
+	return m_aiBonusPlots;
+}
+
+
+const std::vector<int>& CvMap::getBonusPlotIndices(BonusTypes eBonus) const
+{
+	getBonusPlotIndices();	// makes the lists if need be
+
+	static const std::vector<int> aiNone;
+	return (((eBonus >= 0) && (eBonus < (int)m_aaiBonusPlots.size())) ? m_aaiBonusPlots[eBonus] : aiNone);
+}
+
+
+bool CvMap::isMapCountsVerify() const
+{
+#ifdef BRIDGED_PROFILE
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = (GC.getDefineINT("MAP_COUNTS_VERIFY") != 0) ? 1 : 0;
+	}
+	return (iVerify != 0);
+#else
+	return false;
+#endif
+}
+
+
 void CvMap::resetPathDistance()
 {
 	gDLL->getFAStarIFace()->ForceReset(&GC.getStepFinder());
@@ -1514,8 +1603,10 @@ void CvMap::read(FDataStreamBase* pStream)
 	setup();
 	// the plots' owners and unit lists were read without going through setOwner() and addUnit()
 	m_bTeamIndexDirty = true;
-	// and their areas and routes without going through setArea() and setRouteType()
+	// and their areas, bonuses and routes without going through setArea(), setBonusType() and
+	// setRouteType()
 	m_bAreaPlotsDirty = true;
+	m_bBonusPlotsDirty = true;
 	for (int iI = 0; iI < numPlotsINLINE(); iI++)
 	{
 		noteRoute(m_pMapPlots[iI].getRouteType());
@@ -1615,7 +1706,7 @@ void CvMap::calculateAreas()
 // For each plot the map keeps words with a bit per team: the teams with a unit there that
 // can attack, the same again by how far such a unit can reach, and the team that owns the
 // plot. For each block of 8 x 8 plots it keeps the teams with an attacking unit and the
-// teams owning a plot anywhere in the block.
+// teams owning a plot anywhere in the block, and how many units of any kind are in it.
 //
 // CvPlayerAI::AI_getPlotDanger() counts the enemy units in range that could attack a plot
 // and adds the border danger. Nearly always both are nothing, and isTeamAttackerNear() and
@@ -1634,6 +1725,11 @@ void CvMap::calculateAreas()
 // plot counts as must call setTeamIndexDirty(), and the index is rebuilt at the next
 // question: loading a game, a player changing team, a team's extra moves changing, and a
 // unit gaining or losing the ability to attack.
+//
+// The count of all units is for getPlotsWithUnits(): CvPlayerAI::AI_countNumAreaHostileUnits()
+// and CvTeam::countEnemyDangerByArea() count units that need not be able to attack, on plots
+// picked by owner, and most blocks have no unit or no plot of such an owner. It is not kept
+// by team: which team a unit fights for can depend on the plot it is on.
 //
 // Blocks and plots do not depend on each other and a question only reads them, so a clean
 // index can be read from several threads at once.
@@ -1852,6 +1948,57 @@ void CvMap::getTeamOwnedPlots(TeamTypes eTeam, std::vector<CvPlot*>& apPlots) co
 }
 
 
+//
+// Every plot with a unit on it, found from the blocks that have units rather than by looking
+// at the whole map; see CvMap.h for the owners. The order is by block, not by plot index.
+//
+void CvMap::getPlotsWithUnits(unsigned long long uiOwnerTeams, bool bAnyOwner, std::vector<CvPlot*>& apPlots) const
+{
+	apPlots.clear();
+
+	if (m_bTeamIndexDirty)
+	{
+		rebuildTeamIndex();
+	}
+
+	const int iBlockSize = (1 << TEAM_BLOCK_SHIFT);
+	const int iGridWidth = getGridWidthINLINE();
+	const int iGridHeight = getGridHeightINLINE();
+	const int iNumBlocks = (int)m_aiBlockAllUnits.size();
+
+	for (int iBlock = 0; iBlock < iNumBlocks; iBlock++)
+	{
+		if (m_aiBlockAllUnits[iBlock] == 0)
+		{
+			continue;
+		}
+
+		if (!bAnyOwner && ((m_aiBlockOwnerTeams[iBlock] & uiOwnerTeams) == 0))
+		{
+			continue;
+		}
+
+		const int iStartX = (iBlock % m_iTeamBlocksWide) * iBlockSize;
+		const int iStartY = (iBlock / m_iTeamBlocksWide) * iBlockSize;
+		const int iEndX = std::min(iStartX + iBlockSize, iGridWidth);
+		const int iEndY = std::min(iStartY + iBlockSize, iGridHeight);
+
+		for (int iY = iStartY; iY < iEndY; iY++)
+		{
+			CvPlot* pRow = &m_pMapPlots[iY * iGridWidth];
+
+			for (int iX = iStartX; iX < iEndX; iX++)
+			{
+				if (pRow[iX].getNumUnits() > 0)
+				{
+					apPlots.push_back(&pRow[iX]);
+				}
+			}
+		}
+	}
+}
+
+
 void CvMap::rebuildTeamIndex() const
 {
 	FAssert(MAX_TEAMS <= 64);	// one bit per team
@@ -1862,6 +2009,7 @@ void CvMap::rebuildTeamIndex() const
 
 	m_aiBlockTeamUnits.assign(iNumBlocks * MAX_TEAMS, 0);
 	m_aiBlockTeamOwnedPlots.assign(iNumBlocks * MAX_TEAMS, 0);
+	m_aiBlockAllUnits.assign(iNumBlocks, 0);
 	m_aiBlockUnitTeams.assign(iNumBlocks, 0);
 	m_aiBlockOwnerTeams.assign(iNumBlocks, 0);
 	m_aiPlotUnitTeams.assign(numPlotsINLINE(), 0);
@@ -1880,6 +2028,7 @@ void CvMap::rebuildTeamIndex() const
 		}
 
 		m_aiPlotUnitTeams[iI] = calculatePlotUnitTeams(pLoopPlot, &m_aiPlotReachTeams[iI * TEAM_REACH_WORDS]);
+		m_aiBlockAllUnits[iBlock] = (unsigned short)std::min((int)MAX_UNSIGNED_SHORT, m_aiBlockAllUnits[iBlock] + pLoopPlot->getNumUnits());
 
 		CLLNode<IDInfo>* pUnitNode = pLoopPlot->headUnitNode();
 
@@ -1974,6 +2123,29 @@ void CvMap::changeBlockUnits(int iX, int iY, TeamTypes eTeam, int iChange)
 void CvMap::changeBlockOwnedPlots(int iX, int iY, TeamTypes eTeam, int iChange)
 {
 	changeBlockTeamCount(m_aiBlockTeamOwnedPlots, m_aiBlockOwnerTeams, iX, iY, eTeam, iChange);
+}
+
+
+// a unit of any kind has come to the plot or left it
+void CvMap::changeBlockAllUnits(int iX, int iY, int iChange)
+{
+	if (m_bTeamIndexDirty)
+	{
+		return;	// nothing to keep up to date: the index will be rebuilt
+	}
+
+	const int iBlock = ((iY >> TEAM_BLOCK_SHIFT) * m_iTeamBlocksWide) + (iX >> TEAM_BLOCK_SHIFT);
+	const int iNewCount = m_aiBlockAllUnits[iBlock] + iChange;
+
+	if ((iNewCount < 0) || (iNewCount > MAX_UNSIGNED_SHORT))
+	{
+		// a count that cannot be right means a change went past the hooks; start again
+		FAssertMsg(false, "team index unit count out of range");
+		m_bTeamIndexDirty = true;
+		return;
+	}
+
+	m_aiBlockAllUnits[iBlock] = (unsigned short)iNewCount;
 }
 
 
