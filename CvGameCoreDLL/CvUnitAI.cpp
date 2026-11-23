@@ -14332,11 +14332,19 @@ bool CvUnitAI::AI_improveBonus(int iMinValue, CvPlot** ppBestPlot, BuildTypes* p
 
 	bCanRoute = canBuildRoute();
 
+	// Nothing is done for a plot without a bonus, so the map's plots with one will do where
+	// they are fewer: for a sea worker, which has no list of its own, they always are. Both
+	// lists are in plot index order.
 	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
-	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	const std::vector<int>& kBonusPlots = GC.getMapINLINE().getBonusPlotIndices();
+	if ((paiScanPlots == NULL) || (kBonusPlots.size() < paiScanPlots->size()))
+	{
+		paiScanPlots = &kBonusPlots;
+	}
+	const int iNumScanPlots = (int)paiScanPlots->size();
 	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
-		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
+		iI = (*paiScanPlots)[iScan];
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (pLoopPlot->getOwnerINLINE() == getOwnerINLINE() && AI_plotValid(pLoopPlot))
