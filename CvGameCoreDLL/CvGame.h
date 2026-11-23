@@ -712,8 +712,10 @@ protected:
 //
 enum AIRandDecisions
 {
+	AI_RAND_NONE = 0,			// no stream: the draws stay with the game's
 	AI_RAND_PRODUCTION = 1,		// CvCityAI::AI_chooseProduction(): by city
 	AI_RAND_TECH,				// CvPlayerAI::AI_bestTech(): by player and what was asked
+	AI_RAND_EXPLORE,			// CvUnitAI::AI_explore(), AI_exploreRange(): by unit, its plot and the range
 };
 
 class CvAIRandScope
@@ -721,6 +723,7 @@ class CvAIRandScope
 public:
 	CvAIRandScope(AIRandDecisions eDecision, int iPlayer, int iID, int iState1 = 0, int iState2 = 0, int iState3 = 0);
 	~CvAIRandScope();
+	void close();	// ends the stream before the object goes
 
 private:
 	CvRandom m_kRand;

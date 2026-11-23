@@ -7644,7 +7644,7 @@ CvAIRandScope::CvAIRandScope(AIRandDecisions eDecision, int iPlayer, int iID, in
 	m_pOuter(s_pAIRand),
 	m_bOpen(false)
 {
-	if (CvGame::isAIRandomStock())
+	if ((eDecision == AI_RAND_NONE) || CvGame::isAIRandomStock())
 	{
 		return;
 	}
@@ -7671,16 +7671,22 @@ CvAIRandScope::CvAIRandScope(AIRandDecisions eDecision, int iPlayer, int iID, in
 	m_bOpen = true;
 
 #ifdef BRIDGED_PROFILE
-	static BridgedProfileSample aSamples[3] = { { "AI random stream: decisions, other" }, { "AI random stream: decisions, city production" }, { "AI random stream: decisions, technology" } };
-	bridgedProfileAdd(&aSamples[(eDecision == AI_RAND_PRODUCTION) ? 1 : ((eDecision == AI_RAND_TECH) ? 2 : 0)], 0);
+	static BridgedProfileSample aSamples[4] = { { "AI random stream: decisions, other" }, { "AI random stream: decisions, city production" }, { "AI random stream: decisions, technology" }, { "AI random stream: decisions, explore" } };
+	bridgedProfileAdd(&aSamples[(eDecision == AI_RAND_PRODUCTION) ? 1 : ((eDecision == AI_RAND_TECH) ? 2 : ((eDecision == AI_RAND_EXPLORE) ? 3 : 0))], 0);
 #endif
 }
 
 CvAIRandScope::~CvAIRandScope()
 {
+	close();
+}
+
+void CvAIRandScope::close()
+{
 	if (m_bOpen)
 	{
 		s_pAIRand = m_pOuter;
+		m_bOpen = false;
 	}
 }
 

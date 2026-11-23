@@ -10517,6 +10517,47 @@ private:
 };
 
 
+//
+// Explore searches that look for paths from the best plot down (AI_explore(),
+// AI_exploreRange()). Stock asks for a path to every plot worth anything that no other
+// explorer is heading near, and draws the random part of a plot's value only once its path
+// is found. With these rules every such plot gets its random part first, from a stream of
+// the decision's own (CvAIRandScope), so that what a plot is worth but for its path is known
+// before any path is. The plots are then tried from the most valuable down, and the search
+// stops at the first plot that will do (AI_exploreRange()), or once no plot left could beat
+// the best found, by the fewest turns its distance allows (AI_explore(), as AI_targetCity()
+// does). From the same numbers stock would choose the same plot.
+//
+// Tier 2 (see BridgedTiers.h): the plots draw other numbers than in stock, and the game's
+// own stream no longer moves when an explorer decides. EXPLORE_STOCK=1 is the off switch; a
+// REPRODUCE_BTS build never applies the rules.
+//
+static bool exploreBestFirst()
+{
+#ifdef REPRODUCE_BTS
+	return false;
+#else
+	static int iOff = -1;
+
+	if (iOff == -1)
+	{
+		iOff = ((GC.getDefineINT("EXPLORE_STOCK") != 0) ? 1 : 0);
+	}
+
+	return (iOff == 0);
+#endif
+}
+
+struct ExploreCandidate
+{
+	CvPlot* pPlot;
+	int iValue;			// AI_exploreRange(): its value. AI_explore(): its value before the path's turns divide it
+	int iMostValue;		// the most it can be worth
+	int iOrder;			// its place in the stock loop: the earlier of two plots worth the same wins
+	bool operator<(const ExploreCandidate& kOther) const { return (iMostValue > kOther.iMostValue); }
+};
+
+
 // Returns true if a mission was pushed...
 bool CvUnitAI::AI_explore()
 {
@@ -10538,6 +10579,13 @@ bool CvUnitAI::AI_explore()
 	bool bNoContact = (GC.getGameINLINE().countCivTeamsAlive() > GET_TEAM(getTeam()).getHasMetCivCount(true));
 	ExploreTargets kOtherExplorers(this);
 
+	// see exploreBestFirst(): the plots worth anything, and their random parts from a stream
+	// of this decision's own
+	const bool bBestFirst = exploreBestFirst();
+	std::vector<ExploreCandidate> aCandidates;
+	const int iMaxStepsPerTurn = (bBestFirst ? AI_maxStepsPerTurn() : 1);
+	CvAIRandScope kRandScope((bBestFirst ? AI_RAND_EXPLORE : AI_RAND_NONE), getOwnerINLINE(), getID(), GC.getMapINLINE().plotNumINLINE(getX_INLINE(), getY_INLINE()));
+
 	// The random draw below is made only for plots AI_plotValid() accepts, so going through
 	// only those plots, in the same order, draws the same numbers.
 	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
@@ -10558,7 +10606,7 @@ bool CvUnitAI::AI_explore()
 				iValue += 100000;
 			}
 
-			if (iValue > 0 || GC.getGameINLINE().getSorenRandNum(4, "AI make explore faster ;)") == 0)
+			if (iValue > 0 || (bBestFirst ? GC.getGameINLINE().getAIRandNum(4, "AI make explore faster ;)") : GC.getGameINLINE().getSorenRandNum(4, "AI make explore faster ;)")) == 0)
 			{
 				if (!(pLoopPlot->isRevealed(getTeam(), false)))
 				{
@@ -10591,7 +10639,37 @@ bool CvUnitAI::AI_explore()
 				{
 					if (!(pLoopPlot->isVisibleEnemyUnit(this)))
 					{
-						if (!kOtherExplorers.isNear(pLoopPlot, 3))
+						if (kOtherExplorers.isNear(pLoopPlot, 3))
+						{
+							// another explorer is heading near it
+						}
+						else if (bBestFirst)
+						{
+							if (!atPlot(pLoopPlot))
+							{
+								// all of its value but the path's turns, which are no fewer than
+								// its distance allows
+								iValue += GC.getGameINLINE().getAIRandNum(250 * abs(xDistance(getX_INLINE(), pLoopPlot->getX_INLINE())) + abs(yDistance(getY_INLINE(), pLoopPlot->getY_INLINE())), "AI explore");
+
+								if (pLoopPlot->isAdjacentToLand())
+								{
+									iValue += 10000;
+								}
+
+								if (pLoopPlot->isOwned())
+								{
+									iValue += 5000;
+								}
+
+								ExploreCandidate kCandidate;
+								kCandidate.pPlot = pLoopPlot;
+								kCandidate.iValue = iValue;
+								kCandidate.iMostValue = iValue / (3 + AI_minPathTurns(pLoopPlot, iMaxStepsPerTurn));
+								kCandidate.iOrder = (int)aCandidates.size();
+								aCandidates.push_back(kCandidate);
+							}
+						}
+						else
 						{
 							if (!atPlot(pLoopPlot) && generatePath(pLoopPlot, MOVE_NO_ENEMY_TERRITORY, true, &iPathTurns))
 							{
@@ -10619,7 +10697,39 @@ bool CvUnitAI::AI_explore()
 						}
 					}
 				}
-			}		
+			}
+		}
+	}
+
+	kRandScope.close();	// nothing the move sets off draws from this decision's stream
+
+	if (bBestFirst)
+	{
+		std::stable_sort(aCandidates.begin(), aCandidates.end());
+		int iBestOrder = MAX_INT;
+
+		for (size_t iCandidate = 0; iCandidate < aCandidates.size(); iCandidate++)
+		{
+			const ExploreCandidate& kCandidate = aCandidates[iCandidate];
+
+			// the rest are worth no more than this one, and come after it in plot order if they tie
+			if ((kCandidate.iMostValue <= 0) || (kCandidate.iMostValue < iBestValue) || ((kCandidate.iMostValue == iBestValue) && (kCandidate.iOrder > iBestOrder)))
+			{
+				break;
+			}
+
+			if (generatePath(kCandidate.pPlot, MOVE_NO_ENEMY_TERRITORY, true, &iPathTurns))
+			{
+				iValue = kCandidate.iValue / (3 + std::max(1, iPathTurns));
+
+				if ((iValue > iBestValue) || ((iValue == iBestValue) && (iValue > 0) && (kCandidate.iOrder < iBestOrder)))
+				{
+					iBestValue = iValue;
+					iBestOrder = kCandidate.iOrder;
+					pBestPlot = kCandidate.pPlot->isRevealedGoody(getTeam()) ? getPathEndTurnPlot() : kCandidate.pPlot;
+					pBestExplorePlot = kCandidate.pPlot;
+				}
+			}
 		}
 	}
 
@@ -10631,6 +10741,65 @@ bool CvUnitAI::AI_explore()
 	}
 
 	return false;
+}
+
+
+// The part of a plot's value in AI_exploreRange() that does not come from what is revealed
+// there: a random part, whether it is next to land or owned, and for a sea explorer the
+// direction it lies in. iValue is the plot's value so far. Stock adds this once the plot's
+// path is found.
+int CvUnitAI::AI_exploreRangeValue(CvPlot* pPlot, int iValue, int iDX, int iDY, int iSearchRange, int iImpassableCount)
+{
+	iValue += GC.getGameINLINE().getAIRandNum(10000, "AI Explore");
+
+	if (pPlot->isAdjacentToLand())
+	{
+		iValue += 10000;
+	}
+
+	if (pPlot->isOwned())
+	{
+		iValue += 5000;
+	}
+
+	if (!isHuman())
+	{
+		int iDirectionModifier = 100;
+
+		if (AI_getUnitAIType() == UNITAI_EXPLORE_SEA && iImpassableCount == 0)
+		{
+			iDirectionModifier += (50 * (abs(iDX) + abs(iDY))) / iSearchRange;
+			if (GC.getGame().circumnavigationAvailable())
+			{
+				if (GC.getMap().isWrapX())
+				{
+					if ((iDX * ((AI_getBirthmark() % 2 == 0) ? 1 : -1)) > 0)
+					{
+						iDirectionModifier *= 150 + ((iDX * 100) / iSearchRange);
+					}
+					else
+					{
+						iDirectionModifier /= 2;
+					}
+				}
+				if (GC.getMap().isWrapY())
+				{
+					if ((iDY * (((AI_getBirthmark() >> 1) % 2 == 0) ? 1 : -1)) > 0)
+					{
+						iDirectionModifier *= 150 + ((iDY * 100) / iSearchRange);
+					}
+					else
+					{
+						iDirectionModifier /= 2;
+					}
+				}
+			}
+			iValue *= iDirectionModifier;
+			iValue /= 100;
+		}
+	}
+
+	return iValue;
 }
 
 
@@ -10658,6 +10827,12 @@ bool CvUnitAI::AI_exploreRange(int iRange)
 
 	int iImpassableCount = GET_PLAYER(getOwnerINLINE()).AI_unitImpassableCount(getUnitType());
 	ExploreTargets kOtherExplorers(this);
+
+	// see exploreBestFirst(): the plots worth anything, and their random parts from a stream
+	// of this decision's own
+	const bool bBestFirst = exploreBestFirst();
+	std::vector<ExploreCandidate> aCandidates;
+	CvAIRandScope kRandScope((bBestFirst ? AI_RAND_EXPLORE : AI_RAND_NONE), getOwnerINLINE(), getID(), GC.getMapINLINE().plotNumINLINE(getX_INLINE(), getY_INLINE()), iRange);
 
 	for (iDX = -(iSearchRange); iDX <= iSearchRange; iDX++)
 	{
@@ -10704,7 +10879,24 @@ bool CvUnitAI::AI_exploreRange(int iRange)
 						{
 							PROFILE("AI_exploreRange 3");
 
-							if (!kOtherExplorers.isNear(pLoopPlot, 3))
+							if (kOtherExplorers.isNear(pLoopPlot, 3))
+							{
+								// another explorer is heading near it
+							}
+							else if (bBestFirst)
+							{
+								if (!atPlot(pLoopPlot))
+								{
+									// nothing in its value waits for its path
+									ExploreCandidate kCandidate;
+									kCandidate.pPlot = pLoopPlot;
+									kCandidate.iValue = AI_exploreRangeValue(pLoopPlot, iValue, iDX, iDY, iSearchRange, iImpassableCount);
+									kCandidate.iMostValue = kCandidate.iValue;
+									kCandidate.iOrder = (int)aCandidates.size();
+									aCandidates.push_back(kCandidate);
+								}
+							}
+							else
 							{
 								PROFILE("AI_exploreRange 4");
 
@@ -10712,54 +10904,7 @@ bool CvUnitAI::AI_exploreRange(int iRange)
 								{
 									if (iPathTurns <= iRange)
 									{
-										iValue += GC.getGameINLINE().getSorenRandNum(10000, "AI Explore");
-
-										if (pLoopPlot->isAdjacentToLand())
-										{
-											iValue += 10000;
-										}
-
-										if (pLoopPlot->isOwned())
-										{
-											iValue += 5000;
-										}
-										
-										if (!isHuman())
-										{
-											int iDirectionModifier = 100;
-
-											if (AI_getUnitAIType() == UNITAI_EXPLORE_SEA && iImpassableCount == 0)
-											{
-												iDirectionModifier += (50 * (abs(iDX) + abs(iDY))) / iSearchRange;
-												if (GC.getGame().circumnavigationAvailable())
-												{
-													if (GC.getMap().isWrapX())
-													{
-														if ((iDX * ((AI_getBirthmark() % 2 == 0) ? 1 : -1)) > 0)
-														{
-															iDirectionModifier *= 150 + ((iDX * 100) / iSearchRange);
-														}
-														else
-														{
-															iDirectionModifier /= 2;
-														}
-													}
-													if (GC.getMap().isWrapY())
-													{
-														if ((iDY * (((AI_getBirthmark() >> 1) % 2 == 0) ? 1 : -1)) > 0)
-														{
-															iDirectionModifier *= 150 + ((iDY * 100) / iSearchRange);
-														}
-														else
-														{
-															iDirectionModifier /= 2;
-														}
-													}
-												}
-												iValue *= iDirectionModifier;
-												iValue /= 100;
-											}
-										}
+										iValue = AI_exploreRangeValue(pLoopPlot, iValue, iDX, iDY, iSearchRange, iImpassableCount);
 
 										if (iValue > iBestValue)
 										{
@@ -10780,6 +10925,35 @@ bool CvUnitAI::AI_exploreRange(int iRange)
 						}
 					}
 				}
+			}
+		}
+	}
+
+	kRandScope.close();	// nothing the move sets off draws from this decision's stream
+
+	if (bBestFirst)
+	{
+		// the first plot that will do is the one stock would choose: the most valuable, and
+		// the earliest in the loop of those worth the same
+		std::stable_sort(aCandidates.begin(), aCandidates.end());
+
+		for (size_t iCandidate = 0; iCandidate < aCandidates.size(); iCandidate++)
+		{
+			const ExploreCandidate& kCandidate = aCandidates[iCandidate];
+
+			if (kCandidate.iValue <= 0)
+			{
+				break;
+			}
+
+			PROFILE("AI_exploreRange 4");
+
+			if (generatePath(kCandidate.pPlot, MOVE_NO_ENEMY_TERRITORY, true, &iPathTurns, iRange) && (iPathTurns <= iRange))
+			{
+				iBestValue = kCandidate.iValue;
+				pBestPlot = ((getDomainType() == DOMAIN_LAND) ? getPathEndTurnPlot() : kCandidate.pPlot);
+				pBestExplorePlot = kCandidate.pPlot;
+				break;
 			}
 		}
 	}
