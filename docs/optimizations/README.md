@@ -15,6 +15,7 @@
 | [City-site scores kept between turns](found-value-cache.md) | 1 | shrinks | early | medium |
 | [Define lookups kept by name](define-lookup-cache.md) | 1 | not measured | const | medium |
 | [Feature graphics left until seen](feature-graphics-when-seen.md) | 1 | shrinks | early | medium |
+| [Layouts out of sight made a few at a time](layouts-out-of-sight.md) | 1 | grows | late | medium |
 | [Optional Python callbacks](python-callbacks-optional.md) | 1 | flat | late | medium |
 | [Path request lookups made once](path-request-lookups.md) | 1 | flat | late | medium |
 | [Plot group check by an in-DLL flood](plot-group-flood.md) | 1 | not measured | late | medium |
@@ -28,6 +29,7 @@
 | [Cities keep their chosen builds](city-keeps-builds.md) | 2 | flat | late | medium |
 | [Path searches the AI can do without](path-search-trimming.md) | 2 | grows | late | medium |
 | [City builds chosen on the human's turn](builds-on-human-turn.md) | 3 | shrinks | late | medium |
+| [AI turns not played out for the human](ai-turns-not-played-out.md) | 1 | not measured | not measured | low |
 | [Building-value inputs once per production choice](building-value-inputs.md) | 1 | not measured | late | low |
 | [Collateral damage ties by plot order](collateral-ties.md) | 1 | not measured | not measured | low |
 | [Enemy-team word and team index loops](team-index.md) | 1 | not measured | late | low |
