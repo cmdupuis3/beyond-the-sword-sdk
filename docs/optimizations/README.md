@@ -31,11 +31,13 @@
 | [Moving groups keep their path](moving-groups-keep-path.md) | 2 | grows | late | medium |
 | [Path searches the AI can do without](path-search-trimming.md) | 2 | grows | late | medium |
 | [City builds chosen on the human's turn](builds-on-human-turn.md) | 3 | shrinks | late | medium |
+| [AI classes and the free-list array marked final](final-ai-classes.md) | 1 | not measured | const | low |
 | [AI turns not played out for the human](ai-turns-not-played-out.md) | 1 | not measured | not measured | low |
 | [Building-value inputs once per production choice](building-value-inputs.md) | 1 | not measured | late | low |
 | [Collateral damage ties by plot order](collateral-ties.md) | 1 | not measured | not measured | low |
 | [Enemy-team word and team index loops](team-index.md) | 1 | not measured | late | low |
 | [Groups heading for a plot counted per plot](mission-target-counts.md) | 1 | not measured | late | low |
+| [Plot grid tables known at compile time](plot-grid-tables.md) | 1 | not measured | const | low |
 | [Plot yields in one call](plot-yields-in-one-call.md) | 1 | not measured | late | low |
 | [Workers act as a team](worker-teams.md) | 2 | not measured | not measured | low |
 

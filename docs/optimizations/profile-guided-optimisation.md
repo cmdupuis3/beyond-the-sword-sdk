@@ -7,7 +7,7 @@
 | Scales with map size | grows |
 | Scales with game era | const |
 | Value | high |
-| Commits | `b9ad550`, `dc7178c`, `a78fab4`, `aa0c6ea`, `b7e3534` |
+| Commits | `b9ad550`, `dc7178c`, `a78fab4`, `aa0c6ea`, `b7e3534`, `80292bb`, `6e44f36` |
 
 ## What it does
 The build is optimised with a record of which code a real game runs,
