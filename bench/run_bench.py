@@ -144,6 +144,9 @@ def main():
         if not match:
             parser.error(f'--define wants NAME=INT, got {item}')
         defines[match[1]] = int(match[2])
+    if args.profile and not args.save:
+        # a new game starts at turn 0; the DLL stops rewriting the profile after this turn
+        defines.setdefault('PROFILE_LAST_TURN', args.turns)
 
     exe = args.bts_dir / EXE
     for path in [exe, args.dll, args.template_ini] + ([args.save] if args.save else []):

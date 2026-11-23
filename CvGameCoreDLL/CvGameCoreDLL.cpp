@@ -657,6 +657,20 @@ void bridgedProfileTurn(int iGameTurn)
 		return;
 	}
 
+	// PROFILE_LAST_TURN: a global define the benchmark sets to the last game turn it plays.
+	// The game goes on for some seconds before the benchmark stops it, more turns on a small
+	// map than on a large one; the log is not written again in them, so that it covers the
+	// same turns in every run.
+	static int iLastTurn = -1;
+	if (iLastTurn == -1)
+	{
+		iLastTurn = std::max(0, GC.getDefineINT("PROFILE_LAST_TURN"));
+	}
+	if (iLastTurn > 0 && iGameTurn > iLastTurn)
+	{
+		return;
+	}
+
 	int iCount = 0;
 	BridgedProfileSample* pSample;
 	for (pSample = g_pBridgedProfileHead; pSample != NULL; pSample = pSample->pNext)
