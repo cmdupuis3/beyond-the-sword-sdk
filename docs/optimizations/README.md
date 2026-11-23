@@ -37,6 +37,7 @@
 | [Collateral damage ties by plot order](collateral-ties.md) | 1 | not measured | not measured | low |
 | [Enemy-team word and team index loops](team-index.md) | 1 | not measured | late | low |
 | [Groups heading for a plot counted per plot](mission-target-counts.md) | 1 | not measured | late | low |
+| [Other explorers' targets listed once per decision](explorer-targets-once.md) | 1 | flat | not measured | low |
 | [Plot grid tables known at compile time](plot-grid-tables.md) | 1 | not measured | const | low |
 | [Plot yields in one call](plot-yields-in-one-call.md) | 1 | not measured | late | low |
 | [AI choices draw from streams of their own](ai-random-streams.md) | 2 | not measured | not measured | low |
