@@ -4,7 +4,7 @@
 | --- | --- |
 | Tier | 1 |
 | Off switch | none |
-| Scales with map size | not measured |
+| Scales with map size | grows |
 | Scales with game era | late |
 | Value | low |
 | Commits | `ca8199f` |
@@ -21,15 +21,17 @@ unit, leaving out blocks with none and blocks where no team whose plots count ow
 Each plot left is tested as before.
 
 ## What differs from stock
-Nothing in the game state is meant to: the four are counts, so the order of the plots does
-not matter, and `countUnimprovedBonuses()` still calls the exe's border pathfinder in plot
-index order.
+Nothing in the game state: the four are counts, so the order of the plots does not matter,
+and `countUnimprovedBonuses()` still calls the exe's border pathfinder in plot index order.
 
 ## Measured
-Nothing. Before the change the four took 0.62 s of 43.8 s of turn processing in the huge
-game (250 turns, profile build), 1.4%, which bounds the saving.
+Huge game (250 turns, profile build): the four took 61 ms against 400 ms, 0.8% of turn
+processing; standard game (150 turns): 9 ms against 42 ms, 0.6%. Same state hash on every
+turn before and after. With the six tier 2 switches off the standard game is the stock
+DLL's on all 151 turns, and with `MAP_COUNTS_VERIFY` (profile builds) no unit count and no
+kept bonus list differed.
 
 ## Not checked
-The change was not compiled and no game was played with it: neither the state hashes nor
-the time. `MAP_COUNTS_VERIFY` (profile builds) also takes the unit counts the stock way and
-makes the bonus lists again to compare; it has not been run.
+`MAP_COUNTS_VERIFY` compares the bonus lists, not the two bonus counts. No game was loaded
+from a save, which is when the lists and block counts are made again. No `--tier 1` DLL was
+built. The era is judged, not measured.
