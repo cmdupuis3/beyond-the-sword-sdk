@@ -9,7 +9,8 @@
 // The game asks these questions by looping over every build, unit class or building
 // class and testing each one. The answers depend on the XML alone (the lists) or on the
 // XML and the team's technologies (the masks), so they are worked out once and kept:
-// the lists until the XML is loaded again, a team's masks until its technologies change.
+// the lists until the XML is loaded again (infosChanged()), a team's masks until its
+// technologies change (teamTechsChanged()).
 //
 // Every list keeps the order the loop it replaces would have met its members in, so code
 // that takes "the first" or "the last" match gets the same one.
@@ -53,6 +54,10 @@ namespace CvInfoTables
 	// the bonuses the improvement can discover (getImprovementBonusDiscoverRand() above 0)
 	// whose reveal technology the team has
 	int discoverableBonusCount(TeamTypes eTeam, ImprovementTypes eImprovement);
+
+	// the XML infos were loaded, read from the cache or deleted: the lists are made again
+	// on their next use
+	void infosChanged();
 
 	// a team gained or lost a technology, or was reset or loaded
 	void teamTechsChanged(TeamTypes eTeam);

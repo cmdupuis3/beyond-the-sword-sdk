@@ -19,6 +19,7 @@
 #include "FProfiler.h"
 #include "FVariableSystem.h"
 #include "CvInitCore.h"
+#include "CvInfoTables.h"
 
 #define COPY(dst, src, typeName) \
 	{ \
@@ -37,6 +38,7 @@ void deleteInfoArray(std::vector<T*>& array)
 	}
 
 	array.clear();
+	CvInfoTables::infosChanged();
 }
 
 template <class T>
@@ -66,6 +68,7 @@ bool readInfoArray(FDataStreamBase* pStream, std::vector<T*>& array, const char*
 		++iIndex;
 	}
 
+	CvInfoTables::infosChanged();	// infos were read from the cache
 	return true;
 }
 

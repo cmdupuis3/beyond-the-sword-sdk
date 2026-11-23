@@ -13,6 +13,7 @@
 #include "FProfiler.h"
 #include "FVariableSystem.h"
 #include "CvGameCoreUtils.h"
+#include "CvInfoTables.h"
 
 // Macro for Setting Global Art Defines
 #define INIT_XML_GLOBAL_LOAD(xmlInfoPath, infoArray, numInfos)  SetGlobalClassInfo(infoArray, xmlInfoPath, numInfos);
@@ -1348,6 +1349,8 @@ void CvXMLLoadUtility::SetGlobalClassInfo(std::vector<T*>& aInfos, const char* s
 			}
 		}
 	}
+
+	CvInfoTables::infosChanged();	// infos were added or replaced
 }
 
 void CvXMLLoadUtility::SetDiplomacyInfo(std::vector<CvDiplomacyInfo*>& DiploInfos, const char* szTagName)
@@ -1473,6 +1476,8 @@ void CvXMLLoadUtility::LoadGlobalClassInfo(std::vector<T*>& aInfos, const char* 
 	{
 		gDLL->destroyCache(pCache);
 	}
+
+	CvInfoTables::infosChanged();	// from the XML or from the cache, the infos are new
 }
 
 

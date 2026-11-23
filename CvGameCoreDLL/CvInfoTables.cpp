@@ -169,15 +169,36 @@ namespace
 		}
 	}
 
-	const Tables& tables()
+	// The counts the tables were made for against the counts now. tables() used to make
+	// this comparison on every call, tens of millions of times a game; the XML loaders
+	// now say when the infos change (CvInfoTables::infosChanged()).
+	bool countsCurrent()
 	{
 		int aiCounts[NUM_COUNTS];
 		currentCounts(aiCounts);
+		return std::equal(aiCounts, aiCounts + NUM_COUNTS, s_kTables.aiCounts);
+	}
 
-		if (!s_bTablesBuilt || !std::equal(aiCounts, aiCounts + NUM_COUNTS, s_kTables.aiCounts))
+#ifdef BRIDGED_PROFILE
+	void verifyCounts()
+	{
+		static BridgedProfileSample kChecked = { "info table verify: table counts checked" };
+		static BridgedProfileSample kWrong = { "info table verify: TABLES OUT OF DATE" };
+
+		bridgedProfileAdd(&kChecked, 0);
+		if (!countsCurrent())
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
+
+	const Tables& tables()
+	{
+		if (!s_bTablesBuilt)
 		{
 			// first use, or the XML was loaded again
-			std::copy(aiCounts, aiCounts + NUM_COUNTS, s_kTables.aiCounts);
+			currentCounts(s_kTables.aiCounts);
 			buildTables(s_kTables);
 			s_bTablesBuilt = true;
 
@@ -186,6 +207,12 @@ namespace
 				s_akTeamTechs[iI].bValid = false;
 			}
 		}
+#ifdef BRIDGED_PROFILE
+		else if (CvInfoTables::isVerify())
+		{
+			verifyCounts();
+		}
+#endif
 
 		return s_kTables;
 	}
@@ -431,8 +458,21 @@ int CvInfoTables::discoverableBonusCount(TeamTypes eTeam, ImprovementTypes eImpr
 }
 
 
+void CvInfoTables::infosChanged()
+{
+	s_bTablesBuilt = false;
+}
+
+
 void CvInfoTables::teamTechsChanged(TeamTypes eTeam)
 {
+	// Rare next to the lookups, and every game start and load comes through here: the
+	// place to notice info lists that changed without infosChanged() being told.
+	if (s_bTablesBuilt && !countsCurrent())
+	{
+		s_bTablesBuilt = false;
+	}
+
 	if (eTeam >= 0 && eTeam < MAX_TEAMS)
 	{
 		s_akTeamTechs[eTeam].bValid = false;
