@@ -2362,25 +2362,47 @@ int CvTeam::countEnemyDangerByArea(CvArea* pArea) const
 
 	CvPlot* pLoopPlot;
 	int iCount;
-	int iI;
 
 	iCount = 0;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
-	{
-		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+	// Units are counted on this team's plots, so only the plots with a unit, in the blocks
+	// where the team owns a plot, are looked at: see CvMap::getPlotsWithUnits().
+	static std::vector<CvPlot*> s_apUnitPlots;
+	GC.getMapINLINE().getPlotsWithUnits((1ULL << getID()), false, s_apUnitPlots);
 
-		if (pLoopPlot != NULL)
+	for (size_t i = 0; i < s_apUnitPlots.size(); i++)
+	{
+		pLoopPlot = s_apUnitPlots[i];
+
+		if (pLoopPlot->area() == pArea)
 		{
-			if (pLoopPlot->area() == pArea)
+			if (pLoopPlot->getTeam() == getID())
 			{
-				if (pLoopPlot->getTeam() == getID())
-				{
-					iCount += pLoopPlot->plotCount(PUF_canDefendEnemy, getLeaderID(), false, NO_PLAYER, NO_TEAM, PUF_isVisible, getLeaderID());
-				}
+				iCount += pLoopPlot->plotCount(PUF_canDefendEnemy, getLeaderID(), false, NO_PLAYER, NO_TEAM, PUF_isVisible, getLeaderID());
 			}
 		}
 	}
+
+#ifdef BRIDGED_PROFILE
+	// MAP_COUNTS_VERIFY also counts the stock way, over the whole map.
+	if (GC.getMapINLINE().isMapCountsVerify())
+	{
+		static BridgedProfileSample kWrong = { "enemy danger by area verify: COUNT DIFFERS FROM THE WHOLE-MAP COUNT" };
+		int iStockCount = 0;
+		for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+		{
+			pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+			if ((pLoopPlot->area() == pArea) && (pLoopPlot->getTeam() == getID()))
+			{
+				iStockCount += pLoopPlot->plotCount(PUF_canDefendEnemy, getLeaderID(), false, NO_PLAYER, NO_TEAM, PUF_isVisible, getLeaderID());
+			}
+		}
+		if (iStockCount != iCount)
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
 
 	return iCount;
 }

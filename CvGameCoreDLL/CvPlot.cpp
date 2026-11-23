@@ -5369,6 +5369,7 @@ void CvPlot::setBonusType(BonusTypes eNewValue)
 
 		updatePlotGroupBonus(false);
 		m_eBonusType = eNewValue;
+		GC.getMapINLINE().setBonusPlotsDirty();	// see CvMap::getBonusPlotIndices()
 		cityBuildsChanged();	// see CvCityAI::AI_isBestBuildKept()
 		GC.getMapINLINE().foundValuesChanged(this, 3, 7);	// see CvPlayerAI::AI_refreshFoundValues()
 		updatePlotGroupBonus(true);
@@ -8639,6 +8640,7 @@ void CvPlot::addUnit(CvUnit* pUnit, bool bUpdate)
 	}
 
 	// keep the map's team index: see CvMap.cpp
+	GC.getMapINLINE().changeBlockAllUnits(getX_INLINE(), getY_INLINE(), 1);
 	if (pUnit->canAttack())
 	{
 		GC.getMapINLINE().changeBlockUnits(getX_INLINE(), getY_INLINE(), pUnit->getTeam(), 1);
@@ -8670,6 +8672,7 @@ void CvPlot::removeUnit(CvUnit* pUnit, bool bUpdate)
 			FAssertMsg(::getUnit(pUnitNode->m_data)->at(getX_INLINE(), getY_INLINE()), "The current unit instance is expected to be at getX_INLINE and getY_INLINE");
 			m_units.deleteNode(pUnitNode);
 			// keep the map's team index: see CvMap.cpp
+			GC.getMapINLINE().changeBlockAllUnits(getX_INLINE(), getY_INLINE(), -1);
 			if (pUnit->canAttack())
 			{
 				GC.getMapINLINE().changeBlockUnits(getX_INLINE(), getY_INLINE(), pUnit->getTeam(), -1);

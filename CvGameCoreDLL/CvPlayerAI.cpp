@@ -16129,16 +16129,64 @@ int CvPlayerAI::AI_countNumAreaHostileUnits(CvArea* pArea, bool bPlayer, bool bT
 
 	iCount = 0;
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	// Units are counted, so only the plots with a unit are looked at; and unless plots with no
+	// owner count, only those in the blocks where a team whose plots count owns one. See
+	// CvMap::getPlotsWithUnits().
+	unsigned long long uiOwnerTeams = 0;
+
+	if (bPlayer || bTeam)
 	{
-		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
-		if ((pLoopPlot->area() == pArea) && pLoopPlot->isVisible(getTeam(), false) && 
-			((bPlayer && pLoopPlot->getOwnerINLINE() == getID()) || (bTeam && pLoopPlot->getTeam() == getTeam()) 
+		uiOwnerTeams |= (1ULL << getTeam());
+	}
+
+	if (bHostile)
+	{
+		for (iI = 0; iI < MAX_TEAMS; iI++)
+		{
+			if (GET_TEAM(getTeam()).isAtWar((TeamTypes)iI))
+			{
+				uiOwnerTeams |= (1ULL << iI);
+			}
+		}
+	}
+
+	static std::vector<CvPlot*> s_apUnitPlots;
+	GC.getMapINLINE().getPlotsWithUnits(uiOwnerTeams, bNeutral, s_apUnitPlots);
+
+	for (size_t i = 0; i < s_apUnitPlots.size(); i++)
+	{
+		pLoopPlot = s_apUnitPlots[i];
+		if ((pLoopPlot->area() == pArea) && pLoopPlot->isVisible(getTeam(), false) &&
+			((bPlayer && pLoopPlot->getOwnerINLINE() == getID()) || (bTeam && pLoopPlot->getTeam() == getTeam())
 				|| (bNeutral && !pLoopPlot->isOwned()) || (bHostile && pLoopPlot->isOwned() && GET_TEAM(getTeam()).isAtWar(pLoopPlot->getTeam()))))
 			{
 			iCount += pLoopPlot->plotCount(PUF_isEnemy, getID(), false, NO_PLAYER, NO_TEAM, PUF_isVisible, getID());
 		}
 	}
+
+#ifdef BRIDGED_PROFILE
+	// MAP_COUNTS_VERIFY also counts the stock way, over the whole map.
+	if (GC.getMapINLINE().isMapCountsVerify())
+	{
+		static BridgedProfileSample kWrong = { "area hostile units verify: COUNT DIFFERS FROM THE WHOLE-MAP COUNT" };
+		int iStockCount = 0;
+		for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+		{
+			pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
+			if ((pLoopPlot->area() == pArea) && pLoopPlot->isVisible(getTeam(), false) &&
+				((bPlayer && pLoopPlot->getOwnerINLINE() == getID()) || (bTeam && pLoopPlot->getTeam() == getTeam())
+					|| (bNeutral && !pLoopPlot->isOwned()) || (bHostile && pLoopPlot->isOwned() && GET_TEAM(getTeam()).isAtWar(pLoopPlot->getTeam()))))
+			{
+				iStockCount += pLoopPlot->plotCount(PUF_isEnemy, getID(), false, NO_PLAYER, NO_TEAM, PUF_isVisible, getID());
+			}
+		}
+		if (iStockCount != iCount)
+		{
+			bridgedProfileAdd(&kWrong, 0);
+		}
+	}
+#endif
+
 	return iCount;
 }
 

@@ -296,6 +296,25 @@ public:
 	void updatePlotTeams(const CvPlot* pPlot);
 	void setTeamIndexDirty();
 
+	// Every plot with a unit of any kind on it, for counts of units that used to look at every
+	// plot of the map. With bAnyOwner false, the plots of a block are left out unless a team of
+	// uiOwnerTeams owns a plot in it, so no plot those teams own is missed. The order is by
+	// block, not by plot index.
+	void getPlotsWithUnits(unsigned long long uiOwnerTeams, bool bAnyOwner, std::vector<CvPlot*>& apPlots) const;
+	void changeBlockAllUnits(int iX, int iY, int iChange);
+
+	// The indices of the plots with a bonus on them, whether or not anyone can see it, in plot
+	// index order: all of them, or those with one bonus. Worked out again for the whole map
+	// after any plot's bonus changes (CvPlot::setBonusType) or a game is loaded. A list stays
+	// valid until the next bonus change.
+	const std::vector<int>& getBonusPlotIndices() const;
+	const std::vector<int>& getBonusPlotIndices(BonusTypes eBonus) const;
+	void setBonusPlotsDirty() { m_bBonusPlotsDirty = true; }
+
+	// MAP_COUNTS_VERIFY, a global define for profile builds: the counts taken from the lists
+	// above are also taken the stock way, over the whole map. False in other builds.
+	bool isMapCountsVerify() const;
+
 	// The indices of the plots in an area, in plot index order, for scans that only want the
 	// plots of one area (a land unit's AI looking for a plot it can reach). Worked out again
 	// for the whole map after any plot changes area (CvPlot::setArea) or a game is loaded.
@@ -351,6 +370,7 @@ protected:
 	mutable int m_iTeamBlocksWide;
 	mutable std::vector<unsigned short> m_aiBlockTeamUnits;				// per block and team: attacking units there
 	mutable std::vector<unsigned short> m_aiBlockTeamOwnedPlots;		// per block and team: plots owned there
+	mutable std::vector<unsigned short> m_aiBlockAllUnits;				// per block: units of any kind there
 	mutable std::vector<unsigned long long> m_aiBlockUnitTeams;			// per block: a bit for each team with such a unit
 	mutable std::vector<unsigned long long> m_aiBlockOwnerTeams;		// per block: a bit for each team owning a plot
 	mutable std::vector<unsigned long long> m_aiPlotUnitTeams;			// per plot: as for the blocks
@@ -360,6 +380,9 @@ protected:
 	mutable bool m_bAreaPlotsDirty;
 	unsigned int m_uiRoutesSeen;	// a bit per route type: see isRouteSeen()
 	mutable std::map<int, std::vector<int> > m_aaiAreaPlots;	// by area ID: see getAreaPlotIndices()
+	mutable bool m_bBonusPlotsDirty;
+	mutable std::vector<int> m_aiBonusPlots;					// see getBonusPlotIndices()
+	mutable std::vector<std::vector<int> > m_aaiBonusPlots;	// by bonus type
 
 	bool m_bSymbolsDeferred;		// CvGame::update() is running: keep symbol updates for its end
 	mutable int m_iCityLayoutUpdates;	// layouts out of the active team's sight that the exe may still
@@ -368,6 +391,7 @@ protected:
 	bool m_bSymbolsStale;			// some plot's symbols were not made because nobody could see them
 
 	void rebuildTeamIndex() const;
+	void rebuildBonusPlots() const;
 	unsigned long long calculatePlotUnitTeams(const CvPlot* pPlot, unsigned long long* puiReachTeams) const;
 	void changeBlockTeamCount(std::vector<unsigned short>& aiCounts, std::vector<unsigned long long>& aiBlockTeams, int iX, int iY, TeamTypes eTeam, int iChange);
 	bool isTeamInBlocks(const std::vector<unsigned long long>& aiBlockTeams, int iX, int iY, int iRange, unsigned long long uiTeams) const;
