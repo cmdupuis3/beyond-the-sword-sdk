@@ -560,6 +560,154 @@ CvPlot* KmodPathFinder::GetPathEndTurnPlot() const
 	return node ? GC.getMapINLINE().plotSorenINLINE(node->m_iX, node->m_iY) : NULL;
 }
 
+//
+// The weight of the heuristic for a group: the search takes every step to the destination
+// to cost at least this many times PATH_MOVEMENT_WEIGHT, and is only right if none costs
+// less.
+//
+// The stock pathCost charges a step for the movement points it uses: what the plot costs to
+// enter, or, when that leaves the group none, all the points it had left. Stock takes a
+// step to cost one point at the least, because a group can have as little as one point
+// left. But every number of points a step can cost is made of the same few: what a plot
+// costs to enter (a whole move, or half of one for a unit with a double move), what a step
+// along a route on the map costs, the moves a unit has in a turn, and the points the group
+// has left now. So is every number of points the group can have left along a path, and the
+// greatest number that divides all of them divides whatever a step costs. A step costs
+// something, so it costs at least that: 30 or 60 points before any route is on the map,
+// and 2 once there are railroads beside faster roads. With that weight the search heads for
+// the destination instead of spreading round the start.
+//
+// Tier 2 (see BridgedTiers.h): a path costs what it did, but the plots are looked at in
+// another order, so one of two paths of equal cost can be chosen differently.
+// PATH_STOCK_HEURISTIC=1 is the off switch; a REPRODUCE_BTS build keeps the weight 1.
+//
+static bool pathStrongHeuristic()
+{
+#ifdef REPRODUCE_BTS
+	return false;
+#else
+	static int iOff = -1;
+
+	if (iOff == -1)
+	{
+		iOff = ((GC.getDefineINT("PATH_STOCK_HEURISTIC") != 0) ? 1 : 0);
+	}
+
+	return (iOff == 0);
+#endif
+}
+
+static int pathGcd(int iA, int iB)
+{
+	while (iB != 0)
+	{
+		const int iRest = iA % iB;
+		iA = iB;
+		iB = iRest;
+	}
+
+	return iA;
+}
+
+static int pathHeuristicWeight(const CvSelectionGroup* pGroup)
+{
+	if (!pathStrongHeuristic())
+	{
+		return 1;
+	}
+
+	const int iNumTerrains = GC.getNumTerrainInfos();
+	const int iNumFeatures = GC.getNumFeatureInfos();
+	const int iNumRoutes = GC.getNumRouteInfos();
+
+	// a plot that costs nothing to enter is charged one point (CvPlot::movementCost())
+	for (int iI = 0; iI < iNumTerrains; iI++)
+	{
+		if (GC.getTerrainInfo((TerrainTypes)iI).getMovementCost() <= 0)
+		{
+			return 1;
+		}
+	}
+	for (int iI = 0; iI < iNumFeatures; iI++)
+	{
+		if (GC.getFeatureInfo((FeatureTypes)iI).getMovementCost() <= 0)
+		{
+			return 1;
+		}
+	}
+
+	int iWeight = GC.getMOVE_DENOMINATOR();
+
+	for (CLLNode<IDInfo>* pUnitNode = pGroup->headUnitNode(); pUnitNode != NULL; pUnitNode = pGroup->nextUnitNode(pUnitNode))
+	{
+		const CvUnit* pLoopUnit = ::getUnit(pUnitNode->m_data);
+
+		if (pLoopUnit == NULL)
+		{
+			continue;
+		}
+
+		iWeight = pathGcd(iWeight, pLoopUnit->maxMoves());
+
+		if (pLoopUnit->movesLeft() > 0)
+		{
+			iWeight = pathGcd(iWeight, pLoopUnit->movesLeft());
+		}
+
+		if (pLoopUnit->flatMovementCost() || (pLoopUnit->getDomainType() == DOMAIN_AIR))
+		{
+			continue;	// every plot costs it a whole move
+		}
+
+		// half a move for a plot the unit has a double move on
+		bool bDoubleMove = pLoopUnit->isHillsDoubleMove();
+		for (int iI = 0; !bDoubleMove && (iI < iNumTerrains); iI++)
+		{
+			bDoubleMove = pLoopUnit->isTerrainDoubleMove((TerrainTypes)iI);
+		}
+		for (int iI = 0; !bDoubleMove && (iI < iNumFeatures); iI++)
+		{
+			bDoubleMove = pLoopUnit->isFeatureDoubleMove((FeatureTypes)iI);
+		}
+		if (bDoubleMove)
+		{
+			iWeight = pathGcd(iWeight, GC.getMOVE_DENOMINATOR() / 2);
+		}
+
+		// a step from a plot with one route to a plot with another, of the routes on the map
+		const CvTeam& kTeam = GET_TEAM(pLoopUnit->getTeam());
+		for (int iI = 0; iI < iNumRoutes; iI++)
+		{
+			if (!GC.getMapINLINE().isRouteSeen((RouteTypes)iI))
+			{
+				continue;
+			}
+
+			for (int iJ = iI; iJ < iNumRoutes; iJ++)
+			{
+				if (!GC.getMapINLINE().isRouteSeen((RouteTypes)iJ))
+				{
+					continue;
+				}
+
+				const int iRouteCost = std::max(GC.getRouteInfo((RouteTypes)iI).getMovementCost() + kTeam.getRouteChange((RouteTypes)iI), GC.getRouteInfo((RouteTypes)iJ).getMovementCost() + kTeam.getRouteChange((RouteTypes)iJ));
+				const int iRouteFlatCost = std::max(GC.getRouteInfo((RouteTypes)iI).getFlatMovementCost() * pLoopUnit->baseMoves(), GC.getRouteInfo((RouteTypes)iJ).getFlatMovementCost() * pLoopUnit->baseMoves());
+				const int iStepCost = std::min(iRouteCost, iRouteFlatCost);
+
+				if (iStepCost < 1)
+				{
+					return 1;
+				}
+
+				iWeight = pathGcd(iWeight, iStepCost);
+			}
+		}
+	}
+
+	return std::max(1, iWeight);
+}
+
+
 void KmodPathFinder::SetSettings(const CvPathSettings& new_settings)
 {
 	// whenever settings are changed, check that we have the right map size.
@@ -597,7 +745,15 @@ void KmodPathFinder::SetSettings(const CvPathSettings& new_settings)
 		// PATH_MOVEMENT_WEIGHT + PATH_STEP_WEIGHT whatever routes exist, and the weight has to
 		// be 1. The exe's pathfinder uses the same heuristic. (K-Mod's weight, the cheapest
 		// route step, overestimates in that case.)
-		settings.iHeuristicWeight = 1;
+		// pathHeuristicWeight() gives 1 too unless every number of points a step of this
+		// group can cost is known to be a multiple of something larger.
+		settings.iHeuristicWeight = pathHeuristicWeight(settings.pGroup);
+#ifdef BRIDGED_PROFILE
+		{
+			static BridgedProfileSample aSamples[4] = { { "path heuristic: requests with weight 1" }, { "path heuristic: requests with weight 2 to 9" }, { "path heuristic: requests with weight 10 to 29" }, { "path heuristic: requests with weight 30 or more" } };
+			bridgedProfileAdd(&aSamples[(settings.iHeuristicWeight <= 1) ? 0 : ((settings.iHeuristicWeight < 10) ? 1 : ((settings.iHeuristicWeight < 30) ? 2 : 3))], 0);
+		}
+#endif
 	}
 
 	if (settings.iHeuristicWeight != iOldHeuristicWeight)
