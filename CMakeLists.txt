@@ -108,7 +108,9 @@ elseif(BRIDGED_PGO STREQUAL "USE")
   target_compile_options(CvGameCoreDLL PRIVATE "-fprofile-use=${BRIDGED_PGO_PROFILE}"
     -Wno-profile-instr-unprofiled -Wno-profile-instr-out-of-date)
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${BRIDGED_PGO_PROFILE}")
-  set_property(TARGET CvGameCoreDLL APPEND PROPERTY OBJECT_DEPENDS "${BRIDGED_PGO_PROFILE}")
+  # A source-file property: set on the target it does nothing, and a new profile at the
+  # same path left every object as it was.
+  set_property(SOURCE ${sdk_sources} APPEND PROPERTY OBJECT_DEPENDS "${BRIDGED_PGO_PROFILE}")
 elseif(NOT BRIDGED_PGO STREQUAL "OFF")
   message(FATAL_ERROR "BRIDGED_PGO must be OFF, TRAIN or USE")
 endif()
