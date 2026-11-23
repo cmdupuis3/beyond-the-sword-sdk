@@ -12,8 +12,7 @@ performance work on it. Read this before changing anything under `CvGameCoreDLL/
 | 3 | Not deterministic: the game may depend on the clock, threads or memory layout | `#ifdef NON_DETERMINISM_OK` ... `#else` deterministic `#endif` | `--tier 3` |
 
 Decide the tier before writing the change. `CvGameCoreDLL/BridgedTiers.h` has the full
-definitions; `docs/behaviour-changes.md` lists every tier 2 and tier 3 change and must get
-an entry for each new one.
+definitions and `docs/tiers.md` says what tier 1 allows and how each tier is checked.
 
 How to tell them apart:
 
@@ -60,6 +59,31 @@ A change that is meant to be exact and still changes the game: look for an order
 by memory address, and for AI values the stock code works out once a game turn on first
 use (`m_iStrategyHashCacheTurn`, `m_iAveragesCacheTurn`); running AI code early fixes them
 early.
+
+## Documenting an optimization
+
+Every optimization in the DLL, of any tier, has one short doc of its own:
+`docs/optimizations/<slug>.md`. Do not add to one long file.
+
+- Keep it to about 15 to 30 lines: a small table (tier, off switch, scales with map size,
+  scales with game era, value, commits), then "What it does", "What differs from stock",
+  "Measured" and, if something was not checked, "Not checked". Copy the layout of an
+  existing doc.
+- Add a row to `docs/optimizations/README.md`. That file is a bare table and stays one:
+  optimization name (linked), tier, scales with map size, scales with game era, value.
+  No prose beyond the legend under it.
+- Scales with map size: `grows`, `flat` or `shrinks`, by the share of turn time saved on
+  the huge seeded game against the standard one; `not measured` if there is no huge run.
+- Scales with game era: `late` if the saving grows as the game goes on (the work follows
+  units, cities, improvements, deals, the known map), `early` if it is mostly in the
+  early game, `const` if it is about the same share throughout. `compare_bench.py` gives
+  the times by turn range. Late ones are usually, not always, the more valuable: late
+  turns are the long ones.
+- Value: `very high` (about a fifth of the AI turn time or more), `high` (5% to 20%),
+  `medium` (1% to 5%), `low` (under 1% or no speed effect). Rate an opt-in change by what
+  it is worth switched on. When unsure, the lower one.
+- Long measurements, verification tables and the story of how it was found belong in the
+  commit message, not in the doc.
 
 ## Conventions
 

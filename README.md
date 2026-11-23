@@ -86,9 +86,10 @@ many of them the DLL has (`tools/build_dll.py --tier N`):
 | 3 | `NON_DETERMINISM_OK` | Tiers 1 to 3. The game can differ from one run to the next. | `tmp/dll-build-tier3` |
 
 `CvGameCoreDLL/BridgedTiers.h` defines the tiers and says how a change is marked in the
-source. [docs/behaviour-changes.md](docs/behaviour-changes.md) lists the changes of tiers 2
-and 3, the tier 1 changes that a player or a mod could still notice, and how the tiers are
-checked. Nothing is in tier 3 yet, so a `--tier 3` DLL plays the same game as the default.
+source. [docs/tiers.md](docs/tiers.md) says what tier 1 allows and how the tiers are
+checked. [docs/optimizations/](docs/optimizations/README.md) has a table of every
+optimization with its tier, how it scales with map size and what it is worth, and a short
+doc for each. A `--tier 3` DLL plays the default build's game unless a human is playing.
 
 The profile in `pgo/` was collected on the default build. A `--tier 1` build uses it too;
 the few functions that differ are optimised without it.
