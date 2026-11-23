@@ -27,7 +27,7 @@
 #define FLTA_GROWTH_FACTOR	(2)
 
 template <class T>
-class FFreeListTrashArray : public FFreeListArrayBase<T>
+class FFreeListTrashArray final : public FFreeListArrayBase<T>	// final: its virtual calls are bound at compile time
 {
 public:
 

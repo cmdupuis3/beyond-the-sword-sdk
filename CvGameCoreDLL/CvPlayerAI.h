@@ -12,7 +12,8 @@ class CvEventTriggerInfo;
 
 struct FoundValueSweep;
 
-class CvPlayerAI : public CvPlayer
+// final: nothing derives from it, so a call through a CvPlayerAI is bound at compile time
+class CvPlayerAI final : public CvPlayer
 {
 
 public:

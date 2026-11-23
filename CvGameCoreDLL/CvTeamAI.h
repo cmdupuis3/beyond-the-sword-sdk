@@ -7,7 +7,8 @@
 
 #include "CvTeam.h"
 
-class CvTeamAI : public CvTeam
+// final: nothing derives from it, so a call through a CvTeamAI is bound at compile time
+class CvTeamAI final : public CvTeam
 {
 
 public:

@@ -9,7 +9,8 @@
 
 typedef std::vector<std::pair<UnitAITypes, int> > UnitTypeWeightArray;
 
-class CvCityAI : public CvCity
+// final: nothing derives from it, so a call through a CvCityAI is bound at compile time
+class CvCityAI final : public CvCity
 {
 
 public:

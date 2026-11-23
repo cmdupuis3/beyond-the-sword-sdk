@@ -9,7 +9,8 @@
 
 class CvCity;
 
-class CvUnitAI : public CvUnit
+// final: nothing derives from it, so a call through a CvUnitAI is bound at compile time
+class CvUnitAI final : public CvUnit
 {
 
 public:

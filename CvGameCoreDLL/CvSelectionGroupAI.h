@@ -7,7 +7,8 @@
 
 #include "CvSelectionGroup.h"
 
-class CvSelectionGroupAI : public CvSelectionGroup
+// final: nothing derives from it, so a call through a CvSelectionGroupAI is bound at compile time
+class CvSelectionGroupAI final : public CvSelectionGroup
 {
 
 public:
