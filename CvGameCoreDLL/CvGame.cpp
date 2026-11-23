@@ -32,6 +32,13 @@
 
 // Public Functions...
 
+// The stream of the AI decision being made, if it has one: see CvAIRandScope in CvGame.h.
+static CvRandom* s_pAIRand = NULL;
+
+// Mixed into every such stream. It is 0 unless the game was loaded with "new random seed on
+// reload", which gives the game's own stream a new seed and so these streams one too.
+static unsigned long s_ulAIRandSalt = 0;
+
 CvGame::CvGame()
 {
 	m_aiRankPlayer = new int[MAX_PLAYERS];        // Ordered by rank...
@@ -412,6 +419,9 @@ void CvGame::reset(HandicapTypes eHandicap, bool bConstructorCall)
 	//--------------------------------
 	// Uninit class
 	uninit();
+
+	s_pAIRand = NULL;	// see CvAIRandScope
+	s_ulAIRandSalt = 0;
 
 	m_iElapsedGameTurns = 0;
 	m_iStartTurn = 0;
@@ -7582,7 +7592,96 @@ CvRandom& CvGame::getSorenRand()
 
 int CvGame::getSorenRandNum(int iNum, const char* pszLog)
 {
+#ifdef BRIDGED_PROFILE
+	if (s_pAIRand != NULL)
+	{
+		// a draw that the decision's stream should have served
+		static BridgedProfileSample kSample = { "AI random stream: draws from the game's stream inside a decision" };
+		bridgedProfileAdd(&kSample, 0);
+	}
+#endif
 	return m_sorenRand.get(iNum, pszLog);
+}
+
+
+int CvGame::getAIRandNum(int iNum, const char* pszLog)
+{
+	if (s_pAIRand != NULL)
+	{
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample kSample = { "AI random stream: draws from a decision's stream" };
+		bridgedProfileAdd(&kSample, 0);
+#endif
+		return s_pAIRand->get(iNum, pszLog);
+	}
+
+	return m_sorenRand.get(iNum, pszLog);
+}
+
+
+bool CvGame::isAIRandomStock()
+{
+#ifdef REPRODUCE_BTS
+	return true;
+#else
+	static int iStock = -1;
+	if (iStock == -1)
+	{
+		iStock = ((GC.getDefineINT("AI_RANDOM_STOCK") != 0) ? 1 : 0);
+	}
+	return (iStock != 0);
+#endif
+}
+
+
+static unsigned long aiRandMix(unsigned long ulHash, unsigned long ulValue)
+{
+	ulHash ^= ulValue + 0x9e3779b9UL + (ulHash << 6) + (ulHash >> 2);
+	return ulHash;
+}
+
+CvAIRandScope::CvAIRandScope(AIRandDecisions eDecision, int iPlayer, int iID, int iState1, int iState2, int iState3) :
+	m_pOuter(s_pAIRand),
+	m_bOpen(false)
+{
+	if (CvGame::isAIRandomStock())
+	{
+		return;
+	}
+
+	unsigned long ulSeed = aiRandMix(GC.getInitCore().getSyncRandSeed(), s_ulAIRandSalt);
+	ulSeed = aiRandMix(ulSeed, (unsigned long)GC.getGameINLINE().getGameTurn());
+	ulSeed = aiRandMix(ulSeed, (unsigned long)eDecision);
+	ulSeed = aiRandMix(ulSeed, (unsigned long)iPlayer);
+	ulSeed = aiRandMix(ulSeed, (unsigned long)iID);
+	ulSeed = aiRandMix(ulSeed, (unsigned long)iState1);
+	ulSeed = aiRandMix(ulSeed, (unsigned long)iState2);
+	ulSeed = aiRandMix(ulSeed, (unsigned long)iState3);
+
+	// The generator is a linear one: seeds that are close give first numbers that are close.
+	// This spreads them out.
+	ulSeed ^= ulSeed >> 16;
+	ulSeed *= 0x85ebca6bUL;
+	ulSeed ^= ulSeed >> 13;
+	ulSeed *= 0xc2b2ae35UL;
+	ulSeed ^= ulSeed >> 16;
+
+	m_kRand.init(ulSeed);
+	s_pAIRand = &m_kRand;
+	m_bOpen = true;
+
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample aSamples[3] = { { "AI random stream: decisions, other" }, { "AI random stream: decisions, city production" }, { "AI random stream: decisions, technology" } };
+	bridgedProfileAdd(&aSamples[(eDecision == AI_RAND_PRODUCTION) ? 1 : ((eDecision == AI_RAND_TECH) ? 2 : 0)], 0);
+#endif
+}
+
+CvAIRandScope::~CvAIRandScope()
+{
+	if (m_bOpen)
+	{
+		s_pAIRand = m_pOuter;
+	}
 }
 
 
@@ -8069,6 +8168,7 @@ void CvGame::read(FDataStreamBase* pStream)
 		if (!isNetworkMultiPlayer())
 		{
 			m_sorenRand.reseed(timeGetTime());
+			s_ulAIRandSalt = m_sorenRand.getSeed();	// see CvAIRandScope
 		}
 	}
 

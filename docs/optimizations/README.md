@@ -39,6 +39,7 @@
 | [Groups heading for a plot counted per plot](mission-target-counts.md) | 1 | not measured | late | low |
 | [Plot grid tables known at compile time](plot-grid-tables.md) | 1 | not measured | const | low |
 | [Plot yields in one call](plot-yields-in-one-call.md) | 1 | not measured | late | low |
+| [AI choices draw from streams of their own](ai-random-streams.md) | 2 | not measured | not measured | low |
 | [Workers act as a team](worker-teams.md) | 2 | not measured | not measured | low |
 
 - Tier 1: reproduces stock BtS, the same game state on every turn. See [tiers](../tiers.md).
