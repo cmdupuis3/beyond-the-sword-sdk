@@ -10455,6 +10455,68 @@ bool CvUnitAI::AI_goody(int iRange)
 }
 
 
+//
+// The plots the other groups of an explorer's player are exploring towards. AI_explore() and
+// AI_exploreRange() leave out a plot within 3 of one. They asked the player about every plot
+// (CvPlayerAI::AI_plotTargetMissionAIs()), which looks through all the player's groups
+// whenever any group is heading anywhere near the plot, and the explorer's own group nearly
+// always is. The groups and what they are heading for do not change while an explorer
+// decides, so they are looked through once, when the first plot asks.
+//
+class ExploreTargets
+{
+public:
+	ExploreTargets(const CvUnit* pUnit) : m_pUnit(pUnit), m_bMade(false) {}
+
+	// The same answer as
+	// AI_plotTargetMissionAIs(pPlot, MISSIONAI_EXPLORE, the unit's group, iRange) > 0
+	bool isNear(const CvPlot* pPlot, int iRange)
+	{
+		if (!m_bMade)
+		{
+			make();
+		}
+
+		for (size_t iI = 0; iI < m_apTargets.size(); iI++)
+		{
+			if (stepDistance(pPlot->getX_INLINE(), pPlot->getY_INLINE(), m_apTargets[iI]->getX_INLINE(), m_apTargets[iI]->getY_INLINE()) <= iRange)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+private:
+	void make()
+	{
+		const CvPlayer& kOwner = GET_PLAYER(m_pUnit->getOwnerINLINE());
+		int iLoop;
+
+		for (CvSelectionGroup* pLoopGroup = kOwner.firstSelectionGroup(&iLoop); pLoopGroup != NULL; pLoopGroup = kOwner.nextSelectionGroup(&iLoop))
+		{
+			// a group without units counts for nothing there
+			if ((pLoopGroup != m_pUnit->getGroup()) && (pLoopGroup->AI_getMissionAIType() == MISSIONAI_EXPLORE) && (pLoopGroup->getNumUnits() > 0))
+			{
+				const CvPlot* pMissionPlot = pLoopGroup->AI_getMissionAIPlot();
+
+				if (pMissionPlot != NULL)
+				{
+					m_apTargets.push_back(pMissionPlot);
+				}
+			}
+		}
+
+		m_bMade = true;
+	}
+
+	const CvUnit* m_pUnit;
+	bool m_bMade;
+	std::vector<const CvPlot*> m_apTargets;
+};
+
+
 // Returns true if a mission was pushed...
 bool CvUnitAI::AI_explore()
 {
@@ -10474,6 +10536,7 @@ bool CvUnitAI::AI_explore()
 	pBestExplorePlot = NULL;
 	
 	bool bNoContact = (GC.getGameINLINE().countCivTeamsAlive() > GET_TEAM(getTeam()).getHasMetCivCount(true));
+	ExploreTargets kOtherExplorers(this);
 
 	// The random draw below is made only for plots AI_plotValid() accepts, so going through
 	// only those plots, in the same order, draws the same numbers.
@@ -10528,7 +10591,7 @@ bool CvUnitAI::AI_explore()
 				{
 					if (!(pLoopPlot->isVisibleEnemyUnit(this)))
 					{
-						if (GET_PLAYER(getOwnerINLINE()).AI_plotTargetMissionAIs(pLoopPlot, MISSIONAI_EXPLORE, getGroup(), 3) == 0)
+						if (!kOtherExplorers.isNear(pLoopPlot, 3))
 						{
 							if (!atPlot(pLoopPlot) && generatePath(pLoopPlot, MOVE_NO_ENEMY_TERRITORY, true, &iPathTurns))
 							{
@@ -10594,6 +10657,7 @@ bool CvUnitAI::AI_exploreRange(int iRange)
 	pBestExplorePlot = NULL;
 
 	int iImpassableCount = GET_PLAYER(getOwnerINLINE()).AI_unitImpassableCount(getUnitType());
+	ExploreTargets kOtherExplorers(this);
 
 	for (iDX = -(iSearchRange); iDX <= iSearchRange; iDX++)
 	{
@@ -10640,7 +10704,7 @@ bool CvUnitAI::AI_exploreRange(int iRange)
 						{
 							PROFILE("AI_exploreRange 3");
 
-							if (GET_PLAYER(getOwnerINLINE()).AI_plotTargetMissionAIs(pLoopPlot, MISSIONAI_EXPLORE, getGroup(), 3) == 0)
+							if (!kOtherExplorers.isNear(pLoopPlot, 3))
 							{
 								PROFILE("AI_exploreRange 4");
 
