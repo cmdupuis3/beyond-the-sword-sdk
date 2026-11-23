@@ -10475,10 +10475,15 @@ bool CvUnitAI::AI_explore()
 	
 	bool bNoContact = (GC.getGameINLINE().countCivTeamsAlive() > GET_TEAM(getTeam()).getHasMetCivCount(true));
 
-	for (iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+	// The random draw below is made only for plots AI_plotValid() accepts, so going through
+	// only those plots, in the same order, draws the same numbers.
+	const std::vector<int>* paiScanPlots = AI_plotValidScanList();	// only the plots AI_plotValid() can accept
+	const int iNumScanPlots = ((paiScanPlots != NULL) ? (int)paiScanPlots->size() : GC.getMapINLINE().numPlotsINLINE());
+	for (int iScan = 0; iScan < iNumScanPlots; iScan++)
 	{
 		PROFILE("AI_explore 1");
 
+		iI = ((paiScanPlots != NULL) ? (*paiScanPlots)[iScan] : iScan);
 		pLoopPlot = GC.getMapINLINE().plotByIndexINLINE(iI);
 
 		if (AI_plotValid(pLoopPlot))
@@ -16922,11 +16927,6 @@ bool CvUnitAI::AI_plotValid(CvPlot* pPlot)
 }
 
 
-// The plots AI_plotValid() can say yes to, as plot indices in plot index order, when that is
-// fewer than every plot: for a land unit that cannot move over all terrain, the plots of its
-// area. NULL when any plot can be valid. A scan of the map that does nothing for a plot
-// AI_plotValid() rejects can go through this list instead: it meets the same valid plots in
-// the same order. The unit must stay on its plot while the list is in use.
 // The most plots this unit, or a group it is in, can move in one turn: a step costs no less
 // than CvPlot::movementCost() can make it, which is the cheapest of the routes on the map
 // for the team (CvMap::isRouteSeen()) or of a plot without a route, and never less than 1,
@@ -16979,6 +16979,11 @@ int CvUnitAI::AI_minPathTurns(const CvPlot* pPlot, int iMaxStepsPerTurn) const
 }
 
 
+// The plots AI_plotValid() can say yes to, as plot indices in plot index order, when that is
+// fewer than every plot: for a land unit that cannot move over all terrain, the plots of its
+// area. NULL when any plot can be valid. A scan of the map that does nothing for a plot
+// AI_plotValid() rejects can go through this list instead: it meets the same valid plots in
+// the same order. The unit must stay on its plot while the list is in use.
 const std::vector<int>* CvUnitAI::AI_plotValidScanList() const
 {
 	if ((getDomainType() == DOMAIN_LAND) && !canMoveAllTerrain())
