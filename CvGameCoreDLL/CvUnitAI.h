@@ -46,6 +46,12 @@ public:
 
 	int AI_sacrificeValue(const CvPlot* pPlot) const;
 
+	// see AI_isIdleKept() in CvUnitAI.cpp
+	static bool AI_idleUnitRules();
+	bool AI_isIdleKept() const;
+	void AI_noteDecision(bool bIdle);
+	void AI_noteIdleKept();
+
 	void read(FDataStreamBase* pStream);
 	void write(FDataStreamBase* pStream);
 
@@ -56,6 +62,15 @@ protected:
 	UnitAITypes m_eUnitAIType;
 
 	int m_iAutomatedAbortTurn;
+
+	// the unit's last decisions as its group's head, for AI_isIdleKept(); not saved
+	int m_iIdleLastTurn;		// the last turn it stayed idle, or -1
+	int m_iIdleSinceTurn;		// the turn of the decision its idle turns since rest on
+	int m_iIdlePlot;
+	int m_iIdleDamage;
+	int m_iIdleCities;
+	int m_iIdleGroupUnits;
+	bool m_bIdleRepeated;		// that decision was the second idle turn in a row
 
 	void AI_animalMove();
 	void AI_settleMove();
