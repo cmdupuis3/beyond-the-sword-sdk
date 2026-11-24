@@ -37,6 +37,7 @@
 
 CvPlayer::CvPlayer()
 {
+	m_iBurstPreInflatedCosts = MIN_INT;
 	m_aiSeaPlotYield = new int[NUM_YIELD_TYPES];
 	m_aiYieldRateModifier = new int[NUM_YIELD_TYPES];
 	m_aiCapitalYieldRateModifier = new int[NUM_YIELD_TYPES];
@@ -6383,8 +6384,34 @@ int CvPlayer::calculateUnitSupply(int& iPaidUnits, int& iBaseSupplyCost) const
 }
 
 
+//
+// The costs as worked out on the main thread before a burst of work on several threads
+// (BridgedThreads.h): the answer asks Python (getExtraCost), which a burst's thread may not.
+// Nothing changes the costs while the burst runs, so the kept answer is the answer.
+//
+void CvPlayer::setBurstPreInflatedCosts(bool bKeep)
+{
+	m_iBurstPreInflatedCosts = MIN_INT;
+
+	if (bKeep)
+	{
+		m_iBurstPreInflatedCosts = calculatePreInflatedCosts();
+	}
+}
+
 int CvPlayer::calculatePreInflatedCosts() const
 {
+	if (BridgedThreads::isInBurst())
+	{
+		if (m_iBurstPreInflatedCosts != MIN_INT)
+		{
+			return m_iBurstPreInflatedCosts;
+		}
+
+		BridgedThreads::needMainThread();
+		return 0;
+	}
+
 	// Asked every time a player's costs are worked out, which the AI does over and over
 	// while it sets its commerce rates and weighs trades; the stock getExtraCost in
 	// CvGameUtils.py only answers 0. A mod that has left it so can set the define

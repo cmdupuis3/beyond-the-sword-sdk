@@ -188,8 +188,8 @@ def main():
         rows_by_source = {Path(row['file']).resolve(): row for row in database}
         if len(rows_by_source) != len(database) or set(rows_by_source) != expected_sources | adapter_sources:
             raise RuntimeError('compile inventory differs from inherited Makefile direct sources')
-        # the 99 units of the inherited SDK, KmodPathFinder.cpp and CvInfoTables.cpp
-        if len(expected_sources) != 101:
+        # the 99 units of the inherited SDK, KmodPathFinder.cpp, CvInfoTables.cpp and BridgedThreads.cpp
+        if len(expected_sources) != 102:
             raise RuntimeError(f'inherited SDK inventory changed: {len(expected_sources)} units')
         exception_metadata = {}
         for source, row in rows_by_source.items():

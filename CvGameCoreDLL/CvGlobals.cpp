@@ -3,6 +3,7 @@
 //
 #include "CvGameCoreDLL.h"
 #include "CvGlobals.h"
+#include "BridgedThreads.h"
 #include "CvRandom.h"
 #include "CvGameAI.h"
 #include "CvDLLInterfaceIFaceBase.h"
@@ -2626,15 +2627,27 @@ namespace
 		return NULL;
 	}
 
+	// The key is written last: a thread of a burst that finds it set finds the rest written
+	// (x86 keeps stores in order; the fence keeps the compiler from moving them). Entries are
+	// only made under BridgedThreads::lock() while a burst is under way.
 	inline void defineCacheKeep(DefineCacheEntry* pFree, const char* szName)
 	{
 		const size_t uiLength = strlen(szName);
 		if (uiLength < DEFINE_CACHE_NAME)
 		{
 			memcpy(pFree->szName, szName, uiLength + 1);
+			__atomic_signal_fence(__ATOMIC_SEQ_CST);
 			pFree->szKey = szName;
 		}
 	}
+
+	// Runs a first lookup under the lock on a thread of a burst: see BridgedThreads.h
+	struct DefineBurstLock
+	{
+		bool bLocked;
+		DefineBurstLock() : bLocked(BridgedThreads::isInBurst()) { if (bLocked) { BridgedThreads::lock(); } }
+		~DefineBurstLock() { if (bLocked) { BridgedThreads::unlock(); } }
+	};
 
 #ifdef BRIDGED_PROFILE
 	int s_iDefineCacheVerify = -1;	// read again after the defines change: see definesChanged()
@@ -2692,6 +2705,16 @@ int CvGlobals::getDefineINT( const char * szName ) const
 		return pKept->iValue;
 	}
 
+	DefineBurstLock kLock;
+	if (kLock.bLocked)
+	{
+		pKept = defineCacheFind(s_aIntDefines, szName, &pFree);	// another thread may have kept it meanwhile
+		if (pKept != NULL)
+		{
+			return pKept->iValue;
+		}
+	}
+
 	int iReturn = 0;
 	GC.getDefinesVarSystem()->GetValue( szName, iReturn );
 
@@ -2722,6 +2745,16 @@ float CvGlobals::getDefineFLOAT( const char * szName ) const
 		return pKept->fValue;
 	}
 
+	DefineBurstLock kLock;
+	if (kLock.bLocked)
+	{
+		pKept = defineCacheFind(s_aFloatDefines, szName, &pFree);	// another thread may have kept it meanwhile
+		if (pKept != NULL)
+		{
+			return pKept->fValue;
+		}
+	}
+
 	float fReturn = 0;
 	GC.getDefinesVarSystem()->GetValue( szName, fReturn );
 
@@ -2736,6 +2769,7 @@ float CvGlobals::getDefineFLOAT( const char * szName ) const
 
 const char * CvGlobals::getDefineSTRING( const char * szName ) const
 {
+	DefineBurstLock kLock;
 	const char * szReturn = NULL;
 	GC.getDefinesVarSystem()->GetValue( szName, szReturn );
 	return szReturn;
