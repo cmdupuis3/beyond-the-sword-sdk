@@ -1933,9 +1933,6 @@ void CvPlayerAI::AI_unitUpdate()
 
 	CLLNode<int>* pCurrUnitNode;
 	CvSelectionGroup* pLoopSelectionGroup;
-	CLinkList<int> tempGroupCycle;
-	CLinkList<int> finalGroupCycle;
-	int iValue;
 
 	if (!hasBusyUnit())
 	{
@@ -1973,47 +1970,31 @@ void CvPlayerAI::AI_unitUpdate()
 		}
 		else
 		{
-			tempGroupCycle.clear();
-			finalGroupCycle.clear();
+			// The groups move in order of AI_movementPriority(), and in the order of the group
+			// cycle among those of the same priority. Stock went through the cycle once for
+			// each priority, 0 to 16, asking every group not yet placed for its priority
+			// again each time. The priority only reads the group, which nothing changes while
+			// the order is made, so each group is asked once and the list is sorted, stably,
+			// on it: the same order. (A priority below 0 would have gone with those of 0.)
+			std::vector<std::pair<int, int> > aGroupOrder;	// priority, group ID
 
-			pCurrUnitNode = headGroupCycleNode();
-
-			while (pCurrUnitNode != NULL)
-			{
-				tempGroupCycle.insertAtEnd(pCurrUnitNode->m_data);
-				pCurrUnitNode = nextGroupCycleNode(pCurrUnitNode);
-			}
-
-			iValue = 0;
-
-			while (tempGroupCycle.getLength() > 0)
-			{
-				pCurrUnitNode = tempGroupCycle.head();
-
-				while (pCurrUnitNode != NULL)
-				{
-					pLoopSelectionGroup = getSelectionGroup(pCurrUnitNode->m_data);
-					FAssertMsg(pLoopSelectionGroup != NULL, "selection group node with NULL selection group");
-
-					if (AI_movementPriority(pLoopSelectionGroup) <= iValue)
-					{
-						finalGroupCycle.insertAtEnd(pCurrUnitNode->m_data);
-						pCurrUnitNode = tempGroupCycle.deleteNode(pCurrUnitNode);
-					}
-					else
-					{
-						pCurrUnitNode = tempGroupCycle.next(pCurrUnitNode);
-					}
-				}
-
-				iValue++;
-			}
-
-			pCurrUnitNode = finalGroupCycle.head();
-
-			while (pCurrUnitNode != NULL)
+			for (pCurrUnitNode = headGroupCycleNode(); pCurrUnitNode != NULL; pCurrUnitNode = nextGroupCycleNode(pCurrUnitNode))
 			{
 				pLoopSelectionGroup = getSelectionGroup(pCurrUnitNode->m_data);
+				FAssertMsg(pLoopSelectionGroup != NULL, "selection group node with NULL selection group");
+
+				aGroupOrder.push_back(std::make_pair(std::max(0, AI_movementPriority(pLoopSelectionGroup)), pCurrUnitNode->m_data));
+			}
+
+			struct PriorityLess
+			{
+				bool operator()(const std::pair<int, int>& kA, const std::pair<int, int>& kB) const { return (kA.first < kB.first); }
+			};
+			std::stable_sort(aGroupOrder.begin(), aGroupOrder.end(), PriorityLess());
+
+			for (size_t iGroup = 0; iGroup < aGroupOrder.size(); iGroup++)
+			{
+				pLoopSelectionGroup = getSelectionGroup(aGroupOrder[iGroup].second);
 
 				if (NULL != pLoopSelectionGroup)  // group might have been killed by a previous group update
 				{
@@ -2022,8 +2003,6 @@ void CvPlayerAI::AI_unitUpdate()
 						break; // pointers could become invalid...
 					}
 				}
-
-				pCurrUnitNode = finalGroupCycle.next(pCurrUnitNode);
 			}
 		}
 	}
