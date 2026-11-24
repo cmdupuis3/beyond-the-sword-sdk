@@ -31,6 +31,7 @@
 | [Moving groups keep their path](moving-groups-keep-path.md) | 2 | grows | late | medium |
 | [Path searches the AI can do without](path-search-trimming.md) | 2 | grows | late | medium |
 | [Path searches head for the destination](path-heuristic-weight.md) | 2 | grows | not measured | medium |
+| [City-site plan kept by players without a settler](found-plan-kept.md) | 2 | flat | not measured | medium |
 | [City builds chosen on the human's turn](builds-on-human-turn.md) | 3 | shrinks | late | medium |
 | [AI classes and the free-list array marked final](final-ai-classes.md) | 1 | not measured | const | low |
 | [AI turns not played out for the human](ai-turns-not-played-out.md) | 1 | not measured | not measured | low |
