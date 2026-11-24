@@ -5372,6 +5372,28 @@ static int bestBuildKeepTurns()
 }
 
 
+void CvCityAI::AI_saveBestBuildState(BestBuildState& kState) const
+{
+	for (int iI = 0; iI < NUM_CITY_PLOTS; iI++)
+	{
+		kState.aiValue[iI] = m_aiBestBuildValue[iI];
+		kState.aeBuild[iI] = m_aeBestBuild[iI];
+	}
+	kState.bDirty = m_bBestBuildDirty;
+	kState.iTurn = m_iBestBuildTurn;
+}
+
+void CvCityAI::AI_restoreBestBuildState(const BestBuildState& kState)
+{
+	for (int iI = 0; iI < NUM_CITY_PLOTS; iI++)
+	{
+		m_aiBestBuildValue[iI] = kState.aiValue[iI];
+		m_aeBestBuild[iI] = kState.aeBuild[iI];
+	}
+	m_bBestBuildDirty = kState.bDirty;
+	m_iBestBuildTurn = kState.iTurn;
+}
+
 bool CvCityAI::AI_isBestBuildKept() const
 {
 	const int iKeepTurns = bestBuildKeepTurns();

@@ -2064,9 +2064,8 @@ int CvGame::getTeamClosenessScore(int** aaiDistances, int* aiStartingLocs)
 // The builds are used as they are (CvPlayerAI::AI_updateBestBuildsAhead()), which is why
 // they are tier 3.
 //
-// Single-player games only, every tenth of a second: the city-site scores of all the AI
-// players in one burst of work on several threads, and the builds of one player at a time,
-// so that the interface is held up for as short a time as can be.
+// Single-player games only, every tenth of a second, all the AI players in one burst of work
+// on several threads, so that the interface is held up for as short a time as can be.
 //
 void CvGame::updateAhead()
 {
@@ -2083,9 +2082,6 @@ void CvGame::updateAhead()
 	}
 
 	static DWORD uiLastTime = 0;
-#ifdef NON_DETERMINISM_OK
-	static int iNextPlayer = 0;
-#endif
 
 	const DWORD uiTime = GetTickCount();
 
@@ -2096,24 +2092,9 @@ void CvGame::updateAhead()
 
 	uiLastTime = uiTime;
 
-	// every AI player's city-site scores at once, in a burst on several threads: the interface
-	// waits only for the burst (see CvPlayerAI::AI_doWorkAhead() and BridgedThreads.h)
-	CvPlayerAI::AI_doWorkAhead(NO_PLAYER);
-
-#ifdef NON_DETERMINISM_OK
-	for (int iI = 0; iI < MAX_CIV_PLAYERS; iI++)
-	{
-		const PlayerTypes ePlayer = (PlayerTypes)((iNextPlayer + iI) % MAX_CIV_PLAYERS);
-		const CvPlayerAI& kPlayer = GET_PLAYER(ePlayer);
-
-		if (kPlayer.isAlive() && !kPlayer.isHuman())
-		{
-			GET_PLAYER(ePlayer).AI_updateBestBuildsAhead();	// tier 3: what it works out is used
-			iNextPlayer = (ePlayer + 1) % MAX_CIV_PLAYERS;
-			break;
-		}
-	}
-#endif
+	// every AI player's work at once, in a burst on several threads: the interface waits only
+	// for the burst (see CvPlayerAI::AI_doWorkAhead() and BridgedThreads.h)
+	CvPlayerAI::AI_doWorkAhead(true, true, NO_PLAYER);	// the builds in a tier 3 build only: what they work out is used
 }
 
 
