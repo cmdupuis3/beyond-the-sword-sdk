@@ -263,6 +263,8 @@ void CvPlayerAI::AI_reset(bool bConstructor)
 
 	m_aiAICitySites.clear();
 	AI_invalidateFoundValueCache();
+	m_iFoundPlanTurn = -1;
+	m_iFoundPlanCities = -1;
 	
 	FAssert(m_aiBonusValue == NULL);
 	m_aiBonusValue = new int[GC.getNumBonusInfos()];
@@ -385,7 +387,19 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 {
 	PROFILE_FUNC();
 
-	AI_updateFoundValues();
+	if (AI_isFoundPlanKept())
+	{
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample kKeptSample = { "FV plan kept: player-turns without an update" };
+		bridgedProfileAdd(&kKeptSample, 0);
+#endif
+	}
+	else
+	{
+		AI_updateFoundValues();
+		m_iFoundPlanTurn = GC.getGameINLINE().getGameTurn();
+		m_iFoundPlanCities = getNumCities();
+	}
 
 	// FOUND_VALUE_AHEAD_TEST: a global define for games with no human player. Set, the first
 	// player's turn stands in for a human's: the other players' city-site scores are worked
@@ -1206,6 +1220,53 @@ bool CvPlayerAI::AI_isFoundValueKept() const
 	}
 
 	return (GC.getDefineINT("FOUND_VALUE_FULL_SWEEP") == 0);
+}
+
+
+//
+// Whether this player's city-site plan is kept this turn instead of being worked out again
+// (AI_doTurnUnitsPre()). The plan, the scores of the plots and each area's best score are
+// what a settler acts on, and what the cities look at when they weigh building one. A
+// player without a settler keeps them, as they were last worked out, until it has one, its
+// number of cities changes, or a few turns pass: four at normal speed, more on a slower
+// game (CvGameSpeedInfo::getTrainPercent()). The barbarians, whose cities are placed by
+// CvGame::createBarbarianCities() from scores it works out itself, follow the same rule.
+//
+// Tier 2 (see BridgedTiers.h): the cities can weigh a settler on a plan a few turns old.
+// FOUND_SITES_STOCK=1 is the off switch; a REPRODUCE_BTS build never keeps the plan.
+// Nothing here goes into a saved game: a loaded game works the plan out at its first turn.
+//
+bool CvPlayerAI::AI_isFoundPlanKept() const
+{
+#ifdef REPRODUCE_BTS
+	return false;
+#else
+	static int iOff = -1;
+
+	if (iOff == -1)
+	{
+		iOff = ((GC.getDefineINT("FOUND_SITES_STOCK") != 0) ? 1 : 0);
+	}
+
+	if ((iOff != 0) || (m_iFoundPlanTurn < 0))
+	{
+		return false;
+	}
+
+	if (getNumCities() != m_iFoundPlanCities)
+	{
+		return false;
+	}
+
+	if (AI_totalUnitAIs(UNITAI_SETTLE) > 0)
+	{
+		return false;
+	}
+
+	const int iTurns = std::max(1, (4 * GC.getGameSpeedInfo(GC.getGameINLINE().getGameSpeedType()).getTrainPercent()) / 100);
+
+	return ((GC.getGameINLINE().getGameTurn() - m_iFoundPlanTurn) < iTurns);
+#endif
 }
 
 

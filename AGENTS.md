@@ -49,7 +49,8 @@ huge one (250 turns) only when the change is about map size.
   `--profile` DLL with every tier 2 off switch set plays the same game and saves a build:
   `--define PATH_EXE_ONLY=1 --define WORKER_STOCK_CHOICE=1 --define PATH_STOCK_SEARCHES=1
   --define BEST_BUILD_STOCK=1 --define PATH_SEARCH_EVERY_STEP=1 --define AI_RANDOM_STOCK=1
-  --define EXPLORE_STOCK=1 --define PATH_STOCK_HEURISTIC=1`.
+  --define EXPLORE_STOCK=1 --define PATH_STOCK_HEURISTIC=1 --define PATH_STOCK_BOUNDS=1
+  --define FOUND_SITES_STOCK=1 --define UNIT_IDLE_STOCK=1`.
 - Tier 2: with the change's off switch set, the game from before; without it, the same
   hashes on two runs. The `--tier 1` DLL must still match stock.
 - Tier 3: without the change's test define, a `--tier 3` DLL plays the default build's

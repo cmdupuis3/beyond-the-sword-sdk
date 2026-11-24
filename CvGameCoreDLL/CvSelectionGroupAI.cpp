@@ -3,6 +3,7 @@
 #include "CvGameCoreDLL.h"
 #include "CvSelectionGroupAI.h"
 #include "CvPlayerAI.h"
+#include "CvUnitAI.h"
 #include "CvMap.h"
 #include "CvPlot.h"
 #include "CvTeamAI.h"
@@ -255,11 +256,56 @@ static bool peaceProbeUpdate(CvSelectionGroupAI* pGroup)
 
 bool CvSelectionGroupAI::AI_update()
 {
+	// see CvUnitAI::AI_isIdleKept(): a group that stays idle, turn after turn, keeps that
+	CvUnit* pHeadUnit = getHeadUnit();
+	const bool bJudge = (CvUnitAI::AI_idleUnitRules() && (pHeadUnit != NULL) && AI_isControlled() && !isHuman() && !GET_PLAYER(getOwnerINLINE()).isBarbarian()
+		&& !GET_PLAYER(getOwnerINLINE()).isMinorCiv() && (readyToMove() || isForceUpdate()));
+
+	if (bJudge && static_cast<CvUnitAI*>(pHeadUnit)->AI_isIdleKept())
+	{
 #ifdef BRIDGED_PROFILE
-	return peaceProbeUpdate(this);
-#else
-	return AI_updateGroup();
+		static BridgedProfileSample kKeptSample = { "unit idle kept: group turns skipped" };
+		bridgedProfileAdd(&kKeptSample, 0);
 #endif
+		static_cast<CvUnitAI*>(pHeadUnit)->AI_noteIdleKept();
+
+		// The group keeps what its last decision left it doing: fortified or asleep, it stays
+		// so (a forced update would have woken it for the unit to decide it again); awake, it
+		// skips its turn, as an idle decision does.
+		setForceUpdate(false);
+		if (readyToMove())
+		{
+			pushMission(MISSION_SKIP);
+		}
+		return false;
+	}
+
+	const PlayerTypes eOwner = getOwnerINLINE();
+	const int iHeadID = ((pHeadUnit != NULL) ? pHeadUnit->getID() : -1);
+	const CvPlot* pPlot = plot();
+	const int iMoves = ((pHeadUnit != NULL) ? pHeadUnit->getMoves() : 0);
+	const int iDamage = ((pHeadUnit != NULL) ? pHeadUnit->getDamage() : 0);
+	const bool bMadeAttack = ((pHeadUnit != NULL) && pHeadUnit->isMadeAttack());
+
+#ifdef BRIDGED_PROFILE
+	const bool bResult = peaceProbeUpdate(this);	// this group may not exist after this
+#else
+	const bool bResult = AI_updateGroup();
+#endif
+
+	if (bJudge)
+	{
+		CvUnit* pAfter = GET_PLAYER(eOwner).getUnit(iHeadID);
+
+		if ((pAfter != NULL) && !pAfter->isDelayedDeath())
+		{
+			const bool bIdle = ((pAfter->plot() == pPlot) && (pAfter->getGroup()->getLengthMissionQueue() == 0) && (pAfter->getMoves() == iMoves)
+				&& (pAfter->getDamage() == iDamage) && (pAfter->isMadeAttack() == bMadeAttack) && (pAfter->getGroup()->getHeadUnit() == pAfter));
+			static_cast<CvUnitAI*>(pAfter)->AI_noteDecision(bIdle);
+		}
+	}
+
+	return bResult;
 }
 
 
