@@ -36,6 +36,7 @@ public:
 	DllExport void reset(PlayerTypes eID = NO_PLAYER, bool bConstructorCall = false);
 
 protected:
+	mutable int m_iBurstPreInflatedCosts;	// see calculatePreInflatedCosts(); MIN_INT when not kept
 
 	void uninit();
 
@@ -214,6 +215,7 @@ public:
 	int calculateUnitSupply(int& iPaidUnits, int& iBaseSupplyCost) const;																	// Exposed to Python
 	int calculateUnitSupply() const;																																			// Exposed to Python
 	int calculatePreInflatedCosts() const;																																// Exposed to Python
+	void setBurstPreInflatedCosts(bool bKeep);	// see calculatePreInflatedCosts()
 	int calculateInflationRate() const;																																		// Exposed to Python
 	int calculateInflatedCosts() const;																																		// Exposed to Python
 

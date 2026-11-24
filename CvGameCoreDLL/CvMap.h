@@ -15,6 +15,7 @@
 
 #include "CvArea.h"
 #include "CvPlot.h"
+#include "BridgedThreads.h"
 
 
 class FAStar;
@@ -337,10 +338,20 @@ public:
 	void ensureFoundValueDirtyBits();
 	bool isFoundValueScoreDirty(int iPlot, PlayerTypes ePlayer) const { return (((m_aiFoundScoreDirty[iPlot] >> ePlayer) & 1) != 0); }
 	bool isFoundValueDeadlockDirty(int iPlot, PlayerTypes ePlayer) const { return (((m_aiFoundDeadlockDirty[iPlot] >> ePlayer) & 1) != 0); }
+	// During a burst several players' sweeps clear their bits in the same words at once
+	// (BridgedThreads.h), so the clear is then an atomic one.
 	void clearFoundValueDirty(int iPlot, PlayerTypes ePlayer)
 	{
-		m_aiFoundScoreDirty[iPlot] &= ~(1ULL << ePlayer);
-		m_aiFoundDeadlockDirty[iPlot] &= ~(1ULL << ePlayer);
+		if (BridgedThreads::g_lBurstActive != 0)
+		{
+			__atomic_fetch_and(&m_aiFoundScoreDirty[iPlot], ~(1ULL << ePlayer), __ATOMIC_RELAXED);
+			__atomic_fetch_and(&m_aiFoundDeadlockDirty[iPlot], ~(1ULL << ePlayer), __ATOMIC_RELAXED);
+		}
+		else
+		{
+			m_aiFoundScoreDirty[iPlot] &= ~(1ULL << ePlayer);
+			m_aiFoundDeadlockDirty[iPlot] &= ~(1ULL << ePlayer);
+		}
 	}
 protected:
 

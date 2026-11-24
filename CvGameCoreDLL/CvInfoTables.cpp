@@ -464,6 +464,18 @@ void CvInfoTables::infosChanged()
 }
 
 
+void CvInfoTables::prepare()
+{
+	tables();
+	for (int iTeam = 0; iTeam < MAX_TEAMS; iTeam++)
+	{
+		if (GET_TEAM((TeamTypes)iTeam).isAlive())
+		{
+			teamTechs((TeamTypes)iTeam);
+		}
+	}
+}
+
 void CvInfoTables::teamTechsChanged(TeamTypes eTeam)
 {
 	// Rare next to the lookups, and every game start and load comes through here: the
