@@ -149,6 +149,7 @@ protected:
 	bool AI_bombardCity();
 	bool AI_cityAttack(int iRange, int iOddsThreshold, bool bFollow = false);
 	bool AI_anyAttack(int iRange, int iOddsThreshold, int iMinStack = 0, bool bFollow = false);
+	bool AI_attackBestFirst(int iRange, int iOddsThreshold, int iMinStack, bool bCities);
 	bool AI_rangeAttack(int iRange);
 	bool AI_leaveAttack(int iRange, int iThreshold, int iStrengthThreshold);
 	bool AI_blockade();

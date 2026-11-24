@@ -1313,6 +1313,46 @@ static bool workerTeamRules()
 #endif
 }
 
+//
+// Searches that settle what a target is worth before looking for a path to it.
+// AI_anyAttack() and AI_cityAttack() look for a path to every enemy plot in range and only
+// then work out the odds of attacking it, which do not depend on the path. They now work
+// out the odds first, try the plots from the best odds down, and take the first they can
+// reach in time: the plot stock would choose, the earliest in its loop of those with the
+// same odds. AI_pillageRange() values each plot first, with the fewest turns its distance
+// allows (AI_minPathTurns()), and stops once no plot left could beat the best found, as
+// AI_targetCity() does. AI_guardCity() leaves out a city its distance puts beyond the turn
+// limit, where the search could only fail.
+//
+// Tier 2 (see BridgedTiers.h): the same targets are chosen from the same paths, but fewer
+// searches change what the K-Mod pathfinder carries over, so a later path of equal cost can
+// differ. PATH_STOCK_BOUNDS=1 is the off switch; a REPRODUCE_BTS build never applies it.
+//
+static bool pathValueBounds()
+{
+#ifdef REPRODUCE_BTS
+	return false;
+#else
+	static int iOff = -1;
+
+	if (iOff == -1)
+	{
+		iOff = ((GC.getDefineINT("PATH_STOCK_BOUNDS") != 0) ? 1 : 0);
+	}
+
+	return (iOff == 0);
+#endif
+}
+
+struct BoundedTarget
+{
+	CvPlot* pPlot;
+	int iValue;			// its value, or for AI_pillageRange() what it is worth before the path's turns divide it
+	int iMostValue;		// the most it can be worth
+	int iOrder;			// its place in the stock loop: the earlier of two worth the same wins
+	bool operator<(const BoundedTarget& kOther) const { return (iMostValue > kOther.iMostValue); }
+};
+
 // where the player's other workers stand that have yet to decide this turn, for the worker now deciding
 static bool s_bIdleWorkersKnown = false;
 static std::vector<const CvPlot*> s_apIdleWorkerPlots;
@@ -7494,8 +7534,17 @@ bool CvUnitAI::AI_guardCity(bool bLeave, bool bSearch, int iMaxPath)
 		pBestPlot = NULL;
 		pBestGuardPlot = NULL;
 
+		// see pathValueBounds(): a city further than the turn limit allows is not searched for
+		const bool bBounds = (pathValueBounds() && (iMaxPath < MAX_INT));
+		const int iMaxStepsPerTurn = (bBounds ? AI_maxStepsPerTurn() : 1);
+
 		for (pLoopCity = GET_PLAYER(getOwnerINLINE()).firstCity(&iLoop); pLoopCity != NULL; pLoopCity = GET_PLAYER(getOwnerINLINE()).nextCity(&iLoop))
 		{
+			if (bBounds && (AI_minPathTurns(pLoopCity->plot(), iMaxStepsPerTurn) > iMaxPath))
+			{
+				continue;
+			}
+
 			if (AI_plotValid(pLoopCity->plot()))
 			{
 				if (!(pLoopCity->AI_isDefended((!AI_isCityAIType()) ? pLoopCity->plot()->plotCount(PUF_canDefendGroupHead, -1, -1, getOwnerINLINE(), NO_TEAM, PUF_isNotCityAIType) : 0)))	// XXX check for other team's units?
@@ -11414,6 +11463,12 @@ bool CvUnitAI::AI_cityAttack(int iRange, int iOddsThreshold, bool bFollow)
 	iBestValue = 0;
 	pBestPlot = NULL;
 
+	// see pathValueBounds(): the odds first, then paths from the best odds down
+	if (!bFollow && pathValueBounds())
+	{
+		return AI_attackBestFirst(iRange, iOddsThreshold, 0, true);
+	}
+
 	for (iDX = -(iSearchRange); iDX <= iSearchRange; iDX++)
 	{
 		for (iDY = -(iSearchRange); iDY <= iSearchRange; iDY++)
@@ -11492,6 +11547,13 @@ bool CvUnitAI::AI_anyAttack(int iRange, int iOddsThreshold, int iMinStack, bool 
 	iBestValue = 0;
 	pBestPlot = NULL;
 
+	// see pathValueBounds(): the odds first, then paths from the best odds down
+	const bool bBounds = (!bFollow && pathValueBounds());
+	if (bBounds)
+	{
+		return AI_attackBestFirst(iRange, iOddsThreshold, iMinStack, false);
+	}
+
 	for (iDX = -(iSearchRange); iDX <= iSearchRange; iDX++)
 	{
 		for (iDY = -(iSearchRange); iDY <= iSearchRange; iDY++)
@@ -11536,6 +11598,143 @@ bool CvUnitAI::AI_anyAttack(int iRange, int iOddsThreshold, int iMinStack, bool 
 
 	return false;
 }
+
+// See pathValueBounds(). AI_anyAttack() (bCities false) and AI_cityAttack() (bCities true)
+// without bFollow: the same plots, tests and choice, with the odds worked out before any
+// path is looked for. Returns true if a mission was pushed.
+bool CvUnitAI::AI_attackBestFirst(int iRange, int iOddsThreshold, int iMinStack, bool bCities)
+{
+	const int iSearchRange = AI_searchRange(iRange);
+	const int iMaxStepsPerTurn = AI_maxStepsPerTurn();
+	std::vector<BoundedTarget> aTargets;
+
+	for (int iDX = -(iSearchRange); iDX <= iSearchRange; iDX++)
+	{
+		for (int iDY = -(iSearchRange); iDY <= iSearchRange; iDY++)
+		{
+			CvPlot* pLoopPlot = plotXY(getX_INLINE(), getY_INLINE(), iDX, iDY);
+
+			if ((pLoopPlot == NULL) || atPlot(pLoopPlot) || !AI_plotValid(pLoopPlot))
+			{
+				continue;
+			}
+
+			if (bCities)
+			{
+				if (!(pLoopPlot->isCity() || (pLoopPlot->isCity(true, getTeam()) && pLoopPlot->isVisibleEnemyUnit(this))))
+				{
+					continue;
+				}
+				if (!AI_potentialEnemy(pLoopPlot->getTeam(), pLoopPlot))
+				{
+					continue;
+				}
+			}
+			else
+			{
+				if (!(pLoopPlot->isVisibleEnemyUnit(this) || (pLoopPlot->isCity() && AI_potentialEnemy(pLoopPlot->getTeam()))))
+				{
+					continue;
+				}
+				if (pLoopPlot->getNumVisibleEnemyDefenders(this) < iMinStack)
+				{
+					continue;
+				}
+			}
+
+			// the path would have to take no more than iRange turns
+			if (AI_minPathTurns(pLoopPlot, iMaxStepsPerTurn) > iRange)
+			{
+				continue;
+			}
+
+			const int iValue = getGroup()->AI_attackOdds(pLoopPlot, true);
+
+			if ((iValue <= 0) || (iValue < AI_finalOddsThreshold(pLoopPlot, iOddsThreshold)))
+			{
+				continue;
+			}
+
+			BoundedTarget kTarget;
+			kTarget.pPlot = pLoopPlot;
+			kTarget.iValue = iValue;
+			kTarget.iMostValue = iValue;
+			kTarget.iOrder = (int)aTargets.size();
+			aTargets.push_back(kTarget);
+		}
+	}
+
+	// the first that can be reached is the most valuable, and the earliest of those worth the same
+	std::stable_sort(aTargets.begin(), aTargets.end());
+
+#ifdef BRIDGED_PROFILE
+	// PATH_BOUNDS_VERIFY: a global define for profile builds. Set, the stock loop is run as
+	// well, with a path for every plot, and a different target counts as a miss.
+	static int iVerify = -1;
+	if (iVerify == -1)
+	{
+		iVerify = ((GC.getDefineINT("PATH_BOUNDS_VERIFY") != 0) ? 1 : 0);
+	}
+	if (iVerify != 0)
+	{
+		static BridgedProfileSample aSamples[2] = { { "path bounds verify: attack, same target" }, { "path bounds verify: attack, DIFFERENT TARGET" } };
+		CvPlot* pStockTarget = NULL;
+		int iStockValue = 0;
+		for (int iDX = -(iSearchRange); iDX <= iSearchRange; iDX++)
+		{
+			for (int iDY = -(iSearchRange); iDY <= iSearchRange; iDY++)
+			{
+				CvPlot* pLoopPlot = plotXY(getX_INLINE(), getY_INLINE(), iDX, iDY);
+				if ((pLoopPlot == NULL) || !AI_plotValid(pLoopPlot))
+				{
+					continue;
+				}
+				const bool bCandidate = (bCities ? ((pLoopPlot->isCity() || (pLoopPlot->isCity(true, getTeam()) && pLoopPlot->isVisibleEnemyUnit(this))) && AI_potentialEnemy(pLoopPlot->getTeam(), pLoopPlot))
+					: (pLoopPlot->isVisibleEnemyUnit(this) || (pLoopPlot->isCity() && AI_potentialEnemy(pLoopPlot->getTeam()))));
+				int iPathTurns;
+				if (bCandidate && !atPlot(pLoopPlot) && generatePath(pLoopPlot, 0, true, &iPathTurns, iRange) && (iPathTurns <= iRange))
+				{
+					if (bCities || (pLoopPlot->getNumVisibleEnemyDefenders(this) >= iMinStack))
+					{
+						const int iValue = getGroup()->AI_attackOdds(pLoopPlot, true);
+						if ((iValue >= AI_finalOddsThreshold(pLoopPlot, iOddsThreshold)) && (iValue > iStockValue))
+						{
+							iStockValue = iValue;
+							pStockTarget = pLoopPlot;
+						}
+					}
+				}
+			}
+		}
+		CvPlot* pBoundedTarget = NULL;
+		for (size_t iTarget = 0; iTarget < aTargets.size(); iTarget++)
+		{
+			int iPathTurns;
+			if (generatePath(aTargets[iTarget].pPlot, 0, true, &iPathTurns, iRange) && (iPathTurns <= iRange))
+			{
+				pBoundedTarget = aTargets[iTarget].pPlot;
+				break;
+			}
+		}
+		bridgedProfileAdd(&aSamples[(pStockTarget == pBoundedTarget) ? 0 : 1], 0);
+	}
+#endif
+
+	for (size_t iTarget = 0; iTarget < aTargets.size(); iTarget++)
+	{
+		int iPathTurns;
+		if (generatePath(aTargets[iTarget].pPlot, 0, true, &iPathTurns, iRange) && (iPathTurns <= iRange))
+		{
+			CvPlot* pBestPlot = getPathEndTurnPlot();
+			FAssert(!atPlot(pBestPlot));
+			getGroup()->pushMission(MISSION_MOVE_TO, pBestPlot->getX_INLINE(), pBestPlot->getY_INLINE(), 0);
+			return true;
+		}
+	}
+
+	return false;
+}
+
 
 // Returns true if a mission was pushed...
 bool CvUnitAI::AI_rangeAttack(int iRange)
@@ -12298,6 +12497,11 @@ bool CvUnitAI::AI_pillageRange(int iRange, int iBonusValueThreshold)
 	pBestPlot = NULL;
 	pBestPillagePlot = NULL;
 
+	// see pathValueBounds(): each plot's value first, then paths from the most promising down
+	const bool bBounds = pathValueBounds();
+	const int iMaxStepsPerTurn = (bBounds ? AI_maxStepsPerTurn() : 1);
+	std::vector<BoundedTarget> aTargets;
+
 	for (iDX = -(iSearchRange); iDX <= iSearchRange; iDX++)
 	{
 		for (iDY = -(iSearchRange); iDY <= iSearchRange; iDY++)
@@ -12320,7 +12524,26 @@ bool CvUnitAI::AI_pillageRange(int iRange, int iBonusValueThreshold)
                                 {
                                     if (GET_PLAYER(getOwnerINLINE()).AI_plotTargetMissionAIs(pLoopPlot, MISSIONAI_PILLAGE, getGroup()) == 0)
                                     {
-                                        if (generatePath(pLoopPlot, 0, true, &iPathTurns))
+                                        if (bBounds)
+                                        {
+                                            // its value with the fewest turns its distance allows (none for the plot the unit is on)
+                                            const int iMinTurns = (atPlot(pLoopPlot) ? 0 : AI_minPathTurns(pLoopPlot, iMaxStepsPerTurn));
+
+                                            if (iMinTurns <= iRange)
+                                            {
+                                                BoundedTarget kTarget;
+                                                kTarget.pPlot = pLoopPlot;
+                                                kTarget.iValue = AI_pillageValue(pLoopPlot, iBonusValueThreshold) * 1000;
+                                                kTarget.iMostValue = kTarget.iValue / (iMinTurns + 1);
+                                                if (!isEnemy(pLoopPlot->getTeam()) && plot()->getTeam() == pLoopPlot->getTeam())
+                                                {
+                                                    kTarget.iMostValue /= 10;
+                                                }
+                                                kTarget.iOrder = (int)aTargets.size();
+                                                aTargets.push_back(kTarget);
+                                            }
+                                        }
+                                        else if (generatePath(pLoopPlot, 0, true, &iPathTurns))
                                         {
                                             if (getPathLastNode()->m_iData1 == 0)
                                             {
@@ -12354,6 +12577,51 @@ bool CvUnitAI::AI_pillageRange(int iRange, int iBonusValueThreshold)
                                 }
                             }
                         }
+					}
+				}
+			}
+		}
+	}
+
+	if (bBounds)
+	{
+		std::stable_sort(aTargets.begin(), aTargets.end());
+		int iBestOrder = MAX_INT;
+
+		for (size_t iTarget = 0; iTarget < aTargets.size(); iTarget++)
+		{
+			const BoundedTarget& kTarget = aTargets[iTarget];
+
+			// the rest are worth no more than this one, and come after it in plot order if they tie
+			if ((kTarget.iMostValue <= 0) || (kTarget.iMostValue < iBestValue) || ((kTarget.iMostValue == iBestValue) && (kTarget.iOrder > iBestOrder)))
+			{
+				break;
+			}
+
+			pLoopPlot = kTarget.pPlot;
+
+			if (generatePath(pLoopPlot, 0, true, &iPathTurns))
+			{
+				if (getPathLastNode()->m_iData1 == 0)
+				{
+					iPathTurns++;
+				}
+
+				if (iPathTurns <= iRange)
+				{
+					iValue = kTarget.iValue / (iPathTurns + 1);
+
+					if (!isEnemy(pLoopPlot->getTeam()) && plot()->getTeam() == pLoopPlot->getTeam())
+					{
+						iValue /= 10;
+					}
+
+					if ((iValue > iBestValue) || ((iValue == iBestValue) && (iValue > 0) && (kTarget.iOrder < iBestOrder)))
+					{
+						iBestValue = iValue;
+						iBestOrder = kTarget.iOrder;
+						pBestPlot = getPathEndTurnPlot();
+						pBestPillagePlot = pLoopPlot;
 					}
 				}
 			}
