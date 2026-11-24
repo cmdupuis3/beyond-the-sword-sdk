@@ -65,12 +65,12 @@ How each tier is checked:
   `bench/results/stock-std150.log` and `bench/results/stock-huge250.log`; if they are not
   there, run `bench/run_bench.py --dll` on `Assets/CvGameCoreDLL.dll` of the game itself
   (a minute and a half, and eight minutes). A change meant for tier 1 is checked the same
-  way before it is committed. In a default build the eleven off switches of the tier 2
+  way before it is committed. In a default build the twelve off switches of the tier 2
   entries together give the same games, which saves a build: `--define PATH_EXE_ONLY=1
   --define WORKER_STOCK_CHOICE=1 --define PATH_STOCK_SEARCHES=1 --define BEST_BUILD_STOCK=1
   --define PATH_SEARCH_EVERY_STEP=1 --define AI_RANDOM_STOCK=1 --define EXPLORE_STOCK=1
   --define PATH_STOCK_HEURISTIC=1 --define PATH_STOCK_BOUNDS=1
-  --define FOUND_SITES_STOCK=1 --define UNIT_IDLE_STOCK=1`
+  --define FOUND_SITES_STOCK=1 --define UNIT_IDLE_STOCK=1 --define CITIZENS_STOCK=1`
   with a `--profile` DLL.
 - Tier 2: the same two hashes on every turn as the default build before the change, or a
   doc in `optimizations/` saying what differs. The same DLL run twice has to give the same hashes.
