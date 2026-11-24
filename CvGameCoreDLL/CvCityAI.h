@@ -69,6 +69,7 @@ public:
 	bool AI_isEmphasizeGreatPeople();
 
 	bool AI_isAssignWorkDirty();
+	bool AI_isAssignedFromScratch() const;	// see CvCityAI.cpp
 	void AI_setAssignWorkDirty(bool bNewValue);
 
 	bool AI_isChooseProductionDirty();
@@ -126,6 +127,7 @@ protected:
 	int m_iEmphasizeGreatPeopleCount;
 
 	bool m_bAssignWorkDirty;
+	int m_iAssignFromScratchTurn;	// see AI_isAssignedFromScratch(); not saved
 	// City-wide values AI_yieldValue() needs, kept while AI_assignWorkingPlots() runs: see AI_assignCached()
 	enum AssignCacheTypes
 	{
