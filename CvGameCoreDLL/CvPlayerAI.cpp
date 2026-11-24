@@ -420,7 +420,36 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 
 		if (bFoundTest || bBuildsTest)
 		{
-			if (GC.getDefineINT("WORK_AHEAD_SERIAL") != 0)
+			if (GC.getDefineINT("WORK_AHEAD_BACKGROUND_TEST") != 0)
+			{
+				// as a human's turn would have it: the work in the background, the main thread
+				// waiting with the game still (WORK_AHEAD_STOP_AFTER: see AI_beginWorkAhead();
+				// WORK_AHEAD_STOP_TEST=1: stopped at once, the rest done on the main thread;
+				// WORK_AHEAD_LEAVE_TEST=n: n times started and stopped at once with the rest left,
+				// as a human's decision would stop it, before it is done to the end)
+				const int iLeavePasses = GC.getDefineINT("WORK_AHEAD_LEAVE_TEST");
+				for (int iPass = 0; iPass < iLeavePasses; iPass++)
+				{
+					if (AI_startWorkAheadInBackground(bFoundTest, bBuildsTest, getID()))
+					{
+						AI_stopWorkAhead(false);
+					}
+				}
+
+				if (AI_startWorkAheadInBackground(bFoundTest, bBuildsTest, getID()))
+				{
+					if (GC.getDefineINT("WORK_AHEAD_STOP_TEST") != 0)
+					{
+						AI_stopWorkAhead(true);
+					}
+
+					while (AI_updateWorkAhead())
+					{
+						Sleep(0);
+					}
+				}
+			}
+			else if (GC.getDefineINT("WORK_AHEAD_SERIAL") != 0)
 			{
 				for (int iPlayer = 1; iPlayer < MAX_CIV_PLAYERS; iPlayer++)
 				{
@@ -1691,6 +1720,7 @@ namespace
 	{
 		FoundValueSweepRun* pRun;	// a player's sweep, or
 		CvCityAI* pCity;			// a city's builds
+		bool bStarted;				// went through a burst (one may be stopped before it comes to the item)
 		bool bHandedBack;			// a sweep: some of its plots
 		int iState;					// the city's builds as they were before the burst: an index into the saved states
 		BridgedThreads::Need kNeed;	// a city: what it was handed back for
@@ -1700,6 +1730,8 @@ namespace
 	{
 		WorkAheadItem* aItems;
 		const int* piItems;			// a later round: the items to go through again; NULL for the first
+		int iStopAfter;				// WORK_AHEAD_STOP_AFTER: a stop is asked for after this many items (-1: never)
+		volatile long lStarted;
 	};
 
 	void workAheadRange(void* pContext, int iBegin, int iEnd, int /*iThread*/)
@@ -1708,14 +1740,27 @@ namespace
 
 		for (int iI = iBegin; iI < iEnd; iI++)
 		{
+			if (BridgedThreads::isStopRequested())
+			{
+				return;
+			}
+
+			if ((kBurst.iStopAfter >= 0) && (InterlockedIncrement(&kBurst.lStarted) > kBurst.iStopAfter))
+			{
+				BridgedThreads::requestStop();
+				return;
+			}
+
 			WorkAheadItem& kItem = kBurst.aItems[(kBurst.piItems != NULL) ? kBurst.piItems[iI] : iI];
+			const bool bFirst = !kItem.bStarted;
+			kItem.bStarted = true;
 
 			BridgedThreads::takeNeedMainThread();
 
 			if (kItem.pRun != NULL)
 			{
 				// hands back plot by plot
-				if (kBurst.piItems == NULL)
+				if (bFirst)
 				{
 					FoundValueSweep::runPlots(*kItem.pRun);
 					kItem.bHandedBack = true;	// looked at by the main thread below
@@ -1733,11 +1778,32 @@ namespace
 			}
 		}
 	}
+
+	// the work ahead under way: made by CvPlayerAI::AI_beginWorkAhead(), let go by AI_finishWorkAhead()
+	struct WorkAhead
+	{
+		bool bActive;
+		int iRound;
+		std::vector<FoundValueSweepRun> aRuns;	// not resized while active: the items point into it
+		std::vector<WorkAheadItem> aItems;
+		std::vector<CvCityAI::BestBuildState> aStates;
+		std::vector<int> aiAgain;
+		WorkAheadBurst kBurst;
+		int aiStrategyTurn[MAX_PLAYERS];
+		int aiStrategy[MAX_PLAYERS];
+		int aiAveragesTurn[MAX_PLAYERS];
+		int aiUpgradeTurn[MAX_PLAYERS];
+		bool abBuilds[MAX_PLAYERS];
+	};
+	WorkAhead s_kWorkAhead = { false };
 }
 
-void CvPlayerAI::AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip)
+// What the work reads that the game makes on first use, made; the items set out. false if
+// there is nothing to do.
+bool CvPlayerAI::AI_beginWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip)
 {
-	PROFILE_FUNC();
+	FAssert(!s_kWorkAhead.bActive);
+	WorkAhead& kWork = s_kWorkAhead;
 
 #ifndef NON_DETERMINISM_OK
 	bBestBuilds = false;	// tier 3 only
@@ -1761,19 +1827,17 @@ void CvPlayerAI::AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes
 	s_bBonusValuesInBurst = !GC.getUSE_CAN_TRAIN_CALLBACK() && !GC.getUSE_CANNOT_TRAIN_CALLBACK() && !GC.getUSE_CAN_CONSTRUCT_CALLBACK()
 		&& !GC.getUSE_CANNOT_CONSTRUCT_CALLBACK();
 
-	std::vector<FoundValueSweepRun> aRuns(MAX_PLAYERS);	// not resized below: the items point into it
-	std::vector<WorkAheadItem> aItems;
-	int aiStrategyTurn[MAX_PLAYERS];
-	int aiStrategy[MAX_PLAYERS];
-	int aiAveragesTurn[MAX_PLAYERS];
-	int aiUpgradeTurn[MAX_PLAYERS];
-	bool abBuilds[MAX_PLAYERS];
-	int iPlayer;
+	kWork.aRuns.clear();
+	kWork.aRuns.resize(MAX_PLAYERS);
+	kWork.aItems.clear();
+	kWork.aStates.clear();
+	kWork.aiAgain.clear();
+	kWork.iRound = 0;
 
-	for (iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
+	for (int iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
 	{
 		CvPlayerAI& kPlayer = GET_PLAYER((PlayerTypes)iPlayer);
-		abBuilds[iPlayer] = false;
+		kWork.abBuilds[iPlayer] = false;
 
 		if (!kPlayer.isAlive() || kPlayer.isHuman() || (iPlayer == eSkip))
 		{
@@ -1782,9 +1846,9 @@ void CvPlayerAI::AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes
 
 		if (bFoundValues && kPlayer.AI_isFoundValueKept())
 		{
-			kPlayer.AI_beginFoundValueSweep(true, aRuns[iPlayer]);
-			WorkAheadItem kItem = { &aRuns[iPlayer], NULL, false, -1, { BridgedThreads::NEED_NONE, 0, 0 } };
-			aItems.push_back(kItem);
+			kPlayer.AI_beginFoundValueSweep(true, kWork.aRuns[iPlayer]);
+			WorkAheadItem kItem = { &kWork.aRuns[iPlayer], NULL, false, false, -1, { BridgedThreads::NEED_NONE, 0, 0 } };
+			kWork.aItems.push_back(kItem);
 		}
 
 		bool bAnyCityWanted = false;
@@ -1803,12 +1867,12 @@ void CvPlayerAI::AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes
 
 		if (bAnyCityWanted)
 		{
-			// the turn markers of what the stock AI fixes once a game turn, put back below
-			abBuilds[iPlayer] = true;
-			aiStrategyTurn[iPlayer] = kPlayer.m_iStrategyHashCacheTurn;
-			aiStrategy[iPlayer] = kPlayer.m_iStrategyHash;
-			aiAveragesTurn[iPlayer] = kPlayer.m_iAveragesCacheTurn;
-			aiUpgradeTurn[iPlayer] = kPlayer.m_iUpgradeUnitsCacheTurn;
+			// the turn markers of what the stock AI fixes once a game turn, put back at the end
+			kWork.abBuilds[iPlayer] = true;
+			kWork.aiStrategyTurn[iPlayer] = kPlayer.m_iStrategyHashCacheTurn;
+			kWork.aiStrategy[iPlayer] = kPlayer.m_iStrategyHash;
+			kWork.aiAveragesTurn[iPlayer] = kPlayer.m_iAveragesCacheTurn;
+			kWork.aiUpgradeTurn[iPlayer] = kPlayer.m_iUpgradeUnitsCacheTurn;
 
 			// Made now, as the player's first city would make them: working the strategy out
 			// also fills caches that are not put back (the capital's closeness to the others),
@@ -1834,8 +1898,8 @@ void CvPlayerAI::AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes
 #endif
 					if (bBuildsInBurst)
 					{
-						WorkAheadItem kItem = { NULL, pCity, false, -1, { BridgedThreads::NEED_NONE, 0, 0 } };
-						aItems.push_back(kItem);
+						WorkAheadItem kItem = { NULL, pCity, false, false, -1, { BridgedThreads::NEED_NONE, 0, 0 } };
+						kWork.aItems.push_back(kItem);
 					}
 					else
 					{
@@ -1848,136 +1912,296 @@ void CvPlayerAI::AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes
 
 	// A city's builds read what its last run left: an item handed back is put back as it was
 	// before the burst, then done again (its run in the burst went on with a stand-in value).
-	std::vector<CvCityAI::BestBuildState> aStates;
-	for (int iI = 0; iI < (int)aItems.size(); iI++)
+	for (int iI = 0; iI < (int)kWork.aItems.size(); iI++)
 	{
-		if (aItems[iI].pCity != NULL)
+		if (kWork.aItems[iI].pCity != NULL)
 		{
-			aItems[iI].iState = (int)aStates.size();
-			aStates.push_back(CvCityAI::BestBuildState());
-			aItems[iI].pCity->AI_saveBestBuildState(aStates.back());
+			kWork.aItems[iI].iState = (int)kWork.aStates.size();
+			kWork.aStates.push_back(CvCityAI::BestBuildState());
+			kWork.aItems[iI].pCity->AI_saveBestBuildState(kWork.aStates.back());
 		}
 	}
 
-	if (!aItems.empty())
+	kWork.bActive = true;
+
+	if (kWork.aItems.empty())
 	{
-		CvInfoTables::prepare();
-		for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
-		{
-			GC.getMapINLINE().plotByIndexINLINE(iI)->area();
-		}
-
-		WorkAheadBurst kBurst = { &aItems[0], NULL };
-		BridgedThreads::parallelFor((int)aItems.size(), 1, workAheadRange, &kBurst);
-
-		// What was handed back for something the main thread can do alone: done here, in the
-		// order of the items (each is what the item would have done at that point, had it been
-		// done here), and the items go through another burst. Three rounds at most.
-		std::vector<int> aiAgain;
-
-		for (int iRound = 0; iRound < 3; iRound++)
-		{
-			aiAgain.clear();
-
-			for (int iI = 0; iI < (int)aItems.size(); iI++)
-			{
-				WorkAheadItem& kItem = aItems[iI];
-
-				if (!kItem.bHandedBack)
-				{
-					continue;
-				}
-
-				if (kItem.pRun != NULL)
-				{
-					bool bAny = false;
-					for (int iPlot = 0; iPlot < (int)kItem.pRun->aResults.size(); iPlot++)
-					{
-						const FoundValueSweep::PlotResult& kResult = kItem.pRun->aResults[iPlot];
-
-						if ((kResult.eState == FoundValueSweep::PLOT_DEFER_DECISION) || (kResult.eState == FoundValueSweep::PLOT_DEFER_SCORE))
-						{
-							kItem.pRun->kSweep.pPlayer->AI_foundSweepBonusVal(kItem.pRun->kSweep, (BonusTypes)kResult.iBonusNeeded);
-							bAny = true;
-						}
-					}
-
-					if (bAny)
-					{
-						aiAgain.push_back(iI);
-					}
-					else
-					{
-						kItem.bHandedBack = false;
-					}
-				}
-				else if (kItem.kNeed.eType == BridgedThreads::NEED_BONUS_VALUE)
-				{
-					GET_PLAYER((PlayerTypes)kItem.kNeed.iData1).AI_baseBonusVal((BonusTypes)kItem.kNeed.iData2);
-					kItem.pCity->AI_restoreBestBuildState(aStates[kItem.iState]);
-					aiAgain.push_back(iI);
-				}
-				else if (kItem.kNeed.eType == BridgedThreads::NEED_UPGRADE_GOLD)
-				{
-					GET_PLAYER((PlayerTypes)kItem.kNeed.iData1).AI_goldToUpgradeAllUnits(kItem.kNeed.iData2);
-					kItem.pCity->AI_restoreBestBuildState(aStates[kItem.iState]);
-					aiAgain.push_back(iI);
-				}
-			}
-
-			if (aiAgain.empty())
-			{
-				break;
-			}
-
-#ifdef BRIDGED_PROFILE
-			static BridgedProfileSample kAgain = { "work ahead: items handed back, gone through again in another burst" };
-			bridgedProfileAdd(&kAgain, 0, (unsigned int)aiAgain.size());
-#endif
-			kBurst.piItems = &aiAgain[0];
-			BridgedThreads::parallelFor((int)aiAgain.size(), 1, workAheadRange, &kBurst);
-		}
+		AI_finishWorkAhead(true);
+		return false;
 	}
 
-	// what was handed back, and the rest of each sweep, in the order of the players and cities
-	for (int iI = 0; iI < (int)aItems.size(); iI++)
+	CvInfoTables::prepare();
+	for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
 	{
-		WorkAheadItem& kItem = aItems[iI];
+		GC.getMapINLINE().plotByIndexINLINE(iI)->area();
+	}
+
+	kWork.kBurst.aItems = &kWork.aItems[0];
+	kWork.kBurst.piItems = NULL;
+	const int iStopAfter = GC.getDefineINT("WORK_AHEAD_STOP_AFTER");	// a test: see workAheadRange()
+	kWork.kBurst.iStopAfter = ((iStopAfter > 0) ? iStopAfter : -1);
+	kWork.kBurst.lStarted = 0;
+	return true;
+}
+
+// After a burst: what was handed back for something the main thread can do alone is done here,
+// in the order of the items (each is what the item would have done at that point, had it been
+// done here), and the items are set out for another burst. Three rounds at most. true if there
+// is to be another.
+bool CvPlayerAI::AI_resolveWorkAheadBurst()
+{
+	WorkAhead& kWork = s_kWorkAhead;
+
+	kWork.iRound++;
+	kWork.aiAgain.clear();
+
+	if (kWork.iRound > 3)
+	{
+		return false;
+	}
+
+	for (int iI = 0; iI < (int)kWork.aItems.size(); iI++)
+	{
+		WorkAheadItem& kItem = kWork.aItems[iI];
+
+		if (!kItem.bHandedBack)
+		{
+			continue;
+		}
 
 		if (kItem.pRun != NULL)
 		{
-			kItem.pRun->kSweep.pPlayer->AI_endFoundValueSweep(*kItem.pRun);	// does the plots handed back
+			bool bAny = false;
+			for (int iPlot = 0; iPlot < (int)kItem.pRun->aResults.size(); iPlot++)
+			{
+				const FoundValueSweep::PlotResult& kResult = kItem.pRun->aResults[iPlot];
+
+				if ((kResult.eState == FoundValueSweep::PLOT_DEFER_DECISION) || (kResult.eState == FoundValueSweep::PLOT_DEFER_SCORE))
+				{
+					kItem.pRun->kSweep.pPlayer->AI_foundSweepBonusVal(kItem.pRun->kSweep, (BonusTypes)kResult.iBonusNeeded);
+					bAny = true;
+				}
+			}
+
+			if (bAny)
+			{
+				kWork.aiAgain.push_back(iI);
+			}
+			else
+			{
+				kItem.bHandedBack = false;
+			}
 		}
-		else if (kItem.bHandedBack)
+		else if (kItem.kNeed.eType == BridgedThreads::NEED_BONUS_VALUE)
 		{
+			GET_PLAYER((PlayerTypes)kItem.kNeed.iData1).AI_baseBonusVal((BonusTypes)kItem.kNeed.iData2);
+			kItem.pCity->AI_restoreBestBuildState(kWork.aStates[kItem.iState]);
+			kWork.aiAgain.push_back(iI);
+		}
+		else if (kItem.kNeed.eType == BridgedThreads::NEED_UPGRADE_GOLD)
+		{
+			GET_PLAYER((PlayerTypes)kItem.kNeed.iData1).AI_goldToUpgradeAllUnits(kItem.kNeed.iData2);
+			kItem.pCity->AI_restoreBestBuildState(kWork.aStates[kItem.iState]);
+			kWork.aiAgain.push_back(iI);
+		}
+	}
+
+	if (kWork.aiAgain.empty())
+	{
+		return false;
+	}
+
 #ifdef BRIDGED_PROFILE
-			static BridgedProfileSample kHandedBack = { "best build: handed back from the burst, worked out on the main thread" };
-			bridgedProfileAdd(&kHandedBack, 0);
+	static BridgedProfileSample kAgain = { "work ahead: items handed back, gone through again in another burst" };
+	bridgedProfileAdd(&kAgain, 0, (unsigned int)kWork.aiAgain.size());
 #endif
-			kItem.pCity->AI_restoreBestBuildState(aStates[kItem.iState]);
-			kItem.pCity->AI_updateBestBuild();
+	kWork.kBurst.piItems = &kWork.aiAgain[0];
+	return true;
+}
+
+// The end of the work ahead, in the order of the players and cities: the rest of each sweep, and
+// what is left. With bDoLeftovers what was handed back, or never started because the burst was
+// stopped, is done here; without it, a city's builds are put back as they were and a sweep not
+// started is let go, for the work ahead to come back to.
+void CvPlayerAI::AI_finishWorkAhead(bool bDoLeftovers)
+{
+	WorkAhead& kWork = s_kWorkAhead;
+
+	for (int iI = 0; iI < (int)kWork.aItems.size(); iI++)
+	{
+		WorkAheadItem& kItem = kWork.aItems[iI];
+
+		if (kItem.pRun != NULL)
+		{
+			const CvPlayerAI* pPlayer = kItem.pRun->kSweep.pPlayer;
+
+			if (kItem.bStarted)
+			{
+				pPlayer->AI_endFoundValueSweep(*kItem.pRun);	// does the plots handed back
+			}
+			else if (bDoLeftovers)
+			{
+				FoundValueSweep::runPlots(*kItem.pRun);
+				pPlayer->AI_endFoundValueSweep(*kItem.pRun);
+			}
+			else
+			{
+				pPlayer->AI_abandonFoundValueSweep(*kItem.pRun);
+			}
+		}
+		else if (kItem.bHandedBack || !kItem.bStarted)
+		{
+			if (kItem.bStarted)
+			{
+				kItem.pCity->AI_restoreBestBuildState(kWork.aStates[kItem.iState]);
+			}
+
+			if (bDoLeftovers)
+			{
+#ifdef BRIDGED_PROFILE
+				static BridgedProfileSample kHandedBack = { "best build: handed back from the burst, worked out on the main thread" };
+				bridgedProfileAdd(&kHandedBack, 0);
+#endif
+				kItem.pCity->AI_updateBestBuild();
+			}
 		}
 	}
 
 	s_bBonusValuesInBurst = false;
 
-	for (iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
+	for (int iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
 	{
-		if (abBuilds[iPlayer])
+		if (kWork.abBuilds[iPlayer])
 		{
 			CvPlayerAI& kPlayer = GET_PLAYER((PlayerTypes)iPlayer);
 			kPlayer.setBurstPreInflatedCosts(false);
-			kPlayer.m_iStrategyHashCacheTurn = aiStrategyTurn[iPlayer];
-			kPlayer.m_iStrategyHash = aiStrategy[iPlayer];
-			kPlayer.m_iAveragesCacheTurn = aiAveragesTurn[iPlayer];
-			kPlayer.m_iUpgradeUnitsCacheTurn = aiUpgradeTurn[iPlayer];
+			kPlayer.m_iStrategyHashCacheTurn = kWork.aiStrategyTurn[iPlayer];
+			kPlayer.m_iStrategyHash = kWork.aiStrategy[iPlayer];
+			kPlayer.m_iAveragesCacheTurn = kWork.aiAveragesTurn[iPlayer];
+			kPlayer.m_iUpgradeUnitsCacheTurn = kWork.aiUpgradeTurn[iPlayer];
+			kWork.abBuilds[iPlayer] = false;
 		}
 	}
 
 #ifdef BRIDGED_PROFILE
 	static BridgedProfileSample kItemsSample = { "work ahead: items in a burst" };
-	bridgedProfileAdd(&kItemsSample, 0, (unsigned int)aItems.size());
+	bridgedProfileAdd(&kItemsSample, 0, (unsigned int)kWork.aItems.size());
 #endif
+
+	kWork.aItems.clear();
+	kWork.aStates.clear();
+	kWork.aiAgain.clear();
+	kWork.aRuns.clear();
+	kWork.bActive = false;
+}
+
+void CvPlayerAI::AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip)
+{
+	PROFILE_FUNC();
+
+	if (s_kWorkAhead.bActive)
+	{
+		return;		// in the background already
+	}
+
+	if (AI_beginWorkAhead(bFoundValues, bBestBuilds, eSkip))
+	{
+		WorkAhead& kWork = s_kWorkAhead;
+
+		BridgedThreads::parallelFor((int)kWork.aItems.size(), 1, workAheadRange, &kWork.kBurst);
+
+		while (AI_resolveWorkAheadBurst())
+		{
+			BridgedThreads::parallelFor((int)kWork.aiAgain.size(), 1, workAheadRange, &kWork.kBurst);
+		}
+
+		AI_finishWorkAhead(true);
+	}
+}
+
+//
+// The work ahead in the background (BridgedThreads::startInBackground()): the main thread goes
+// on while the workers do it, keeping the game still, and looks at it with AI_updateWorkAhead()
+// until it is over. Between the bursts of its rounds, and at the end, the main thread does its
+// share there. With no workers it is done at once, in one burst on the main thread; false then,
+// and when there is nothing to do.
+//
+bool CvPlayerAI::AI_startWorkAheadInBackground(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip)
+{
+	PROFILE_FUNC();
+
+	if (s_kWorkAhead.bActive)
+	{
+		return true;
+	}
+
+	if (BridgedThreads::workerCount() == 0)
+	{
+		AI_doWorkAhead(bFoundValues, bBestBuilds, eSkip);
+		return false;
+	}
+
+	if (!AI_beginWorkAhead(bFoundValues, bBestBuilds, eSkip))
+	{
+		return false;
+	}
+
+	WorkAhead& kWork = s_kWorkAhead;
+	if (!BridgedThreads::startInBackground((int)kWork.aItems.size(), 1, workAheadRange, &kWork.kBurst))
+	{
+		FAssertMsg(false, "a burst under way when the work ahead started");
+		AI_finishWorkAhead(true);
+		return false;
+	}
+
+	return true;
+}
+
+bool CvPlayerAI::AI_isWorkAheadUnderWay()
+{
+	return s_kWorkAhead.bActive;
+}
+
+// true while it is under way
+bool CvPlayerAI::AI_updateWorkAhead()
+{
+	if (!s_kWorkAhead.bActive)
+	{
+		return false;
+	}
+
+	if (!BridgedThreads::isBackgroundDone())
+	{
+		return true;
+	}
+
+	PROFILE("CvPlayerAI::AI_updateWorkAhead: a burst done");
+
+	WorkAhead& kWork = s_kWorkAhead;
+
+	if (AI_resolveWorkAheadBurst() && BridgedThreads::startInBackground((int)kWork.aiAgain.size(), 1, workAheadRange, &kWork.kBurst))
+	{
+		return true;
+	}
+
+	AI_finishWorkAhead(true);
+	return false;
+}
+
+// Stops the work ahead under way at once: what a worker has started is finished, the rest is done
+// here (bDoLeftovers) or left (AI_finishWorkAhead()).
+void CvPlayerAI::AI_stopWorkAhead(bool bDoLeftovers)
+{
+	if (!s_kWorkAhead.bActive)
+	{
+		return;
+	}
+
+	PROFILE_FUNC();
+
+	BridgedThreads::requestStop();
+	BridgedThreads::waitBackground();
+	AI_finishWorkAhead(bDoLeftovers);
 }
 
 
@@ -2222,6 +2446,16 @@ void CvPlayerAI::AI_beginFoundValueSweep(bool bAhead, FoundValueSweepRun& kRun) 
 	kSweep.bDeferred = false;
 	kSweep.iBonusNeeded = -1;
 	kRun.aResults.resize(iNumPlots);
+}
+
+
+// A sweep begun (AI_beginFoundValueSweep()) and never run, let go: what its beginning took from
+// the player for the plots to use is put back, so that the next sweep sees it again. The plots
+// it marked to be scored again stay marked.
+void CvPlayerAI::AI_abandonFoundValueSweep(FoundValueSweepRun& kRun) const
+{
+	m_uiFoundNoTradeable ^= kRun.uiTradeableChanged;
+	m_aiAICitySites.swap(kRun.aiKeptCitySites);
 }
 
 
