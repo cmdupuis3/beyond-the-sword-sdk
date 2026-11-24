@@ -51,6 +51,7 @@
 | [Idle units at peace keep their decision](idle-units-kept.md) | 2 | flat | not measured | low |
 | [Explorers look for paths from the best plot down](explore-best-first.md) | 2 | flat | not measured | low |
 | [Workers act as a team](worker-teams.md) | 2 | not measured | not measured | low |
+| [City builds worked out ahead on several threads](builds-ahead-in-a-burst.md) | 3 | flat | late | low |
 
 - Tier 1: reproduces stock BtS, the same game state on every turn. See [tiers](../tiers.md).
 - Tier 2: deterministic, but play can differ from stock. Tier 3: not deterministic.
