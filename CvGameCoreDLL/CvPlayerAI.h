@@ -11,6 +11,7 @@
 class CvEventTriggerInfo;
 
 struct FoundValueSweep;
+struct FoundValueSweepRun;
 
 // final: nothing derives from it, so a call through a CvPlayerAI is bound at compile time
 class CvPlayerAI final : public CvPlayer
@@ -55,6 +56,8 @@ public:
 	bool AI_isMissionTargetNear(const CvPlot* pPlot, int iRange) const;
 	void AI_updateFoundValuesAhead() const;
 	void AI_updateBestBuildsAhead();
+	// the work ahead for every AI player but eSkip, in one burst: see CvPlayerAI.cpp
+	static void AI_doWorkAhead(PlayerTypes eSkip);
 	bool AI_isFoundValueKept() const;
 	bool AI_isFoundPlanKept() const;
 	void AI_updateAreaTargets();
@@ -146,6 +149,7 @@ public:
 
 	int AI_bonusVal(BonusTypes eBonus, int iChange = 1) const;
 	int AI_baseBonusVal(BonusTypes eBonus) const;
+	int AI_computeBaseBonusVal(BonusTypes eBonus) const;
 	int AI_bonusTradeVal(BonusTypes eBonus, PlayerTypes ePlayer, int iChange) const;
 	DenialTypes AI_bonusTrade(BonusTypes eBonus, PlayerTypes ePlayer) const;
 	int AI_corporationBonusVal(BonusTypes eBonus) const;
@@ -435,6 +439,8 @@ protected:
 
 	void AI_updateFoundValuesAll() const;
 	void AI_refreshFoundValues(bool bAhead) const;
+	void AI_beginFoundValueSweep(bool bAhead, FoundValueSweepRun& kRun) const;
+	void AI_endFoundValueSweep(FoundValueSweepRun& kRun) const;
 	int AI_foundSweepBonusVal(FoundValueSweep& kSweep, BonusTypes eBonus) const;
 	int AI_foundBonusVal(BonusTypes eBonus) const;
 	bool AI_foundNoTradeableBonus(BonusTypes eBonus) const;

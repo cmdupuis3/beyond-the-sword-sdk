@@ -7,12 +7,23 @@
 #include "CvGlobals.h"
 #include "FProfiler.h"
 #include "CvDLLInterfaceIFaceBase.h"
+#include "BridgedThreads.h"
+
+// a worker thread in a burst allocates from the DLL's own heap: see BridgedThreads.h
+static inline bool onBurstWorker()
+{
+	return (BridgedThreads::g_lBurstActive != 0) && BridgedThreads::isWorkerThread();
+}
 
 //
 // operator global new and delete override for gamecore DLL 
 //
 void *__cdecl operator new(size_t size)
 {
+	if (onBurstWorker())
+	{
+		return BridgedThreads::workerAllocate(size);
+	}
 	if (gDLL)
 	{
 		return gDLL->newMem(size, __FILE__, __LINE__);
@@ -22,6 +33,11 @@ void *__cdecl operator new(size_t size)
 
 void __cdecl operator delete (void *p)
 {
+	if (onBurstWorker())
+	{
+		BridgedThreads::workerFree(p);
+		return;
+	}
 	if (gDLL)
 	{
 		gDLL->delMem(p, __FILE__, __LINE__);
@@ -34,6 +50,10 @@ void __cdecl operator delete (void *p)
 
 void* operator new[](size_t size)
 {
+	if (onBurstWorker())
+	{
+		return BridgedThreads::workerAllocate(size);
+	}
 	if (gDLL)
 		return gDLL->newMemArray(size, __FILE__, __LINE__);
 	return malloc(size);
@@ -41,6 +61,11 @@ void* operator new[](size_t size)
 
 void operator delete[](void* pvMem)
 {
+	if (onBurstWorker())
+	{
+		BridgedThreads::workerFree(pvMem);
+		return;
+	}
 	if (gDLL)
 	{
 		gDLL->delMemArray(pvMem, __FILE__, __LINE__);
@@ -53,21 +78,39 @@ void operator delete[](void* pvMem)
 
 void *__cdecl operator new(size_t size, char* pcFile, int iLine)
 {
+	if (onBurstWorker())
+	{
+		return BridgedThreads::workerAllocate(size);
+	}
 	return gDLL->newMem(size, pcFile, iLine);
 }
 
 void *__cdecl operator new[](size_t size, char* pcFile, int iLine)
 {
+	if (onBurstWorker())
+	{
+		return BridgedThreads::workerAllocate(size);
+	}
 	return gDLL->newMem(size, pcFile, iLine);
 }
 
 void __cdecl operator delete(void* pvMem, char* pcFile, int iLine)
 {
+	if (onBurstWorker())
+	{
+		BridgedThreads::workerFree(pvMem);
+		return;
+	}
 	gDLL->delMem(pvMem, pcFile, iLine);
 }
 
 void __cdecl operator delete[](void* pvMem, char* pcFile, int iLine)
 {
+	if (onBurstWorker())
+	{
+		BridgedThreads::workerFree(pvMem);
+		return;
+	}
 	gDLL->delMem(pvMem, pcFile, iLine);
 }
 

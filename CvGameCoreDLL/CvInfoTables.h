@@ -62,6 +62,11 @@ namespace CvInfoTables
 	// a team gained or lost a technology, or was reset or loaded
 	void teamTechsChanged(TeamTypes eTeam);
 
+	// Makes the lists and every live team's masks now, so that a burst of work on several
+	// threads only reads them (see BridgedThreads.h). What is made is what the next question
+	// would have made: the answers do not depend on when they are worked out.
+	void prepare();
+
 	// true in a profile build with INFO_TABLE_VERIFY set
 	bool isVerify();
 }

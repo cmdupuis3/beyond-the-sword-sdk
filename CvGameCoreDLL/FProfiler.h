@@ -87,6 +87,19 @@ struct BridgedProfileSample
 };
 
 extern BridgedProfileSample* g_pBridgedProfileCurrent;
+
+// A worker thread of a burst does not take part: the current-sample pointer and the counts
+// are the main thread's (see BridgedThreads.h). Its time shows in the scope the main thread
+// has open around the burst.
+namespace BridgedThreads
+{
+	bool isWorkerThread();
+	extern volatile long g_lBurstActive;
+}
+inline bool bridgedProfileOnWorker()
+{
+	return (BridgedThreads::g_lBurstActive != 0) && BridgedThreads::isWorkerThread();
+}
 void bridgedProfileRegister(BridgedProfileSample* pSample);
 void bridgedProfileTurn(int iGameTurn);	// call once per game turn; writes the log
 // For CvGame::update(), on its way in and out and for each time the exe had the thread: see
@@ -101,6 +114,10 @@ inline unsigned long long bridgedProfileTicks()
 
 inline BridgedProfileSample* bridgedProfileEnter(BridgedProfileSample* pSample)
 {
+	if (bridgedProfileOnWorker())
+	{
+		return NULL;
+	}
 	if (!pSample->bRegistered)
 	{
 		bridgedProfileRegister(pSample);
@@ -113,6 +130,10 @@ inline BridgedProfileSample* bridgedProfileEnter(BridgedProfileSample* pSample)
 
 inline void bridgedProfileLeave(BridgedProfileSample* pSample, BridgedProfileSample* pParent, unsigned long long uiStart)
 {
+	if (bridgedProfileOnWorker())
+	{
+		return;
+	}
 	const unsigned long long uiElapsed = bridgedProfileTicks() - uiStart;
 	pSample->uiCalls++;
 	if (--pSample->iOpen == 0)
@@ -129,6 +150,10 @@ inline void bridgedProfileLeave(BridgedProfileSample* pSample, BridgedProfileSam
 // For counts and timings taken by hand rather than through a scope.
 inline void bridgedProfileAdd(BridgedProfileSample* pSample, unsigned long long uiTicks, unsigned int uiCalls = 1)
 {
+	if (bridgedProfileOnWorker())
+	{
+		return;
+	}
 	if (!pSample->bRegistered)
 	{
 		bridgedProfileRegister(pSample);

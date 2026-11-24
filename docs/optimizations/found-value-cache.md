@@ -15,8 +15,9 @@ plot's score is now kept (`AI_refreshFoundValues()`) and worked out again only w
 something it was worked out from has changed. Changes on the map mark the plots around
 them (`CvMap::foundValuesChanged()`); inputs that many plots share (the team's cities and
 visible bonuses, bonus values, culture multipliers) are compared at each sweep. While a
-human takes their turn, `CvGame::updateAhead()` brings one AI player's scores up to date
-every 100 ms (single-player only). The barbarians, and games that score or veto city sites
+human takes their turn, `CvGame::updateAhead()` brings the AI players' scores up to date
+every 100 ms (single-player only; on several threads since
+[`6b76660`](found-values-ahead-in-a-burst.md)). The barbarians, and games that score or veto city sites
 from Python, keep the stock sweep (`AI_updateFoundValuesAll()`).
 
 `6ef48c0` also added per-player fixed found values and found modifiers on plots

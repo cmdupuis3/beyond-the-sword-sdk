@@ -2,6 +2,8 @@
 
 #include "CvGameCoreDLL.h"
 #include "CvPlayerAI.h"
+#include "BridgedThreads.h"
+#include "CvInfoTables.h"
 #include "CvRandom.h"
 #include "CvGlobals.h"
 #include "CvGameCoreUtils.h"
@@ -403,8 +405,9 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 
 	// FOUND_VALUE_AHEAD_TEST: a global define for games with no human player. Set, the first
 	// player's turn stands in for a human's: the other players' city-site scores are worked
-	// on at its start, as CvGame::updateAhead() does while a human takes their turn. A game
-	// must play out exactly as it does without it.
+	// on at its start, as CvGame::updateAhead() does while a human takes their turn, in one
+	// burst (AI_doWorkAhead()). A game must play out exactly as it does without it.
+	// WORK_AHEAD_SERIAL=1 does them one player at a time on the main thread instead, to compare.
 #ifdef NON_DETERMINISM_OK
 	// BEST_BUILD_AHEAD_TEST: the same stand-in for AI_updateBestBuildsAhead(). Every other
 	// player's cities get their turn ahead, which is what a human who takes long enough
@@ -420,9 +423,16 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 
 	if ((getID() == 0) && (GC.getDefineINT("FOUND_VALUE_AHEAD_TEST") != 0))
 	{
-		for (int iPlayer = 1; iPlayer < MAX_CIV_PLAYERS; iPlayer++)
+		if (GC.getDefineINT("WORK_AHEAD_SERIAL") != 0)
 		{
-			GET_PLAYER((PlayerTypes)iPlayer).AI_updateFoundValuesAhead();
+			for (int iPlayer = 1; iPlayer < MAX_CIV_PLAYERS; iPlayer++)
+			{
+				GET_PLAYER((PlayerTypes)iPlayer).AI_updateFoundValuesAhead();
+			}
+		}
+		else
+		{
+			AI_doWorkAhead(getID());	// not for the stand-in itself
 		}
 	}
 
@@ -1053,14 +1063,90 @@ struct FoundValueSweep
 
 	bool bRecording;
 	bool bCultureRead;
+	bool bDeferred;						// the plot in hand needs a bonus value not fixed yet: see AI_foundSweepBonusVal()
+	int iBonusNeeded;					// that bonus
 	int iDeadlockCount;
 	int iNumBonusAsked;
 	unsigned char aeBonusAsked[CvPlayerAI::FOUND_VALUE_MAX_ASKED];
 	unsigned long long uiTradeableAsked;
+
+	// what scoring one plot gave, for its record
+	struct Score
+	{
+		int iValue;
+		unsigned long long uiTradeableAsked;
+		unsigned int uiCultureHash;
+		int iDeadlockCount;
+		int iNumBonusAsked;
+		unsigned char aeBonusAsked[CvPlayerAI::FOUND_VALUE_MAX_ASKED];
+		bool bDeferred;
+	};
+
+	// what the sweep came to for one plot
+	enum PlotStates
+	{
+		PLOT_NOT_REVEALED,
+		PLOT_KEPT,
+		PLOT_SCORED,
+		PLOT_DEFER_DECISION,	// handed back before its dirty bits were cleared: all of it again
+		PLOT_DEFER_SCORE,		// handed back while being scored: the scoring again
+	};
+	struct PlotResult
+	{
+		unsigned char eState;
+		unsigned char eReason;	// why it was scored, or that it was kept: FoundValueReasons
+		bool bDeadlockSame;		// its deadlocked bonuses were counted again and were the same
+		int iBonusNeeded;		// handed back: the bonus value it needs fixed
+		Score kScore;
+	};
+
+	static void scorePlot(FoundValueSweep& kSweep, int iPlot, Score& kScore);
+	static void processPlot(FoundValueSweep& kSweep, int iPlot, unsigned long long uiTradeableChanged, PlotResult& kResult);
+	static void runPlots(FoundValueSweepRun& kRun);
+	static bool runHandedBack(FoundValueSweepRun& kRun);	// the plots handed back once more; whether any still is
 };
 
-// the sweep under way, if any; AI_foundValue() reports to it through the functions below
+// One sweep from start to end: see AI_refreshFoundValues().
+struct FoundValueSweepRun
+{
+	FoundValueSweep kSweep;
+	unsigned long long uiTradeableChanged;
+	std::vector<int> aiKeptCitySites;
+	std::vector<FoundValueSweep::PlotResult> aResults;	// per plot
+	bool bAhead;
+};
+
+// why a sweep scored a plot again, or that it kept its score (the profile counts them)
+enum FoundValueReasons
+{
+	FOUND_REASON_KEPT,
+	FOUND_REASON_CHANGED_NEARBY,
+	FOUND_REASON_FIRST,
+	FOUND_REASON_TRADEABLE,
+	FOUND_REASON_CULTURE,
+	FOUND_REASON_DEADLOCK,
+	FOUND_REASON_BONUS,
+	NUM_FOUND_REASONS
+};
+
+// Whether a sweep made ahead may work a bonus value out on a burst's thread
+// (AI_foundSweepBonusVal()): set by AI_doWorkAhead() when the answer cannot come from Python.
+static bool s_bBonusValuesInBurst = false;
+
+// The sweep under way, if any; AI_foundValue() reports to it through the functions below.
+// During a burst each thread has its own copy (see AI_refreshFoundValues()).
 static FoundValueSweep* s_pFoundValueSweep = NULL;
+static FoundValueSweep* s_apBurstFoundValueSweep[16];
+
+static inline FoundValueSweep* currentFoundValueSweep()
+{
+	if (BridgedThreads::isInBurst())
+	{
+		return s_apBurstFoundValueSweep[BridgedThreads::threadIndex()];
+	}
+
+	return s_pFoundValueSweep;
+}
 
 inline void foundValueMix(unsigned long long& uiHash, int iValue)
 {
@@ -1070,7 +1156,7 @@ inline void foundValueMix(unsigned long long& uiHash, int iValue)
 // AI_foundValue() has read a culture multiplier.
 inline void foundValueCultureRead(const CvPlayerAI* pPlayer)
 {
-	FoundValueSweep* pSweep = s_pFoundValueSweep;
+	FoundValueSweep* pSweep = currentFoundValueSweep();
 
 	if ((pSweep != NULL) && (pSweep->pPlayer == pPlayer) && pSweep->bRecording)
 	{
@@ -1094,6 +1180,29 @@ int CvPlayerAI::AI_foundSweepBonusVal(FoundValueSweep& kSweep, BonusTypes eBonus
 	{
 		const bool bUnfixed = (m_aiBonusValue[eBonus] == -1);
 
+		// Working it out would fix it, at the moment of asking, and fixing it is the main
+		// thread's: the plot is scored again there after the burst (AI_endFoundValueSweep()). A
+		// sweep made ahead leaves the value unfixed anyway, so it works it out without keeping
+		// it, where a burst's thread may (AI_baseBonusVal()).
+		if (bUnfixed && BridgedThreads::isInBurst())
+		{
+			if (kSweep.bAhead && s_bBonusValuesInBurst)
+			{
+				BridgedThreads::takeNeedMainThread();	// a sweep's item does not hand back as a whole
+				const int iValue = AI_computeBaseBonusVal(eBonus) + AI_corporationBonusVal(eBonus);
+
+				if (!BridgedThreads::takeNeedMainThread())
+				{
+					kSweep.aiBonusVal[eBonus] = iValue;
+					return iValue;
+				}
+			}
+
+			kSweep.bDeferred = true;
+			kSweep.iBonusNeeded = eBonus;
+			return 0;
+		}
+
 		kSweep.aiBonusVal[eBonus] = AI_bonusVal(eBonus);
 
 		if (kSweep.bAhead && bUnfixed)
@@ -1106,10 +1215,228 @@ int CvPlayerAI::AI_foundSweepBonusVal(FoundValueSweep& kSweep, BonusTypes eBonus
 }
 
 
+// Scores one plot of a sweep, noting what the score read. On a thread of a burst, a plot
+// that needs a bonus value not fixed yet comes back with bDeferred set and nothing else.
+void FoundValueSweep::scorePlot(FoundValueSweep& kSweep, int iPlot, Score& kScore)
+{
+	CvPlot* pPlot = GC.getMapINLINE().plotByIndexINLINE(iPlot);
+
+	kSweep.bRecording = true;
+	kSweep.bCultureRead = false;
+	kSweep.bDeferred = false;
+	kSweep.iDeadlockCount = -1;
+	kSweep.iNumBonusAsked = 0;
+	kSweep.uiTradeableAsked = 0;
+
+	kScore.iValue = kSweep.pPlayer->AI_foundValueForSweep(pPlot);
+
+	kSweep.bRecording = false;
+	kScore.bDeferred = kSweep.bDeferred;
+
+	if (kScore.bDeferred)
+	{
+		return;
+	}
+
+	kScore.uiTradeableAsked = kSweep.uiTradeableAsked;
+	kScore.uiCultureHash = (kSweep.bCultureRead ? kSweep.pPlayer->AI_foundCultureHash(pPlot, kSweep.iClaimThreshold) : 0);
+	kScore.iDeadlockCount = kSweep.iDeadlockCount;
+	kScore.iNumBonusAsked = kSweep.iNumBonusAsked;
+
+	for (int iAsked = 0; iAsked < std::min(kSweep.iNumBonusAsked, (int)CvPlayerAI::FOUND_VALUE_MAX_ASKED); iAsked++)
+	{
+		kScore.aeBonusAsked[iAsked] = kSweep.aeBonusAsked[iAsked];
+	}
+}
+
+//
+// One plot of a sweep: is the kept score still right, and if not, the plot scored again. The
+// tests run in the order AI_foundValue() reads: a bonus value is asked for last, and only
+// while every earlier answer stands, so that no bonus value is fixed that the plain sweep
+// would have left alone. On a thread of a burst a plot that needs a bonus value not fixed yet
+// is handed back (PLOT_DEFER_DECISION or PLOT_DEFER_SCORE) with the bonus it needs.
+//
+void FoundValueSweep::processPlot(FoundValueSweep& kSweep, int iPlot, unsigned long long uiTradeableChanged, PlotResult& kResult)
+{
+	const CvPlayerAI& kPlayer = *kSweep.pPlayer;
+	const PlayerTypes ePlayer = kPlayer.getID();
+	CvMap& kMap = GC.getMapINLINE();
+	CvPlot* pPlot = kMap.plotByIndexINLINE(iPlot);
+
+	kResult.bDeadlockSame = false;
+	kResult.iBonusNeeded = -1;
+
+	if (!pPlot->isRevealed(kPlayer.getTeam(), false))
+	{
+		// not swept; CvPlot::setRevealed() marks a plot that stops being revealed
+		kResult.eState = PLOT_NOT_REVEALED;
+		return;
+	}
+
+	const CvPlayerAI::FoundValueRecord& kRecord = kPlayer.m_aFoundValueRecords[iPlot];
+	int iReason = FOUND_REASON_KEPT;
+	bool bScore = true;
+
+	if (kMap.isFoundValueScoreDirty(iPlot, ePlayer))
+	{
+		iReason = FOUND_REASON_CHANGED_NEARBY;
+	}
+	else if ((kRecord.iValue == MIN_INT) || (kRecord.iNumBonusAsked == CvPlayerAI::FOUND_VALUE_ASKED_OVERFLOW))
+	{
+		iReason = FOUND_REASON_FIRST;
+	}
+	else if ((kRecord.uiTradeableAsked & uiTradeableChanged) != 0)
+	{
+		iReason = FOUND_REASON_TRADEABLE;
+	}
+	else if ((kRecord.uiCultureHash != 0) && (kPlayer.AI_foundCultureHash(pPlot, kSweep.iClaimThreshold) != kRecord.uiCultureHash))
+	{
+		iReason = FOUND_REASON_CULTURE;
+	}
+	else
+	{
+		bScore = false;
+
+		if ((kRecord.iDeadlockCount >= 0) && kMap.isFoundValueDeadlockDirty(iPlot, ePlayer))
+		{
+			if (kPlayer.AI_countDeadlockedBonuses(pPlot) != kRecord.iDeadlockCount)
+			{
+				bScore = true;
+				iReason = FOUND_REASON_DEADLOCK;
+			}
+			else
+			{
+				kResult.bDeadlockSame = true;
+			}
+		}
+
+		for (int iAsked = 0; !bScore && (iAsked < kRecord.iNumBonusAsked); iAsked++)
+		{
+			const BonusTypes eBonus = (BonusTypes)kRecord.aeBonusAsked[iAsked];
+
+			kSweep.bDeferred = false;
+			const int iValue = kPlayer.AI_foundSweepBonusVal(kSweep, eBonus);
+
+			if (kSweep.bDeferred)
+			{
+				kResult.eState = PLOT_DEFER_DECISION;
+				kResult.iBonusNeeded = eBonus;
+				return;
+			}
+
+			if (iValue != kPlayer.m_aiFoundBonusVal[eBonus])
+			{
+				bScore = true;
+				iReason = FOUND_REASON_BONUS;
+			}
+		}
+	}
+
+	kMap.clearFoundValueDirty(iPlot, ePlayer);	// this plot's own word: no other thread touches it
+	kResult.eReason = (unsigned char)iReason;
+
+	if (!bScore)
+	{
+		kResult.eState = PLOT_KEPT;
+		return;
+	}
+
+	scorePlot(kSweep, iPlot, kResult.kScore);
+
+	if (kResult.kScore.bDeferred)
+	{
+		kResult.eState = PLOT_DEFER_SCORE;
+		kResult.iBonusNeeded = kSweep.iBonusNeeded;
+		return;
+	}
+
+	kResult.eState = PLOT_SCORED;
+}
+
+// The plots of a sweep, on the thread that runs it (a burst's thread for a sweep made ahead:
+// see CvPlayerAI::AI_doWorkAhead()). Each plot comes to a PlotResult; the main thread does the
+// rest (CvPlayerAI::AI_endFoundValueSweep()).
+void FoundValueSweep::runPlots(FoundValueSweepRun& kRun)
+{
+	const bool bBurst = BridgedThreads::isInBurst();
+	const int iNumPlots = GC.getMapINLINE().numPlotsINLINE();
+
+	if (bBurst)
+	{
+		s_apBurstFoundValueSweep[BridgedThreads::threadIndex()] = &kRun.kSweep;
+	}
+	else
+	{
+		s_pFoundValueSweep = &kRun.kSweep;
+	}
+
+	for (int iI = 0; iI < iNumPlots; iI++)
+	{
+		processPlot(kRun.kSweep, iI, kRun.uiTradeableChanged, kRun.aResults[iI]);
+	}
+
+	if (bBurst)
+	{
+		s_apBurstFoundValueSweep[BridgedThreads::threadIndex()] = NULL;
+	}
+	else
+	{
+		s_pFoundValueSweep = NULL;
+	}
+}
+
+
+// The plots of a sweep that were handed back, gone through again once the main thread has
+// worked out the bonus values they need (CvPlayerAI::AI_doWorkAhead()).
+bool FoundValueSweep::runHandedBack(FoundValueSweepRun& kRun)
+{
+	const bool bBurst = BridgedThreads::isInBurst();
+	const int iNumPlots = GC.getMapINLINE().numPlotsINLINE();
+	bool bStill = false;
+
+	if (bBurst)
+	{
+		s_apBurstFoundValueSweep[BridgedThreads::threadIndex()] = &kRun.kSweep;
+	}
+
+	for (int iI = 0; iI < iNumPlots; iI++)
+	{
+		PlotResult& kResult = kRun.aResults[iI];
+
+		if (kResult.eState == PLOT_DEFER_DECISION)
+		{
+			processPlot(kRun.kSweep, iI, kRun.uiTradeableChanged, kResult);
+		}
+		else if (kResult.eState == PLOT_DEFER_SCORE)
+		{
+			scorePlot(kRun.kSweep, iI, kResult.kScore);
+
+			if (kResult.kScore.bDeferred)
+			{
+				kResult.iBonusNeeded = kRun.kSweep.iBonusNeeded;
+			}
+			else
+			{
+				kResult.eState = PLOT_SCORED;
+			}
+		}
+
+		bStill = bStill || (kResult.eState == PLOT_DEFER_DECISION) || (kResult.eState == PLOT_DEFER_SCORE);
+	}
+
+	if (bBurst)
+	{
+		s_apBurstFoundValueSweep[BridgedThreads::threadIndex()] = NULL;
+	}
+
+	return bStill;
+}
+
+
 // AI_bonusVal() as AI_foundValue() asks for it: a sweep notes which bonuses were asked for.
 int CvPlayerAI::AI_foundBonusVal(BonusTypes eBonus) const
 {
-	FoundValueSweep* pSweep = s_pFoundValueSweep;
+	FoundValueSweep* pSweep = currentFoundValueSweep();
 
 	if ((pSweep == NULL) || (pSweep->pPlayer != this))
 	{
@@ -1149,7 +1476,7 @@ int CvPlayerAI::AI_foundBonusVal(BonusTypes eBonus) const
 // (getNumTradeableBonuses(eBonus) == 0) as AI_foundValue() asks it.
 bool CvPlayerAI::AI_foundNoTradeableBonus(BonusTypes eBonus) const
 {
-	FoundValueSweep* pSweep = s_pFoundValueSweep;
+	FoundValueSweep* pSweep = currentFoundValueSweep();
 
 	if ((pSweep != NULL) && (pSweep->pPlayer == this) && pSweep->bRecording)
 	{
@@ -1163,7 +1490,7 @@ bool CvPlayerAI::AI_foundNoTradeableBonus(BonusTypes eBonus) const
 // AI_countDeadlockedBonuses() as AI_foundValue() asks for it.
 int CvPlayerAI::AI_foundDeadlockedBonuses(CvPlot* pPlot) const
 {
-	FoundValueSweep* pSweep = s_pFoundValueSweep;
+	FoundValueSweep* pSweep = currentFoundValueSweep();
 	const int iCount = AI_countDeadlockedBonuses(pPlot);
 
 	if ((pSweep != NULL) && (pSweep->pPlayer == this) && pSweep->bRecording)
@@ -1333,6 +1660,161 @@ void CvPlayerAI::AI_updateBestBuildsAhead()
 }
 
 
+//
+// The work for the AI players that can be done while a human takes their turn, for all of them
+// in one burst on several threads (BridgedThreads.h): each player's city-site scores, one item
+// a player. Tier 1: what is worked out is never relied on (AI_updateFoundValuesAhead()).
+//
+// What the work reads that the game makes on first use is made here first: the info tables and
+// the plots' areas. A plot that needs a bonus value not fixed yet is handed back: the value is
+// fixed here, in the order of the players, and the plot goes through another burst; what is
+// left after three rounds is done here at the end of the player's sweep
+// (AI_endFoundValueSweep()). So what comes out is what the same work done on the main thread
+// gives, however it was split.
+//
+namespace
+{
+	struct WorkAheadItem
+	{
+		FoundValueSweepRun* pRun;	// a player's sweep
+		bool bHandedBack;			// some of its plots
+	};
+
+	struct WorkAheadBurst
+	{
+		WorkAheadItem* aItems;
+		const int* piItems;			// a later round: the items to go through again; NULL for the first
+	};
+
+	void workAheadRange(void* pContext, int iBegin, int iEnd, int /*iThread*/)
+	{
+		WorkAheadBurst& kBurst = *(WorkAheadBurst*)pContext;
+
+		for (int iI = iBegin; iI < iEnd; iI++)
+		{
+			WorkAheadItem& kItem = kBurst.aItems[(kBurst.piItems != NULL) ? kBurst.piItems[iI] : iI];
+
+			BridgedThreads::takeNeedMainThread();
+
+			// hands back plot by plot
+			if (kBurst.piItems == NULL)
+			{
+				FoundValueSweep::runPlots(*kItem.pRun);
+				kItem.bHandedBack = true;	// looked at by the main thread below
+			}
+			else
+			{
+				kItem.bHandedBack = FoundValueSweep::runHandedBack(*kItem.pRun);
+			}
+			BridgedThreads::takeNeedMainThread();
+		}
+	}
+}
+
+void CvPlayerAI::AI_doWorkAhead(PlayerTypes eSkip)
+{
+	PROFILE_FUNC();
+
+	// a bonus value asks whether units and buildings can be made: on a burst's thread only if
+	// Python is not asked (AI_foundSweepBonusVal())
+	s_bBonusValuesInBurst = !GC.getUSE_CAN_TRAIN_CALLBACK() && !GC.getUSE_CANNOT_TRAIN_CALLBACK() && !GC.getUSE_CAN_CONSTRUCT_CALLBACK()
+		&& !GC.getUSE_CANNOT_CONSTRUCT_CALLBACK();
+
+	std::vector<FoundValueSweepRun> aRuns(MAX_PLAYERS);	// not resized below: the items point into it
+	std::vector<WorkAheadItem> aItems;
+
+	for (int iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
+	{
+		CvPlayerAI& kPlayer = GET_PLAYER((PlayerTypes)iPlayer);
+
+		if (kPlayer.isAlive() && !kPlayer.isHuman() && (iPlayer != eSkip) && kPlayer.AI_isFoundValueKept())
+		{
+			kPlayer.AI_beginFoundValueSweep(true, aRuns[iPlayer]);
+			WorkAheadItem kItem = { &aRuns[iPlayer], false };
+			aItems.push_back(kItem);
+		}
+	}
+
+	if (!aItems.empty())
+	{
+		CvInfoTables::prepare();
+		for (int iI = 0; iI < GC.getMapINLINE().numPlotsINLINE(); iI++)
+		{
+			GC.getMapINLINE().plotByIndexINLINE(iI)->area();
+		}
+
+		WorkAheadBurst kBurst = { &aItems[0], NULL };
+		BridgedThreads::parallelFor((int)aItems.size(), 1, workAheadRange, &kBurst);
+
+		// The bonus values the plots handed back for: fixed here, in the order of the items (each
+		// is what the item would have fixed at that point, had it been done here), and the items
+		// go through another burst. Three rounds at most.
+		std::vector<int> aiAgain;
+
+		for (int iRound = 0; iRound < 3; iRound++)
+		{
+			aiAgain.clear();
+
+			for (int iI = 0; iI < (int)aItems.size(); iI++)
+			{
+				WorkAheadItem& kItem = aItems[iI];
+
+				if (!kItem.bHandedBack)
+				{
+					continue;
+				}
+
+				bool bAny = false;
+				for (int iPlot = 0; iPlot < (int)kItem.pRun->aResults.size(); iPlot++)
+				{
+					const FoundValueSweep::PlotResult& kResult = kItem.pRun->aResults[iPlot];
+
+					if ((kResult.eState == FoundValueSweep::PLOT_DEFER_DECISION) || (kResult.eState == FoundValueSweep::PLOT_DEFER_SCORE))
+					{
+						kItem.pRun->kSweep.pPlayer->AI_foundSweepBonusVal(kItem.pRun->kSweep, (BonusTypes)kResult.iBonusNeeded);
+						bAny = true;
+					}
+				}
+
+				if (bAny)
+				{
+					aiAgain.push_back(iI);
+				}
+				else
+				{
+					kItem.bHandedBack = false;
+				}
+			}
+
+			if (aiAgain.empty())
+			{
+				break;
+			}
+
+#ifdef BRIDGED_PROFILE
+			static BridgedProfileSample kAgain = { "work ahead: items handed back, gone through again in another burst" };
+			bridgedProfileAdd(&kAgain, 0, (unsigned int)aiAgain.size());
+#endif
+			kBurst.piItems = &aiAgain[0];
+			BridgedThreads::parallelFor((int)aiAgain.size(), 1, workAheadRange, &kBurst);
+		}
+	}
+
+	// the rest of each sweep, in the order of the players
+	for (int iI = 0; iI < (int)aItems.size(); iI++)
+	{
+		aItems[iI].pRun->kSweep.pPlayer->AI_endFoundValueSweep(*aItems[iI].pRun);	// does the plots handed back
+	}
+
+	s_bBonusValuesInBurst = false;
+
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample kItemsSample = { "work ahead: items in a burst" };
+	bridgedProfileAdd(&kItemsSample, 0, (unsigned int)aItems.size());
+#endif
+}
+
+
 void CvPlayerAI::AI_updateFoundValuesAhead() const
 {
 	if (!isAlive() || isHuman() || !AI_isFoundValueKept())
@@ -1389,23 +1871,22 @@ void CvPlayerAI::AI_updateFoundValuesAhead() const
 //
 void CvPlayerAI::AI_refreshFoundValues(bool bAhead) const
 {
+	FoundValueSweepRun kRun;
+	AI_beginFoundValueSweep(bAhead, kRun);
+	FoundValueSweep::runPlots(kRun);
+	AI_endFoundValueSweep(kRun);
+}
+
+
+// The first part of a sweep, on the main thread: what every plot shares.
+void CvPlayerAI::AI_beginFoundValueSweep(bool bAhead, FoundValueSweepRun& kRun) const
+{
 	CvMap& kMap = GC.getMapINLINE();
 	const int iNumPlots = kMap.numPlotsINLINE();
 	const int iNumBonuses = GC.getNumBonusInfos();
 	int iI;
 
-#ifdef BRIDGED_PROFILE
-	enum { COUNT_KEPT, COUNT_CHANGED_NEARBY, COUNT_FIRST, COUNT_TRADEABLE, COUNT_CULTURE, COUNT_DEADLOCK, COUNT_BONUS, COUNT_DEADLOCK_SAME, NUM_COUNTS };
-	static BridgedProfileSample aPlotSamples[2][NUM_COUNTS] = {
-		{ { "FV plot: kept" }, { "FV plot: scored, something changed nearby" }, { "FV plot: scored for the first time" },
-		  { "FV plot: scored, a bonus became tradeable or stopped" }, { "FV plot: scored, culture changed" },
-		  { "FV plot: scored, deadlocked bonuses changed" }, { "FV plot: scored, a bonus value changed" }, { "FV plot: deadlocked bonuses counted again, same" } },
-		{ { "FV ahead plot: kept" }, { "FV ahead plot: scored, something changed nearby" }, { "FV ahead plot: scored for the first time" },
-		  { "FV ahead plot: scored, a bonus became tradeable or stopped" }, { "FV ahead plot: scored, culture changed" },
-		  { "FV ahead plot: scored, deadlocked bonuses changed" }, { "FV ahead plot: scored, a bonus value changed" }, { "FV ahead plot: deadlocked bonuses counted again, same" } } };
-	int aiCounts[NUM_COUNTS] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-#endif
-
+	kRun.bAhead = bAhead;
 	kMap.ensureFoundValueDirtyBits();
 
 	if (((int)m_aFoundValueRecords.size() != iNumPlots) || ((int)m_aiFoundBonusVal.size() != iNumBonuses))
@@ -1422,7 +1903,7 @@ void CvPlayerAI::AI_refreshFoundValues(bool bAhead) const
 		m_aFoundAreaClass.clear();
 	}
 
-	FoundValueSweep kSweep;
+	FoundValueSweep& kSweep = kRun.kSweep;
 	kSweep.pPlayer = this;
 	kSweep.bAhead = bAhead;
 	kSweep.aiBonusVal.assign(iNumBonuses, MIN_INT);
@@ -1565,136 +2046,121 @@ void CvPlayerAI::AI_refreshFoundValues(bool bAhead) const
 		}
 	}
 
-	const unsigned long long uiTradeableChanged = (uiNoTradeable ^ m_uiFoundNoTradeable);
+	kRun.uiTradeableChanged = (uiNoTradeable ^ m_uiFoundNoTradeable);
 	m_uiFoundNoTradeable = uiNoTradeable;
 
 	// The scores kept are the scores with no city sites planned. At the player's own turn
 	// AI_updateFoundValues() has just cleared the plan; ahead of it the plan is set aside.
-	std::vector<int> aiKeptCitySites;
-	aiKeptCitySites.swap(m_aiAICitySites);
+	kRun.aiKeptCitySites.swap(m_aiAICitySites);
+
+	kSweep.bDeferred = false;
+	kSweep.iBonusNeeded = -1;
+	kRun.aResults.resize(iNumPlots);
+}
+
+
+//
+// The last part of a sweep, on the main thread. A plot's answer (FoundValueSweep::processPlot())
+// depends only on the game, which nothing changes meanwhile, and on the bonus values, which
+// only a plot whose value is not fixed yet fixes; so the plots can be gone through on another
+// thread, as a sweep made ahead is (AI_doWorkAhead()), as long as a value is fixed only here.
+// A plot that needed one was handed back and is done here, in plot order, fixing the value as
+// the plain sweep would have when it came to that plot. Then the records are filled and the
+// values written back, in plot order.
+//
+void CvPlayerAI::AI_endFoundValueSweep(FoundValueSweepRun& kRun) const
+{
+	CvMap& kMap = GC.getMapINLINE();
+	const int iNumPlots = kMap.numPlotsINLINE();
+	const int iNumBonuses = GC.getNumBonusInfos();
+	const bool bAhead = kRun.bAhead;
+	FoundValueSweep& kSweep = kRun.kSweep;
+	const unsigned long long uiTradeableChanged = kRun.uiTradeableChanged;
+	FoundValueSweep::PlotResult* aResults = &kRun.aResults[0];
+	int iI;
+
+#ifdef BRIDGED_PROFILE
+	enum { COUNT_KEPT, COUNT_CHANGED_NEARBY, COUNT_FIRST, COUNT_TRADEABLE, COUNT_CULTURE, COUNT_DEADLOCK, COUNT_BONUS, COUNT_DEADLOCK_SAME, NUM_COUNTS };
+	static BridgedProfileSample aPlotSamples[2][NUM_COUNTS] = {
+		{ { "FV plot: kept" }, { "FV plot: scored, something changed nearby" }, { "FV plot: scored for the first time" },
+		  { "FV plot: scored, a bonus became tradeable or stopped" }, { "FV plot: scored, culture changed" },
+		  { "FV plot: scored, deadlocked bonuses changed" }, { "FV plot: scored, a bonus value changed" }, { "FV plot: deadlocked bonuses counted again, same" } },
+		{ { "FV ahead plot: kept" }, { "FV ahead plot: scored, something changed nearby" }, { "FV ahead plot: scored for the first time" },
+		  { "FV ahead plot: scored, a bonus became tradeable or stopped" }, { "FV ahead plot: scored, culture changed" },
+		  { "FV ahead plot: scored, deadlocked bonuses changed" }, { "FV ahead plot: scored, a bonus value changed" }, { "FV ahead plot: deadlocked bonuses counted again, same" } } };
+	int aiCounts[NUM_COUNTS] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+	static BridgedProfileSample kHandedBack = { "FV burst: plots handed back for a bonus value, done on the main thread" };
+#endif
 
 	s_pFoundValueSweep = &kSweep;
 
 	for (iI = 0; iI < iNumPlots; iI++)
 	{
-		CvPlot* pLoopPlot = kMap.plotByIndexINLINE(iI);
+		FoundValueSweep::PlotResult& kResult = aResults[iI];
 
-		if (!pLoopPlot->isRevealed(getTeam(), false))
+		// what was handed back is done here, in plot order
+		if (kResult.eState == FoundValueSweep::PLOT_DEFER_DECISION)
 		{
-			// not swept; CvPlot::setRevealed() marks a plot that stops being revealed
+			FoundValueSweep::processPlot(kSweep, iI, uiTradeableChanged, kResult);
+#ifdef BRIDGED_PROFILE
+			bridgedProfileAdd(&kHandedBack, 0);
+#endif
+		}
+		else if (kResult.eState == FoundValueSweep::PLOT_DEFER_SCORE)
+		{
+			FoundValueSweep::scorePlot(kSweep, iI, kResult.kScore);
+			kResult.eState = FoundValueSweep::PLOT_SCORED;
+#ifdef BRIDGED_PROFILE
+			bridgedProfileAdd(&kHandedBack, 0);
+#endif
+		}
+		FAssert((kResult.eState != FoundValueSweep::PLOT_DEFER_DECISION) && (kResult.eState != FoundValueSweep::PLOT_DEFER_SCORE));
+
+		if (kResult.eState == FoundValueSweep::PLOT_NOT_REVEALED)
+		{
 			continue;
 		}
 
+#ifdef BRIDGED_PROFILE
+		aiCounts[kResult.eReason]++;
+		if (kResult.bDeadlockSame)
+		{
+			aiCounts[COUNT_DEADLOCK_SAME]++;
+		}
+#endif
+
 		FoundValueRecord& kRecord = m_aFoundValueRecords[iI];
 
-		// Is the kept score still right? The tests run in the order AI_foundValue() reads:
-		// a bonus value is asked for last, and only while every earlier answer stands, so
-		// that no bonus value is fixed that the plain sweep would have left alone.
-#ifdef BRIDGED_PROFILE
-		int iReason = COUNT_KEPT;
-#endif
-		bool bScore = true;
-
-		if (kMap.isFoundValueScoreDirty(iI, getID()))
+		if (kResult.eState == FoundValueSweep::PLOT_SCORED)
 		{
-#ifdef BRIDGED_PROFILE
-			iReason = COUNT_CHANGED_NEARBY;
-#endif
-		}
-		else if ((kRecord.iValue == MIN_INT) || (kRecord.iNumBonusAsked == FOUND_VALUE_ASKED_OVERFLOW))
-		{
-#ifdef BRIDGED_PROFILE
-			iReason = COUNT_FIRST;
-#endif
-		}
-		else if ((kRecord.uiTradeableAsked & uiTradeableChanged) != 0)
-		{
-#ifdef BRIDGED_PROFILE
-			iReason = COUNT_TRADEABLE;
-#endif
-		}
-		else if ((kRecord.uiCultureHash != 0) && (AI_foundCultureHash(pLoopPlot, kSweep.iClaimThreshold) != kRecord.uiCultureHash))
-		{
-#ifdef BRIDGED_PROFILE
-			iReason = COUNT_CULTURE;
-#endif
-		}
-		else
-		{
-			bScore = false;
+			const FoundValueSweep::Score& kScore = kResult.kScore;
 
-			if ((kRecord.iDeadlockCount >= 0) && kMap.isFoundValueDeadlockDirty(iI, getID()))
-			{
-				if (AI_countDeadlockedBonuses(pLoopPlot) != kRecord.iDeadlockCount)
-				{
-					bScore = true;
-#ifdef BRIDGED_PROFILE
-					iReason = COUNT_DEADLOCK;
-#endif
-				}
-#ifdef BRIDGED_PROFILE
-				else
-				{
-					aiCounts[COUNT_DEADLOCK_SAME]++;
-				}
-#endif
-			}
+			kRecord.iValue = kScore.iValue;
+			kRecord.uiTradeableAsked = kScore.uiTradeableAsked;
+			kRecord.uiCultureHash = kScore.uiCultureHash;
+			kRecord.iDeadlockCount = (short)kScore.iDeadlockCount;
 
-			for (int iAsked = 0; !bScore && (iAsked < kRecord.iNumBonusAsked); iAsked++)
-			{
-				const BonusTypes eBonus = (BonusTypes)kRecord.aeBonusAsked[iAsked];
-
-				if (AI_foundSweepBonusVal(kSweep, eBonus) != m_aiFoundBonusVal[eBonus])
-				{
-					bScore = true;
-#ifdef BRIDGED_PROFILE
-					iReason = COUNT_BONUS;
-#endif
-				}
-			}
-		}
-
-		kMap.clearFoundValueDirty(iI, getID());
-
-		if (bScore)
-		{
-			kSweep.bRecording = true;
-			kSweep.bCultureRead = false;
-			kSweep.iDeadlockCount = -1;
-			kSweep.iNumBonusAsked = 0;
-			kSweep.uiTradeableAsked = 0;
-
-			kRecord.iValue = AI_foundValueForSweep(pLoopPlot);
-
-			kSweep.bRecording = false;
-
-			kRecord.uiTradeableAsked = kSweep.uiTradeableAsked;
-			kRecord.uiCultureHash = (kSweep.bCultureRead ? AI_foundCultureHash(pLoopPlot, kSweep.iClaimThreshold) : 0);
-			kRecord.iDeadlockCount = (short)kSweep.iDeadlockCount;
-
-			if (kSweep.iNumBonusAsked > FOUND_VALUE_MAX_ASKED)
+			if (kScore.iNumBonusAsked > FOUND_VALUE_MAX_ASKED)
 			{
 				kRecord.iNumBonusAsked = FOUND_VALUE_ASKED_OVERFLOW;
 			}
 			else
 			{
-				kRecord.iNumBonusAsked = (unsigned char)kSweep.iNumBonusAsked;
+				kRecord.iNumBonusAsked = (unsigned char)kScore.iNumBonusAsked;
 
-				for (int iAsked = 0; iAsked < kSweep.iNumBonusAsked; iAsked++)
+				for (int iAsked = 0; iAsked < kScore.iNumBonusAsked; iAsked++)
 				{
-					kRecord.aeBonusAsked[iAsked] = kSweep.aeBonusAsked[iAsked];
+					kRecord.aeBonusAsked[iAsked] = kScore.aeBonusAsked[iAsked];
 				}
 			}
 		}
-
-#ifdef BRIDGED_PROFILE
-		aiCounts[iReason]++;
-#endif
 
 		if (!bAhead)
 		{
 			// Every revealed plot's found value is written back at every sweep, because
 			// choosing the planned city sites afterwards adjusts the values around each site.
+			CvPlot* pLoopPlot = kMap.plotByIndexINLINE(iI);
+
 			pLoopPlot->setFoundValue(getID(), kRecord.iValue);
 
 			if (kRecord.iValue > pLoopPlot->area()->getBestFoundValue(getID()))
@@ -1717,7 +2183,7 @@ void CvPlayerAI::AI_refreshFoundValues(bool bAhead) const
 
 	if (bAhead)
 	{
-		m_aiAICitySites.swap(aiKeptCitySites);
+		m_aiAICitySites.swap(kRun.aiKeptCitySites);
 	}
 
 #ifdef BRIDGED_PROFILE
@@ -2557,7 +3023,20 @@ int CvPlayerAI::AI_foundValue(int iX, int iY, int iMinRivalRange, bool bStarting
 		}
 	}
 	
-	std::vector<int> paiBonusCount(GC.getNumBonusInfos(), 0);
+	// on the stack where it fits: this runs for every plot of a sweep, on several threads at
+	// once (BridgedThreads.h), and a heap is a lock they would all wait on
+	int aiBonusCountKept[128];
+	std::vector<int> aiBonusCountHeap;
+	int* paiBonusCount = aiBonusCountKept;
+	if (GC.getNumBonusInfos() > 128)
+	{
+		aiBonusCountHeap.assign(GC.getNumBonusInfos(), 0);
+		paiBonusCount = &aiBonusCountHeap[0];
+	}
+	else
+	{
+		memset(aiBonusCountKept, 0, GC.getNumBonusInfos() * sizeof(int));
+	}
 
 	if (iMinRivalRange != -1)
 	{
@@ -7484,12 +7963,32 @@ int CvPlayerAI::AI_bonusVal(BonusTypes eBonus, int iChange) const
 }
 
 //Value sans corporation
+//
+// The value is worked out once and kept until the player's next turn (AI_updateBonusValue()),
+// so when it is first asked for decides it: on a thread of a burst (BridgedThreads.h) it is
+// handed back to the main thread.
+//
 int CvPlayerAI::AI_baseBonusVal(BonusTypes eBonus) const
 {
 	PROFILE_FUNC();
 
-	//recalculate if not defined
-	if(m_aiBonusValue[eBonus] == -1)
+	if (m_aiBonusValue[eBonus] == -1)
+	{
+		if (BridgedThreads::isInBurst())
+		{
+			BridgedThreads::needMainThread(BridgedThreads::NEED_BONUS_VALUE, getID(), eBonus);
+			return 0;
+		}
+
+		m_aiBonusValue[eBonus] = AI_computeBaseBonusVal(eBonus);
+	}
+
+	return m_aiBonusValue[eBonus];
+}
+
+// AI_baseBonusVal() worked out afresh and not kept.
+int CvPlayerAI::AI_computeBaseBonusVal(BonusTypes eBonus) const
+{
 	{
 		PROFILE("CvPlayerAI::AI_baseBonusVal::recalculate");
 
@@ -7803,10 +8302,8 @@ int CvPlayerAI::AI_baseBonusVal(BonusTypes eBonus) const
 
 
 		//clamp value non-negative
-		m_aiBonusValue[eBonus] = std::max(0, iValue);
+		return std::max(0, iValue);
 	}
-
-	return m_aiBonusValue[eBonus];
 }
 
 int CvPlayerAI::AI_corporationBonusVal(BonusTypes eBonus) const
@@ -10031,6 +10528,13 @@ bool CvPlayerAI::AI_isMissionTargetNear(const CvPlot* pPlot, int iRange) const
 
 	if (m_bMissionTargetsDirty || ((int)m_aiMissionTargetGroups.size() != kMap.numPlotsINLINE()))
 	{
+		// counted again here: the main thread's to do (BridgedThreads.h)
+		if (BridgedThreads::isInBurst())
+		{
+			BridgedThreads::needMainThread();
+			return true;
+		}
+
 		m_aiMissionTargetGroups.assign(kMap.numPlotsINLINE(), 0);
 
 		int iLoop;
@@ -14893,6 +15397,13 @@ int CvPlayerAI::AI_getStrategyHash() const
     {
         return m_iStrategyHash;        
     }
+
+	// fixed for the turn when first asked for: the main thread's to do (BridgedThreads.h)
+	if (BridgedThreads::isInBurst())
+	{
+		BridgedThreads::needMainThread();
+		return 0;
+	}
     
     const FlavorTypes AI_FLAVOR_MILITARY = (FlavorTypes)0;
 	const FlavorTypes AI_FLAVOR_RELIGION = (FlavorTypes)1;
@@ -15799,6 +16310,13 @@ int CvPlayerAI::AI_goldToUpgradeAllUnits(int iExpThreshold) const
 		return m_iUpgradeUnitsCachedGold;
 	}
 
+	// kept for the turn when first asked for: the main thread's to do (BridgedThreads.h)
+	if (BridgedThreads::isInBurst())
+	{
+		BridgedThreads::needMainThread(BridgedThreads::NEED_UPGRADE_GOLD, getID(), iExpThreshold);
+		return 0;
+	}
+
 	int iTotalGold = 0;
 	
 	CvCivilizationInfo& kCivilizationInfo = GC.getCivilizationInfo(getCivilizationType());
@@ -15973,6 +16491,13 @@ void CvPlayerAI::AI_calculateAverages() const
 	CvCity* pLoopCity;
 	int iLoop;
 	int iI;
+
+	// fixed for the turn when first asked for: the main thread's to do (BridgedThreads.h)
+	if (BridgedThreads::isInBurst())
+	{
+		BridgedThreads::needMainThread();
+		return;
+	}
 	
 	int iPopulation;
 	int iTotalPopulation;
