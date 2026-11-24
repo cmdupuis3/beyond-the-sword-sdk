@@ -33,6 +33,7 @@
 | [Path searches head for the destination](path-heuristic-weight.md) | 2 | grows | not measured | medium |
 | [Targets valued before their path is searched for](path-value-bounds.md) | 2 | grows | not measured | medium |
 | [City-site plan kept by players without a settler](found-plan-kept.md) | 2 | flat | not measured | medium |
+| [Citizens swapped in place](citizens-swapped-in-place.md) | 2 | flat | late | medium |
 | [City builds chosen on the human's turn](builds-on-human-turn.md) | 3 | shrinks | late | medium |
 | [AI classes and the free-list array marked final](final-ai-classes.md) | 1 | not measured | const | low |
 | [AI turns not played out for the human](ai-turns-not-played-out.md) | 1 | not measured | not measured | low |
