@@ -2078,6 +2078,25 @@ int CvGame::getTeamClosenessScore(int** aaiDistances, int* aiStartingLocs)
 namespace
 {
 	bool s_bWorkAheadWanted = false;	// updateAhead() asks for the burst, startWorkAheadIfWanted() starts it
+	DWORD s_uiWorkAheadStartMs = 0;
+
+	// WORK_AHEAD_HOLD_MS: the longest the game is kept still for the work (unset or 0: 250 ms).
+	// Past it the workers are asked to stop after the items in hand, and the rest is left for the
+	// next time. The game's passes (the human's units on their way, automated workers, the
+	// turn's end) wait while it is kept still.
+	DWORD workAheadHoldMs()
+	{
+		static int iMs = -1;
+		if (iMs == -1)
+		{
+			iMs = GC.getDefineINT("WORK_AHEAD_HOLD_MS");
+			if (iMs <= 0)
+			{
+				iMs = 250;
+			}
+		}
+		return (DWORD)iMs;
+	}
 	bool s_bWorkAheadBuilds = true;		// with the cities' builds (tier 3)
 
 	// WORK_AHEAD_UPDATE_TEST=1, for games with no human player: the city-site scores (tier 1,
@@ -2138,6 +2157,7 @@ void CvGame::startWorkAheadIfWanted()
 	s_uiWorkAheadStart = bridgedProfileTicks();
 #endif
 
+	s_uiWorkAheadStartMs = GetTickCount();
 	CvPlayerAI::AI_startWorkAheadInBackground(true, s_bWorkAheadBuilds, NO_PLAYER);
 }
 
@@ -2146,7 +2166,15 @@ bool CvGame::holdForWorkAhead()
 {
 	if (CvPlayerAI::AI_isWorkAheadUnderWay())
 	{
-		if (CvPlayerAI::AI_updateWorkAhead(CvDecisionQueue::hasQueued()))
+		const bool bHeldLong = ((GetTickCount() - s_uiWorkAheadStartMs) > workAheadHoldMs());
+#ifdef BRIDGED_PROFILE
+		if (bHeldLong && !CvDecisionQueue::hasQueued() && !BridgedThreads::isStopRequested())
+		{
+			static BridgedProfileSample kLong = { "work ahead in the background: stopped, held the game too long" };
+			bridgedProfileAdd(&kLong, 0);
+		}
+#endif
+		if (CvPlayerAI::AI_updateWorkAhead(CvDecisionQueue::hasQueued() || bHeldLong))
 		{
 			return true;
 		}
