@@ -11,7 +11,8 @@
 
 ## What it does
 While a human takes their turn in a single-player game, `CvGame::updateAhead()` goes round
-the AI players, one every tenth of a second. In a tier 3 build each of them then has all
+the AI players, one every tenth of a second (all of them at once, on several threads, since
+[`3239d18`](builds-ahead-in-a-burst.md)). In a tier 3 build each of them then has all
 its cities work out their builds for their plots
 (`CvPlayerAI::AI_updateBestBuildsAhead()`): every city once a game turn, and again if
 something it looks at changes afterwards. A city that has had its turn ahead keeps what it

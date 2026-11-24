@@ -57,7 +57,7 @@ public:
 	void AI_updateFoundValuesAhead() const;
 	void AI_updateBestBuildsAhead();
 	// the work ahead for every AI player but eSkip, in one burst: see CvPlayerAI.cpp
-	static void AI_doWorkAhead(PlayerTypes eSkip);
+	static void AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip);
 	bool AI_isFoundValueKept() const;
 	bool AI_isFoundPlanKept() const;
 	void AI_updateAreaTargets();

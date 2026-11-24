@@ -96,6 +96,17 @@ public:
 	int AI_countBestBuilds(CvArea* pArea);
 	void AI_updateBestBuild();
 	bool AI_isBestBuildKept() const;
+	// What AI_updateBestBuild() writes, and reads of its last run: saved before a burst of work
+	// ahead and put back before an item handed back is done again (CvPlayerAI::AI_doWorkAhead()).
+	struct BestBuildState
+	{
+		int aiValue[NUM_CITY_PLOTS];
+		BuildTypes aeBuild[NUM_CITY_PLOTS];
+		bool bDirty;
+		int iTurn;
+	};
+	void AI_saveBestBuildState(BestBuildState& kState) const;
+	void AI_restoreBestBuildState(const BestBuildState& kState);
 	bool AI_isBestBuildWantedAhead() const;
 
 	virtual int AI_cityValue() const;
