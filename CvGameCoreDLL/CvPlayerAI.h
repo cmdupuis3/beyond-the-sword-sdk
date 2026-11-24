@@ -56,6 +56,7 @@ public:
 	void AI_updateFoundValuesAhead() const;
 	void AI_updateBestBuildsAhead();
 	bool AI_isFoundValueKept() const;
+	bool AI_isFoundPlanKept() const;
 	void AI_updateAreaTargets();
 
 	int AI_movementPriority(CvSelectionGroup* pGroup) const;
@@ -407,6 +408,8 @@ protected:
 	int** m_aaiMemoryCount;
 	
 	mutable std::vector<int> m_aiAICitySites;
+	int m_iFoundPlanTurn;		// see AI_isFoundPlanKept(); not saved
+	int m_iFoundPlanCities;
 	// The city-site scores kept between turns: see AI_refreshFoundValues(). Not saved with the game.
 	enum { FOUND_VALUE_MAX_ASKED = 8, FOUND_VALUE_ASKED_OVERFLOW = 255 };
 	struct FoundValueRecord
