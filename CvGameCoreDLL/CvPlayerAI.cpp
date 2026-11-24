@@ -436,6 +436,10 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 					}
 				}
 
+#ifdef BRIDGED_PROFILE
+				const bool bTripwire = (GC.getDefineINT("WORK_AHEAD_TRIPWIRE") != 0);
+				const int iChecksum = bTripwire ? GC.getGameINLINE().calculateSyncChecksum() : 0;
+#endif
 				if (AI_startWorkAheadInBackground(bFoundTest, bBuildsTest, getID()))
 				{
 					if (GC.getDefineINT("WORK_AHEAD_STOP_TEST") != 0)
@@ -448,6 +452,14 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 						Sleep(0);
 					}
 				}
+#ifdef BRIDGED_PROFILE
+				if (bTripwire)
+				{
+					static BridgedProfileSample kSame = { "work ahead tripwire: game the same after the work" };
+					static BridgedProfileSample kChanged = { "work ahead tripwire: GAME CHANGED WHILE THE WORK RAN" };
+					bridgedProfileAdd((GC.getGameINLINE().calculateSyncChecksum() == iChecksum) ? &kSame : &kChanged, 0);
+				}
+#endif
 			}
 			else if (GC.getDefineINT("WORK_AHEAD_SERIAL") != 0)
 			{
@@ -2162,17 +2174,29 @@ bool CvPlayerAI::AI_isWorkAheadUnderWay()
 	return s_kWorkAhead.bActive;
 }
 
-// true while it is under way
-bool CvPlayerAI::AI_updateWorkAhead()
+// true while it is under way. bStopAsked: it is to end as soon as the workers have finished the
+// items in hand, with the rest left (CvDecisionQueue: a decision is waiting).
+bool CvPlayerAI::AI_updateWorkAhead(bool bStopAsked)
 {
 	if (!s_kWorkAhead.bActive)
 	{
 		return false;
 	}
 
+	if (bStopAsked)
+	{
+		BridgedThreads::requestStop();
+	}
+
 	if (!BridgedThreads::isBackgroundDone())
 	{
 		return true;
+	}
+
+	if (bStopAsked)
+	{
+		AI_finishWorkAhead(false);
+		return false;
 	}
 
 	PROFILE("CvPlayerAI::AI_updateWorkAhead: a burst done");
@@ -2202,6 +2226,31 @@ void CvPlayerAI::AI_stopWorkAhead(bool bDoLeftovers)
 	BridgedThreads::requestStop();
 	BridgedThreads::waitBackground();
 	AI_finishWorkAhead(bDoLeftovers);
+}
+
+// Stops the work ahead under way and lets it go without ending it: the game it was for is being
+// let go (a game loaded, the game left), and its players and cities may be gone already.
+void CvPlayerAI::AI_discardWorkAhead()
+{
+	if (!s_kWorkAhead.bActive)
+	{
+		return;
+	}
+
+	BridgedThreads::requestStop();
+	BridgedThreads::waitBackground();
+
+	WorkAhead& kWork = s_kWorkAhead;
+	s_bBonusValuesInBurst = false;
+	for (int iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
+	{
+		kWork.abBuilds[iPlayer] = false;
+	}
+	kWork.aItems.clear();
+	kWork.aStates.clear();
+	kWork.aiAgain.clear();
+	kWork.aRuns.clear();
+	kWork.bActive = false;
 }
 
 

@@ -85,6 +85,8 @@ public:
 	bool canDoControl(ControlTypes eControl) const;
 	void doControl(ControlTypes eControl);
 
+	void startWorkAheadIfWanted();
+	bool holdForWorkAhead();
 	DllExport void implementDeal(PlayerTypes eWho, PlayerTypes eOtherWho, CLinkList<TradeData>* pOurList, CLinkList<TradeData>* pTheirList, bool bForce = false);
 	void verifyDeals();
 

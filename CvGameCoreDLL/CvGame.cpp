@@ -1,6 +1,7 @@
 // game.cpp
 
 #include "CvGameCoreDLL.h"
+#include "CvMessageData.h"
 #include "CvGameCoreUtils.h"
 #include "CvGame.h"
 #include "CvGameAI.h"
@@ -369,6 +370,8 @@ void CvGame::regenerateMap()
 
 void CvGame::uninit()
 {
+	CvDecisionQueue::discardAll();	// the work ahead in the background, and what it kept, let go
+
 	SAFE_DELETE_ARRAY(m_aiShrineBuilding);
 	SAFE_DELETE_ARRAY(m_aiShrineReligion);
 	SAFE_DELETE_ARRAY(m_paiUnitCreatedCount);
@@ -414,6 +417,8 @@ void CvGame::uninit()
 // Initializes data members that are serialized.
 void CvGame::reset(HandicapTypes eHandicap, bool bConstructorCall)
 {
+	CvDecisionQueue::discardAll();	// the work ahead in the background, and what it kept, let go
+
 	int iI;
 
 	//--------------------------------
@@ -2065,10 +2070,114 @@ int CvGame::getTeamClosenessScore(int** aaiDistances, int* aiStartingLocs)
 // they are tier 3.
 //
 // Single-player games only, every tenth of a second, all the AI players in one burst of work
-// on several threads, so that the interface is held up for as short a time as can be.
+// on several threads, so that the interface is held up for as short a time as can be. In a tier 3
+// build the burst runs in the background (unless WORK_AHEAD_BACKGROUND_OFF=1): it is started at
+// the end of CvGame::update() and the game is kept still until it is over, the human's decisions
+// meanwhile kept and done afterwards (CvDecisionQueue). The interface is then not held up at all.
 //
+namespace
+{
+	bool s_bWorkAheadWanted = false;	// updateAhead() asks for the burst, startWorkAheadIfWanted() starts it
+	bool s_bWorkAheadBuilds = true;		// with the cities' builds (tier 3)
+
+	// WORK_AHEAD_UPDATE_TEST=1, for games with no human player: the city-site scores (tier 1,
+	// never relied on) worked out in the background after every pass, the game kept still
+	// meanwhile, in any build. A game must play out exactly as it does without it.
+	bool isWorkAheadUpdateTest()
+	{
+		static int iTest = -1;
+		if (iTest == -1)
+		{
+			iTest = ((GC.getDefineINT("WORK_AHEAD_UPDATE_TEST") != 0) ? 1 : 0);
+		}
+		return (iTest != 0);
+	}
+#ifdef BRIDGED_PROFILE
+	bool s_bWorkAheadTripwire = false;
+	int s_iWorkAheadChecksum = 0;
+	unsigned long long s_uiWorkAheadStart = 0;
+#endif
+
+	bool isWorkAheadInBackground()
+	{
+#ifdef NON_DETERMINISM_OK
+		static int iOff = -1;
+		if (iOff == -1)
+		{
+			iOff = ((GC.getDefineINT("WORK_AHEAD_BACKGROUND_OFF") != 0) ? 1 : 0);
+		}
+		return (iOff == 0);
+#else
+		return false;
+#endif
+	}
+}
+
+static bool isWorkAheadUpdateTestWaiting()
+{
+	return isWorkAheadUpdateTest() && s_bWorkAheadWanted;
+}
+
+void CvGame::startWorkAheadIfWanted()
+{
+	if (!s_bWorkAheadWanted)
+	{
+		return;
+	}
+
+	s_bWorkAheadWanted = false;
+
+	if (CvPlayerAI::AI_isWorkAheadUnderWay())
+	{
+		return;
+	}
+
+#ifdef BRIDGED_PROFILE
+	s_bWorkAheadTripwire = (GC.getDefineINT("WORK_AHEAD_TRIPWIRE") != 0);
+	s_iWorkAheadChecksum = s_bWorkAheadTripwire ? calculateSyncChecksum() : 0;
+	s_uiWorkAheadStart = bridgedProfileTicks();
+#endif
+
+	CvPlayerAI::AI_startWorkAheadInBackground(true, s_bWorkAheadBuilds, NO_PLAYER);
+}
+
+// true: the work ahead is still running in the background, and the game waits for it
+bool CvGame::holdForWorkAhead()
+{
+	if (CvPlayerAI::AI_isWorkAheadUnderWay())
+	{
+		if (CvPlayerAI::AI_updateWorkAhead(CvDecisionQueue::hasQueued()))
+		{
+			return true;
+		}
+
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample kRan = { "work ahead in the background: from start to end" };
+		bridgedProfileAdd(&kRan, bridgedProfileTicks() - s_uiWorkAheadStart);
+
+		if (s_bWorkAheadTripwire)
+		{
+			static BridgedProfileSample kSame = { "work ahead tripwire: game the same after the work" };
+			static BridgedProfileSample kChanged = { "work ahead tripwire: GAME CHANGED WHILE THE WORK RAN" };
+			bridgedProfileAdd((calculateSyncChecksum() == s_iWorkAheadChecksum) ? &kSame : &kChanged, 0);
+			s_bWorkAheadTripwire = false;
+		}
+#endif
+	}
+
+	CvDecisionQueue::playBack();
+	return false;
+}
+
 void CvGame::updateAhead()
 {
+	if (isWorkAheadUpdateTest())
+	{
+		s_bWorkAheadWanted = true;
+		s_bWorkAheadBuilds = false;
+		return;
+	}
+
 	if (isGameMultiPlayer() || (getActivePlayer() == NO_PLAYER) || (getAIAutoPlay() != 0))
 	{
 		return;
@@ -2091,6 +2200,12 @@ void CvGame::updateAhead()
 	}
 
 	uiLastTime = uiTime;
+
+	if (isWorkAheadInBackground())
+	{
+		s_bWorkAheadWanted = true;	// started at the end of CvGame::update()
+		return;
+	}
 
 	// every AI player's work at once, in a burst on several threads: the interface waits only
 	// for the burst (see CvPlayerAI::AI_doWorkAhead() and BridgedThreads.h)
@@ -2308,6 +2423,9 @@ int CvGame::nextSliceWait(bool bNewGameTurn, int iStartRequests, int iPasses, DW
 }
 
 
+// WORK_AHEAD_UPDATE_TEST: see updateAhead()
+static bool isWorkAheadUpdateTestWaiting();
+
 void CvGame::update()
 {
 #ifdef BRIDGED_PROFILE
@@ -2345,6 +2463,8 @@ void CvGame::update()
 		// changes: see CvPlot::updateSymbols().
 		GC.getMapINLINE().setSymbolsDeferred(!GC.getMapINLINE().isStockSymbolUpdates());
 
+		// while the AI's work ahead runs in the background the game is kept still: no pass now
+		if (!holdForWorkAhead())
 		do
 		{
 			const int iStartGameTurn = getGameTurn();
@@ -2371,11 +2491,13 @@ void CvGame::update()
 			bridgedProfileAdd(&aWaitSamples[iWait], 0);
 #endif
 		}
-		while (iWait == SLICE_WAIT_NONE);
+		while ((iWait == SLICE_WAIT_NONE) && !isWorkAheadUpdateTestWaiting());	// the test: back to the exe after each pass
 
 		GC.getMapINLINE().setSymbolsDeferred(false);
 		GC.getMapINLINE().updateDeferredSymbols();
 		GC.getMapINLINE().resetLayoutUpdates();
+
+		startWorkAheadIfWanted();	// last: the workers run while the exe has the time
 	}
 #ifdef BRIDGED_PROFILE
 	uiLastCallMs = GetTickCount() - uiCallStart;
@@ -2841,6 +2963,11 @@ bool CvGame::selectionListIgnoreBuildingDefense() const
 
 void CvGame::implementDeal(PlayerTypes eWho, PlayerTypes eOtherWho, CLinkList<TradeData>* pOurList, CLinkList<TradeData>* pTheirList, bool bForce)
 {
+	if (CvDecisionQueue::deferDeal(eWho, eOtherWho, pOurList, pTheirList, bForce))
+	{
+		return;		// made while the work ahead ran in the background: done afterwards
+	}
+
 	CvDeal* pDeal;
 
 	FAssertMsg(eWho != NO_PLAYER, "Who is not assigned a valid value");
@@ -8229,6 +8356,8 @@ void CvGame::read(FDataStreamBase* pStream)
 
 void CvGame::write(FDataStreamBase* pStream)
 {
+	CvDecisionQueue::settle();	// the work ahead in the background stopped, and what it kept done, first
+
 	int iI;
 
 	uint uiFlag=1;

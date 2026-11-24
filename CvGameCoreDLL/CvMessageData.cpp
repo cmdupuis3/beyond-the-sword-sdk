@@ -4,6 +4,9 @@
 #include "CvDLLUtilityIFaceBase.h"
 #include "CvDLLInterfaceIFaceBase.h"
 #include "CvEventReporter.h"
+#include "CvPlayerAI.h"
+#include "BridgedThreads.h"
+#include "LinkedList.h"
 
 CvMessageData* CvMessageData::createMessage(GameMessageTypes eType)
 {
@@ -91,6 +94,11 @@ void CvNetExtendedGame::Debug(char* szAddendum)
 
 void CvNetExtendedGame::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).makeExtendedGame();
@@ -118,6 +126,11 @@ void CvNetAutoMoves::Debug(char* szAddendum)
 
 void CvNetAutoMoves::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).setAutoMoves(true);
@@ -145,6 +158,11 @@ void CvNetTurnComplete::Debug(char* szAddendum)
 
 void CvNetTurnComplete::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).setEndTurn(true);
@@ -176,6 +194,11 @@ void CvNetPushOrder::Debug(char* szAddendum)
 
 void CvNetPushOrder::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		CvCity* pCity = GET_PLAYER(m_ePlayer).getCity(m_iCityID);
@@ -228,6 +251,11 @@ void CvNetPopOrder::Debug(char* szAddendum)
 
 void CvNetPopOrder::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		CvCity* pCity = GET_PLAYER(m_ePlayer).getCity(m_iCityID);
@@ -272,6 +300,11 @@ void CvNetDoTask::Debug(char* szAddendum)
 
 void CvNetDoTask::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		CvCity* pCity = GET_PLAYER(m_ePlayer).getCity(m_iCityID);
@@ -324,6 +357,11 @@ void CvNetUpdateCivics::Debug(char* szAddendum)
 
 void CvNetUpdateCivics::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER && !m_aeCivics.empty())
 	{
 		GET_PLAYER(m_ePlayer).revolution(&m_aeCivics[0]);
@@ -363,6 +401,11 @@ void CvNetResearch::Debug(char* szAddendum)
 
 void CvNetResearch::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		CvPlayer& kPlayer = GET_PLAYER(m_ePlayer);
@@ -432,6 +475,11 @@ void CvNetEspionageChange::Debug(char* szAddendum)
 
 void CvNetEspionageChange::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).changeEspionageSpendingWeightAgainstTeam(m_eTargetTeam, m_iChange);
@@ -469,6 +517,11 @@ void CvNetAdvancedStartAction::Debug(char* szAddendum)
 
 void CvNetAdvancedStartAction::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		if (!gDLL->getInterfaceIFace()->isExitingToMainMenu())
@@ -509,6 +562,11 @@ void CvNetModNetMessage::Debug(char* szAddendum)
 
 void CvNetModNetMessage::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	CvEventReporter::getInstance().reportModNetMessage(m_iData1, m_iData2, m_iData3, m_iData4, m_iData5);
 }
 
@@ -541,6 +599,11 @@ void CvNetConvert::Debug(char* szAddendum)
 
 void CvNetConvert::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).convert(m_eReligion);
@@ -572,6 +635,11 @@ void CvNetEmpireSplit::Debug(char* szAddendum)
 
 void CvNetEmpireSplit::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).splitEmpire(m_iAreaId);
@@ -604,6 +672,11 @@ void CvNetFoundReligion::Debug(char* szAddendum)
 
 void CvNetFoundReligion::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).foundReligion(m_eReligion, m_eSlotReligion, true);
@@ -637,6 +710,11 @@ void CvNetLaunchSpaceship::Debug(char* szAddendum)
 
 void CvNetLaunchSpaceship::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).launch(m_eVictory);
@@ -669,6 +747,11 @@ void CvNetEventTriggered::Debug(char* szAddendum)
 
 void CvNetEventTriggered::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).applyEvent(m_eEvent, m_iEventTriggeredId);
@@ -704,6 +787,11 @@ void CvNetJoinGroup::Debug(char* szAddendum)
 
 void CvNetJoinGroup::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		CvUnit* pUnit = GET_PLAYER(m_ePlayer).getUnit(m_iUnitID);
@@ -751,6 +839,11 @@ void CvNetPushMission::Debug(char* szAddendum)
 
 void CvNetPushMission::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		CvUnit* pUnit = GET_PLAYER(m_ePlayer).getUnit(m_iUnitID);
@@ -802,6 +895,11 @@ void CvNetAutoMission::Debug(char* szAddendum)
 
 void CvNetAutoMission::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		CvUnit* pUnit = GET_PLAYER(m_ePlayer).getUnit(m_iUnitID);
@@ -843,6 +941,11 @@ void CvNetDoCommand::Debug(char* szAddendum)
 
 void CvNetDoCommand::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		CvUnit* pUnit = GET_PLAYER(m_ePlayer).getUnit(m_iUnitID);
@@ -902,6 +1005,11 @@ void CvNetPercentChange::Debug(char* szAddendum)
 
 void CvNetPercentChange::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		GET_PLAYER(m_ePlayer).changeCommercePercent(m_eCommerce, m_iChange);
@@ -937,6 +1045,11 @@ void CvNetChangeVassal::Debug(char* szAddendum)
 
 void CvNetChangeVassal::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		FAssert(GET_PLAYER(m_ePlayer).getTeam() != m_eMasterTeam);
@@ -975,6 +1088,11 @@ void CvNetChooseElection::Debug(char* szAddendum)
 
 void CvNetChooseElection::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	GC.getGameINLINE().setVoteChosen(m_iSelection, m_iVoteId);
 }
 
@@ -1007,6 +1125,11 @@ void CvNetDiploVote::Debug(char* szAddendum)
 
 void CvNetDiploVote::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	GC.getGameINLINE().castVote(m_ePlayer, m_iVoteId, m_eChoice);
 }
 
@@ -1039,6 +1162,11 @@ void CvNetChangeWar::Debug(char* szAddendum)
 
 void CvNetChangeWar::Execute()
 {
+	if (CvDecisionQueue::defer(this))
+	{
+		return;
+	}
+
 	if (m_ePlayer != NO_PLAYER)
 	{
 		FAssert(GET_PLAYER(m_ePlayer).getTeam() != m_eRivalTeam);
@@ -1106,3 +1234,571 @@ void CvNetPing::Execute()
 	}
 }
 
+
+
+//
+// The human's decisions while the AI's work ahead runs in the background.
+//
+// In a tier 3 build the work the AI players can do while a human takes their turn runs on worker
+// threads while the game goes on drawing and taking input (CvGame::update(),
+// CvPlayerAI::AI_startWorkAheadInBackground()). The workers read the game, so it must not change
+// meanwhile: a decision of the human's (every one reaches the game as one of these messages, as
+// in a network game, or as a deal through CvGame::implementDeal()) is kept here, the workers are
+// asked to stop after the item in hand, and once they have, what was kept is done, before
+// anything else.
+//
+// What was kept is done in lanes: the cities' production and the empire's choices first, then
+// the cities' worked tiles and specialists, then the units' moves, commands and promotions, each
+// lane in the order it came. A decision goes ahead of an earlier one only if they touch nothing in
+// common: no city, unit or plot, and not both gold. A decision that reaches far (war, peace, a
+// deal, a vote, an event, the end of the turn, a city given away or razed) is a barrier: what came
+// before it is done before it, and what came after, after. DECISIONS_ARRIVAL_ORDER=1 does
+// everything in the order it came.
+//
+// The screen shows the game as it was until what was kept is done, as in a network game while a
+// message is on its way, so a decision cannot be made on what an earlier one will bring about (a
+// city not founded yet); the lanes keep the order where it may matter all the same.
+//
+struct CvQueuedDecision
+{
+	CvMessageData* pMessage;	// a copy, or NULL for a deal:
+	PlayerTypes eWho;
+	PlayerTypes eOtherWho;
+	std::vector<TradeData> aOur;
+	std::vector<TradeData> aTheir;
+	bool bOurList;
+	bool bTheirList;
+	bool bForce;
+
+	int iLane;
+	int aiPlot[3];				// the plots it touches (indices), -1 for none
+	int iCityOwner;
+	int iCityID;
+	int iUnitOwner;
+	int iUnitID;
+	bool bGold;
+	unsigned long long uiQueued;	// when it was kept (profile builds)
+};
+
+namespace
+{
+	enum DecisionLanes
+	{
+		LANE_BARRIER = -1,
+		LANE_EMPIRE,
+		LANE_CITIZENS,
+		LANE_UNITS,
+	};
+
+	std::vector<CvQueuedDecision>* s_paQueue = NULL;	// made on first use
+	bool s_bPlayingBack = false;
+
+	void touchPlot(CvQueuedDecision& kDecision, const CvPlot* pPlot)
+	{
+		if (pPlot == NULL)
+		{
+			return;
+		}
+
+		const int iIndex = GC.getMapINLINE().plotNumINLINE(pPlot->getX_INLINE(), pPlot->getY_INLINE());
+
+		for (int iI = 0; iI < 3; iI++)
+		{
+			if (kDecision.aiPlot[iI] == iIndex)
+			{
+				return;
+			}
+			if (kDecision.aiPlot[iI] == -1)
+			{
+				kDecision.aiPlot[iI] = iIndex;
+				return;
+			}
+		}
+	}
+
+	const CvCity* touchCity(CvQueuedDecision& kDecision, PlayerTypes ePlayer, int iCityID)
+	{
+		kDecision.iCityOwner = ePlayer;
+		kDecision.iCityID = iCityID;
+		const CvCity* pCity = (ePlayer != NO_PLAYER) ? GET_PLAYER(ePlayer).getCity(iCityID) : NULL;
+
+		if (pCity != NULL)
+		{
+			touchPlot(kDecision, pCity->plot());
+		}
+
+		return pCity;
+	}
+
+	void touchUnit(CvQueuedDecision& kDecision, PlayerTypes ePlayer, int iUnitID)
+	{
+		kDecision.iUnitOwner = ePlayer;
+		kDecision.iUnitID = iUnitID;
+		const CvUnit* pUnit = (ePlayer != NO_PLAYER) ? GET_PLAYER(ePlayer).getUnit(iUnitID) : NULL;
+
+		if (pUnit != NULL)
+		{
+			touchPlot(kDecision, pUnit->plot());
+		}
+	}
+
+	bool touchesSame(const CvQueuedDecision& kA, const CvQueuedDecision& kB)
+	{
+		if (kA.bGold && kB.bGold)
+		{
+			return true;
+		}
+
+		if ((kA.iCityID != -1) && (kA.iCityOwner == kB.iCityOwner) && (kA.iCityID == kB.iCityID))
+		{
+			return true;
+		}
+
+		if ((kA.iUnitID != -1) && (kA.iUnitOwner == kB.iUnitOwner) && (kA.iUnitID == kB.iUnitID))
+		{
+			return true;
+		}
+
+		for (int iI = 0; iI < 3; iI++)
+		{
+			for (int iJ = 0; (kA.aiPlot[iI] != -1) && (iJ < 3); iJ++)
+			{
+				if (kA.aiPlot[iI] == kB.aiPlot[iJ])
+				{
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	bool isArrivalOrder()
+	{
+		static int iArrival = -1;
+		if (iArrival == -1)
+		{
+			iArrival = ((GC.getDefineINT("DECISIONS_ARRIVAL_ORDER") != 0) ? 1 : 0);
+		}
+		return (iArrival != 0);
+	}
+
+	void clearDecision(CvQueuedDecision& kDecision)
+	{
+		kDecision.pMessage = NULL;
+		kDecision.eWho = NO_PLAYER;
+		kDecision.eOtherWho = NO_PLAYER;
+		kDecision.bOurList = false;
+		kDecision.bTheirList = false;
+		kDecision.bForce = false;
+		kDecision.iLane = LANE_BARRIER;
+		kDecision.aiPlot[0] = kDecision.aiPlot[1] = kDecision.aiPlot[2] = -1;
+		kDecision.iCityOwner = NO_PLAYER;
+		kDecision.iCityID = -1;
+		kDecision.iUnitOwner = NO_PLAYER;
+		kDecision.iUnitID = -1;
+		kDecision.bGold = false;
+#ifdef BRIDGED_PROFILE
+		kDecision.uiQueued = bridgedProfileTicks();
+#else
+		kDecision.uiQueued = 0;
+#endif
+	}
+
+	void keep(CvQueuedDecision& kDecision)
+	{
+		if (s_paQueue == NULL)
+		{
+			s_paQueue = new std::vector<CvQueuedDecision>();
+		}
+
+		s_paQueue->push_back(kDecision);
+		BridgedThreads::requestStop();	// the workers stop after the item in hand (CvGame::update())
+
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample kKept = { "decision queue: decisions kept while the work ahead ran" };
+		bridgedProfileAdd(&kKept, 0);
+#endif
+	}
+}
+
+CvMessageData* CvDecisionQueue::copy(const CvMessageData* pMessage)
+{
+	switch (pMessage->getType())
+	{
+	case GAMEMESSAGE_EXTENDED_GAME: return new CvNetExtendedGame(*(const CvNetExtendedGame*)pMessage);
+	case GAMEMESSAGE_AUTO_MOVES: return new CvNetAutoMoves(*(const CvNetAutoMoves*)pMessage);
+	case GAMEMESSAGE_TURN_COMPLETE: return new CvNetTurnComplete(*(const CvNetTurnComplete*)pMessage);
+	case GAMEMESSAGE_PUSH_ORDER: return new CvNetPushOrder(*(const CvNetPushOrder*)pMessage);
+	case GAMEMESSAGE_POP_ORDER: return new CvNetPopOrder(*(const CvNetPopOrder*)pMessage);
+	case GAMEMESSAGE_DO_TASK: return new CvNetDoTask(*(const CvNetDoTask*)pMessage);
+	case GAMEMESSAGE_UPDATE_CIVICS: return new CvNetUpdateCivics(*(const CvNetUpdateCivics*)pMessage);
+	case GAMEMESSAGE_RESEARCH: return new CvNetResearch(*(const CvNetResearch*)pMessage);
+	case GAMEMESSAGE_ESPIONAGE_CHANGE: return new CvNetEspionageChange(*(const CvNetEspionageChange*)pMessage);
+	case GAMEMESSAGE_ADVANCED_START_ACTION: return new CvNetAdvancedStartAction(*(const CvNetAdvancedStartAction*)pMessage);
+	case GAMEMESSAGE_MOD_NET_MESSAGE: return new CvNetModNetMessage(*(const CvNetModNetMessage*)pMessage);
+	case GAMEMESSAGE_CONVERT: return new CvNetConvert(*(const CvNetConvert*)pMessage);
+	case GAMEMESSAGE_EMPIRE_SPLIT: return new CvNetEmpireSplit(*(const CvNetEmpireSplit*)pMessage);
+	case GAMEMESSAGE_FOUND_RELIGION: return new CvNetFoundReligion(*(const CvNetFoundReligion*)pMessage);
+	case GAMEMESSAGE_LAUNCH_SPACESHIP: return new CvNetLaunchSpaceship(*(const CvNetLaunchSpaceship*)pMessage);
+	case GAMEMESSAGE_EVENT_TRIGGERED: return new CvNetEventTriggered(*(const CvNetEventTriggered*)pMessage);
+	case GAMEMESSAGE_JOIN_GROUP: return new CvNetJoinGroup(*(const CvNetJoinGroup*)pMessage);
+	case GAMEMESSAGE_PUSH_MISSION: return new CvNetPushMission(*(const CvNetPushMission*)pMessage);
+	case GAMEMESSAGE_AUTO_MISSION: return new CvNetAutoMission(*(const CvNetAutoMission*)pMessage);
+	case GAMEMESSAGE_DO_COMMAND: return new CvNetDoCommand(*(const CvNetDoCommand*)pMessage);
+	case GAMEMESSAGE_PERCENT_CHANGE: return new CvNetPercentChange(*(const CvNetPercentChange*)pMessage);
+	case GAMEMESSAGE_CHANGE_VASSAL: return new CvNetChangeVassal(*(const CvNetChangeVassal*)pMessage);
+	case GAMEMESSAGE_CHOOSE_ELECTION: return new CvNetChooseElection(*(const CvNetChooseElection*)pMessage);
+	case GAMEMESSAGE_DIPLO_VOTE: return new CvNetDiploVote(*(const CvNetDiploVote*)pMessage);
+	case GAMEMESSAGE_CHANGE_WAR: return new CvNetChangeWar(*(const CvNetChangeWar*)pMessage);
+	default: return NULL;
+	}
+}
+
+// The lane of a decision and what it touches, as the game stands when it is made.
+void CvDecisionQueue::describe(CvQueuedDecision& kDecision)
+{
+	const CvMessageData* pMessage = kDecision.pMessage;
+
+	if (pMessage == NULL)
+	{
+		kDecision.iLane = LANE_BARRIER;		// a deal
+		return;
+	}
+
+	switch (pMessage->getType())
+	{
+	case GAMEMESSAGE_PUSH_ORDER:
+		{
+			const CvNetPushOrder& kMessage = *(const CvNetPushOrder*)pMessage;
+			kDecision.iLane = LANE_EMPIRE;
+			touchCity(kDecision, kMessage.m_ePlayer, kMessage.m_iCityID);
+		}
+		break;
+
+	case GAMEMESSAGE_POP_ORDER:
+		{
+			const CvNetPopOrder& kMessage = *(const CvNetPopOrder*)pMessage;
+			kDecision.iLane = LANE_EMPIRE;
+			touchCity(kDecision, kMessage.m_ePlayer, kMessage.m_iCityID);
+		}
+		break;
+
+	case GAMEMESSAGE_DO_TASK:
+		{
+			const CvNetDoTask& kMessage = *(const CvNetDoTask*)pMessage;
+			const CvCity* pCity = touchCity(kDecision, kMessage.m_ePlayer, kMessage.m_iCityID);
+
+			switch (kMessage.m_eTask)
+			{
+			case TASK_RAZE:
+			case TASK_DISBAND:
+			case TASK_GIFT:
+			case TASK_LIBERATE:
+				kDecision.iLane = LANE_BARRIER;
+				break;
+
+			case TASK_CHANGE_WORKING_PLOT:
+				kDecision.iLane = LANE_CITIZENS;
+				if (pCity != NULL)
+				{
+					touchPlot(kDecision, pCity->getCityIndexPlot(kMessage.m_iData1));
+				}
+				break;
+
+			case TASK_SET_AUTOMATED_CITIZENS:
+			case TASK_SET_EMPHASIZE:
+			case TASK_CHANGE_SPECIALIST:
+			case TASK_CLEAR_WORKING_OVERRIDE:
+				kDecision.iLane = LANE_CITIZENS;
+				break;
+
+			case TASK_HURRY:
+				kDecision.iLane = LANE_EMPIRE;
+				kDecision.bGold = true;
+				break;
+
+			default:
+				kDecision.iLane = LANE_EMPIRE;
+				break;
+			}
+		}
+		break;
+
+	case GAMEMESSAGE_UPDATE_CIVICS:
+	case GAMEMESSAGE_RESEARCH:
+	case GAMEMESSAGE_ESPIONAGE_CHANGE:
+	case GAMEMESSAGE_PERCENT_CHANGE:
+		kDecision.iLane = LANE_EMPIRE;
+		break;
+
+	case GAMEMESSAGE_JOIN_GROUP:
+		{
+			const CvNetJoinGroup& kMessage = *(const CvNetJoinGroup*)pMessage;
+			kDecision.iLane = LANE_UNITS;
+			touchUnit(kDecision, kMessage.m_ePlayer, kMessage.m_iUnitID);
+		}
+		break;
+
+	case GAMEMESSAGE_PUSH_MISSION:
+		{
+			const CvNetPushMission& kMessage = *(const CvNetPushMission*)pMessage;
+			kDecision.iLane = LANE_UNITS;
+			touchUnit(kDecision, kMessage.m_ePlayer, kMessage.m_iUnitID);
+
+			switch (kMessage.m_eMission)
+			{
+			case MISSION_MOVE_TO:
+			case MISSION_ROUTE_TO:
+			case MISSION_AIRLIFT:
+			case MISSION_NUKE:
+			case MISSION_RECON:
+			case MISSION_PARADROP:
+			case MISSION_AIRBOMB:
+			case MISSION_RANGE_ATTACK:
+				touchPlot(kDecision, GC.getMapINLINE().plot(kMessage.m_iData1, kMessage.m_iData2));
+				break;
+
+			case MISSION_SPREAD_CORPORATION:
+			case MISSION_TRADE:
+			case MISSION_ESPIONAGE:
+				kDecision.bGold = true;
+				break;
+
+			default:
+				break;
+			}
+		}
+		break;
+
+	case GAMEMESSAGE_AUTO_MISSION:
+		{
+			const CvNetAutoMission& kMessage = *(const CvNetAutoMission*)pMessage;
+			kDecision.iLane = LANE_UNITS;
+			touchUnit(kDecision, kMessage.m_ePlayer, kMessage.m_iUnitID);
+		}
+		break;
+
+	case GAMEMESSAGE_DO_COMMAND:
+		{
+			const CvNetDoCommand& kMessage = *(const CvNetDoCommand*)pMessage;
+			kDecision.iLane = LANE_UNITS;
+			touchUnit(kDecision, kMessage.m_ePlayer, kMessage.m_iUnitID);
+			kDecision.bGold = (kMessage.m_eCommand == COMMAND_UPGRADE);
+		}
+		break;
+
+	default:
+		kDecision.iLane = LANE_BARRIER;		// the end of the turn, war, votes, events, Python's messages
+		break;
+	}
+}
+
+bool CvDecisionQueue::defer(CvMessageData* pMessage)
+{
+	if (s_bPlayingBack || !CvPlayerAI::AI_isWorkAheadUnderWay())
+	{
+		return false;
+	}
+
+	CvQueuedDecision kDecision;
+	clearDecision(kDecision);
+	kDecision.pMessage = copy(pMessage);
+
+	if (kDecision.pMessage == NULL)
+	{
+		// not known here: the work ahead is stopped and what was kept done, then this one
+		settle();
+		return false;
+	}
+
+	describe(kDecision);
+	keep(kDecision);
+	return true;
+}
+
+bool CvDecisionQueue::deferDeal(PlayerTypes eWho, PlayerTypes eOtherWho, CLinkList<TradeData>* pOurList, CLinkList<TradeData>* pTheirList, bool bForce)
+{
+	if (s_bPlayingBack || !CvPlayerAI::AI_isWorkAheadUnderWay())
+	{
+		return false;
+	}
+
+	CvQueuedDecision kDecision;
+	clearDecision(kDecision);
+	kDecision.eWho = eWho;
+	kDecision.eOtherWho = eOtherWho;
+	kDecision.bForce = bForce;
+	kDecision.bOurList = (pOurList != NULL);
+	kDecision.bTheirList = (pTheirList != NULL);
+
+	if (pOurList != NULL)
+	{
+		for (CLLNode<TradeData>* pNode = pOurList->head(); pNode != NULL; pNode = pOurList->next(pNode))
+		{
+			kDecision.aOur.push_back(pNode->m_data);
+		}
+	}
+
+	if (pTheirList != NULL)
+	{
+		for (CLLNode<TradeData>* pNode = pTheirList->head(); pNode != NULL; pNode = pTheirList->next(pNode))
+		{
+			kDecision.aTheir.push_back(pNode->m_data);
+		}
+	}
+
+	describe(kDecision);
+	keep(kDecision);
+	return true;
+}
+
+bool CvDecisionQueue::hasQueued()
+{
+	return (s_paQueue != NULL) && !s_paQueue->empty();
+}
+
+void CvDecisionQueue::play(CvQueuedDecision& kDecision)
+{
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample kWaited = { "decision queue: decision done, time held" };
+	bridgedProfileAdd(&kWaited, bridgedProfileTicks() - kDecision.uiQueued);
+#endif
+
+	if (kDecision.pMessage != NULL)
+	{
+		kDecision.pMessage->Execute();
+		SAFE_DELETE(kDecision.pMessage);
+	}
+	else
+	{
+		CLinkList<TradeData> kOur;
+		CLinkList<TradeData> kTheir;
+
+		for (int iI = 0; iI < (int)kDecision.aOur.size(); iI++)
+		{
+			kOur.insertAtEnd(kDecision.aOur[iI]);
+		}
+		for (int iI = 0; iI < (int)kDecision.aTheir.size(); iI++)
+		{
+			kTheir.insertAtEnd(kDecision.aTheir[iI]);
+		}
+
+		GC.getGameINLINE().implementDeal(kDecision.eWho, kDecision.eOtherWho, kDecision.bOurList ? &kOur : NULL, kDecision.bTheirList ? &kTheir : NULL, kDecision.bForce);
+	}
+}
+
+void CvDecisionQueue::playBack()
+{
+	if (!hasQueued() || s_bPlayingBack)
+	{
+		return;
+	}
+
+	FAssert(!CvPlayerAI::AI_isWorkAheadUnderWay());
+	PROFILE_FUNC();
+
+	std::vector<CvQueuedDecision> aQueue;
+	aQueue.swap(*s_paQueue);
+	s_bPlayingBack = true;
+
+	const int iCount = (int)aQueue.size();
+	const bool bArrival = isArrivalOrder();
+	std::vector<bool> abDone(iCount, false);
+	int iStart = 0;
+
+	while (iStart < iCount)
+	{
+		int iEnd = iStart;
+		while ((iEnd < iCount) && (aQueue[iEnd].iLane != LANE_BARRIER))
+		{
+			iEnd++;
+		}
+
+		// iStart to iEnd: one decision at a time, the first that may go in the lowest lane
+		for (int iLeft = iEnd - iStart; iLeft > 0; iLeft--)
+		{
+			int iBest = -1;
+
+			for (int iJ = iStart; iJ < iEnd; iJ++)
+			{
+				if (abDone[iJ])
+				{
+					continue;
+				}
+
+				if (bArrival)
+				{
+					iBest = iJ;
+					break;
+				}
+
+				bool bReady = true;
+				for (int iK = iStart; bReady && (iK < iJ); iK++)
+				{
+					if (!abDone[iK] && ((aQueue[iK].iLane <= aQueue[iJ].iLane) || touchesSame(aQueue[iK], aQueue[iJ])))
+					{
+						bReady = false;
+					}
+				}
+
+				if (bReady && ((iBest == -1) || (aQueue[iJ].iLane < aQueue[iBest].iLane)))
+				{
+					iBest = iJ;
+				}
+			}
+
+			FAssert(iBest != -1);
+#ifdef BRIDGED_PROFILE
+			if (iBest != iStart)
+			{
+				static BridgedProfileSample kAhead = { "decision queue: decision done ahead of an earlier one" };
+				bridgedProfileAdd(&kAhead, 0);
+			}
+#endif
+			play(aQueue[iBest]);
+			abDone[iBest] = true;
+
+			while ((iStart < iEnd) && abDone[iStart])
+			{
+				iStart++;
+			}
+		}
+
+		if (iEnd < iCount)
+		{
+			play(aQueue[iEnd]);		// a barrier
+			abDone[iEnd] = true;
+		}
+
+		iStart = iEnd + 1;
+	}
+
+	s_bPlayingBack = false;
+}
+
+void CvDecisionQueue::settle()
+{
+	if (CvPlayerAI::AI_isWorkAheadUnderWay())
+	{
+		CvPlayerAI::AI_stopWorkAhead(false);
+	}
+
+	playBack();
+}
+
+void CvDecisionQueue::discardAll()
+{
+	CvPlayerAI::AI_discardWorkAhead();
+
+	if (s_paQueue != NULL)
+	{
+		for (int iI = 0; iI < (int)s_paQueue->size(); iI++)
+		{
+			SAFE_DELETE((*s_paQueue)[iI].pMessage);
+		}
+		s_paQueue->clear();
+	}
+
+	s_bPlayingBack = false;
+}

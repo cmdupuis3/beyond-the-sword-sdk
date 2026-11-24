@@ -2,6 +2,9 @@
 #define CV_MESSAGE_DATA
 
 class FDataStreamBase;
+struct TradeData;
+template <class tVARTYPE> class CLinkList;
+struct CvQueuedDecision;
 
 class CvMessageData
 {
@@ -17,6 +20,7 @@ public:
 
 	DllExport static CvMessageData* createMessage(GameMessageTypes eType);
 
+	friend class CvDecisionQueue;
 private:
 	GameMessageTypes m_eType;
 };
@@ -29,6 +33,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 };
@@ -41,6 +46,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 };
@@ -53,6 +59,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 };
@@ -66,6 +73,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iCityID;
@@ -85,6 +93,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iCityID;
@@ -100,6 +109,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iCityID;
@@ -121,6 +131,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	std::vector<CivicTypes> m_aeCivics;
@@ -135,6 +146,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iDiscover;
@@ -151,6 +163,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	TeamTypes m_eTargetTeam;
@@ -165,6 +178,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	AdvancedStartActionTypes m_eAction;
 	PlayerTypes m_ePlayer;
@@ -182,6 +196,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	int m_iData1;
 	int m_iData2;
@@ -199,6 +214,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	ReligionTypes m_eReligion;
@@ -212,6 +228,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iAreaId;
@@ -225,6 +242,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	ReligionTypes m_eReligion;
@@ -239,6 +257,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	VictoryTypes m_eVictory;
@@ -252,6 +271,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	EventTypes m_eEvent;
@@ -267,6 +287,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iUnitID;
@@ -282,6 +303,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iUnitID;
@@ -301,6 +323,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iUnitID;
@@ -315,6 +338,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iUnitID;
@@ -333,6 +357,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iChange;
@@ -348,6 +373,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	bool m_bVassal;
 	bool m_bCapitulated;
@@ -364,6 +390,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iSelection;
@@ -379,6 +406,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iVoteId;
@@ -394,6 +422,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	bool m_bWar;
 	PlayerTypes m_ePlayer;
@@ -408,6 +437,7 @@ public:
 	DllExport virtual void Execute();
 	DllExport virtual void PutInBuffer(FDataStreamBase* pStream);
 	DllExport virtual void SetFromBuffer(FDataStreamBase* pStream);
+	friend class CvDecisionQueue;
 private:
 	PlayerTypes m_ePlayer;
 	int m_iX;
@@ -415,5 +445,31 @@ private:
 };
 
 
+
+//
+// The human's decisions made while the AI's work ahead runs in the background (tier 3): kept and
+// done afterwards, when the game may change again. See CvMessageData.cpp.
+//
+class CvDecisionQueue
+{
+public:
+	// in a message's Execute(): true if a copy was kept to be done later
+	static bool defer(CvMessageData* pMessage);
+	// in CvGame::implementDeal(): the same for a deal
+	static bool deferDeal(PlayerTypes eWho, PlayerTypes eOtherWho, CLinkList<TradeData>* pOurList, CLinkList<TradeData>* pTheirList, bool bForce);
+	static bool hasQueued();
+	// what was kept, done now (main thread, the work ahead over)
+	static void playBack();
+	// before the game is saved: the work ahead stopped and what was kept done
+	static void settle();
+	// before the game is let go (a game loaded, the game left): the work ahead stopped and dropped,
+	// and what was kept dropped
+	static void discardAll();
+
+private:
+	static void describe(CvQueuedDecision& kDecision);
+	static void play(CvQueuedDecision& kDecision);
+	static CvMessageData* copy(const CvMessageData* pMessage);
+};
 
 #endif

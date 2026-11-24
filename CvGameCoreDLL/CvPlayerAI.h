@@ -61,9 +61,10 @@ public:
 	// the same in the background, while the main thread goes on: started, then looked at until
 	// it is over, or stopped
 	static bool AI_startWorkAheadInBackground(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip);
-	static bool AI_updateWorkAhead();
+	static bool AI_updateWorkAhead(bool bStopAsked = false);
 	static bool AI_isWorkAheadUnderWay();
 	static void AI_stopWorkAhead(bool bDoLeftovers);
+	static void AI_discardWorkAhead();
 	bool AI_isFoundValueKept() const;
 	bool AI_isFoundPlanKept() const;
 	void AI_updateAreaTargets();
