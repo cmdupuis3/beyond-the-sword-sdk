@@ -45,6 +45,7 @@
 | [Plot grid tables known at compile time](plot-grid-tables.md) | 1 | not measured | const | low |
 | [Plot yields in one call](plot-yields-in-one-call.md) | 1 | not measured | late | low |
 | [AI choices draw from streams of their own](ai-random-streams.md) | 2 | not measured | not measured | low |
+| [Idle units at peace keep their decision](idle-units-kept.md) | 2 | flat | not measured | low |
 | [Explorers look for paths from the best plot down](explore-best-first.md) | 2 | flat | not measured | low |
 | [Workers act as a team](worker-teams.md) | 2 | not measured | not measured | low |
 

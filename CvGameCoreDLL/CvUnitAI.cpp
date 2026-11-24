@@ -77,8 +77,117 @@ void CvUnitAI::AI_reset(UnitAITypes eUnitAI)
 	m_iBirthmark = 0;
 
 	m_eUnitAIType = eUnitAI;
-	
+
 	m_iAutomatedAbortTurn = -1;
+
+	m_iIdleLastTurn = -1;
+	m_iIdleSinceTurn = -1;
+	m_iIdlePlot = -1;
+	m_iIdleDamage = 0;
+	m_iIdleCities = 0;
+	m_iIdleGroupUnits = 0;
+	m_bIdleRepeated = false;
+}
+
+
+//
+// Units at peace that stay where they are, turn after turn, decide it again every turn: a
+// city's defenders, a reserve, a counter unit waiting in its city. A group whose head unit
+// stayed idle (on the same plot, with nothing queued and nothing spent) on two turns in a
+// row now keeps that decision for the next three turns at normal speed, more on a slower
+// game (CvGameSpeedInfo::getTrainPercent()): fortified or asleep it stays so, awake it skips
+// its turn, as the idle decision did.
+// It decides again at once if its team is no longer at peace with everyone (a war plan is
+// enough), an enemy unit that can attack comes within four plots, it is damaged or healed,
+// its group gains or loses units, its owner gains or loses a city, or it is not on that plot.
+// Not for a human's automated units, the barbarians or the minor civilizations.
+//
+// Tier 2 (see BridgedTiers.h): the units decide less often, and what a decision would have
+// drawn from the game's random numbers is not drawn. UNIT_IDLE_STOCK=1 is the off switch; a
+// REPRODUCE_BTS build never applies the rule. Nothing here goes into a saved game.
+//
+bool CvUnitAI::AI_idleUnitRules()
+{
+#ifdef REPRODUCE_BTS
+	return false;
+#else
+	static int iOff = -1;
+
+	if (iOff == -1)
+	{
+		iOff = ((GC.getDefineINT("UNIT_IDLE_STOCK") != 0) ? 1 : 0);
+	}
+
+	return (iOff == 0);
+#endif
+}
+
+
+bool CvUnitAI::AI_isIdleKept() const
+{
+	const int iGameTurn = GC.getGameINLINE().getGameTurn();
+
+	if (!m_bIdleRepeated || (m_iIdleLastTurn != (iGameTurn - 1)))
+	{
+		return false;
+	}
+
+	const int iTurns = std::max(1, (4 * GC.getGameSpeedInfo(GC.getGameINLINE().getGameSpeedType()).getTrainPercent()) / 100);
+
+	if ((iGameTurn - m_iIdleSinceTurn) >= iTurns)
+	{
+		return false;
+	}
+
+	if ((GC.getMapINLINE().plotNumINLINE(getX_INLINE(), getY_INLINE()) != m_iIdlePlot) || (getDamage() != m_iIdleDamage)
+		|| (GET_PLAYER(getOwnerINLINE()).getNumCities() != m_iIdleCities) || (getGroup()->getNumUnits() != m_iIdleGroupUnits))
+	{
+		return false;
+	}
+
+	const CvTeam& kTeam = GET_TEAM(getTeam());
+
+	if (kTeam.getPeaceState() != PEACE_STATE_PEACE)
+	{
+		return false;
+	}
+
+	return !GC.getMapINLINE().isTeamAttackerNear(plot(), 4, kTeam.getEnemyTeams(), false);
+}
+
+
+// What the unit's group decided, the unit being its head: whether it stayed idle.
+void CvUnitAI::AI_noteDecision(bool bIdle)
+{
+	const int iGameTurn = GC.getGameINLINE().getGameTurn();
+	const int iPlot = GC.getMapINLINE().plotNumINLINE(getX_INLINE(), getY_INLINE());
+
+	if (!bIdle)
+	{
+		m_iIdleLastTurn = -1;
+		m_bIdleRepeated = false;
+		return;
+	}
+
+	if (m_iIdleLastTurn == iGameTurn)
+	{
+		return;	// a second decision in the same turn: the first one counts
+	}
+
+	m_bIdleRepeated = ((m_iIdleLastTurn == (iGameTurn - 1)) && (m_iIdlePlot == iPlot));
+	m_iIdleLastTurn = iGameTurn;
+	m_iIdleSinceTurn = iGameTurn;
+	m_iIdlePlot = iPlot;
+	m_iIdleDamage = getDamage();
+	m_iIdleCities = GET_PLAYER(getOwnerINLINE()).getNumCities();
+	m_iIdleGroupUnits = getGroup()->getNumUnits();
+}
+
+
+// The group skipped its turn on the strength of the unit's last decision.
+void CvUnitAI::AI_noteIdleKept()
+{
+	m_iIdleLastTurn = GC.getGameINLINE().getGameTurn();
 }
 
 // AI_update returns true when we should abort the loop and wait until next slice
