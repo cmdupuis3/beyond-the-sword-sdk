@@ -100,6 +100,7 @@ void CvCityAI::AI_reset()
 	m_bForceEmphasizeCulture = false;
 
 	m_bAssignWorkDirty = false;
+	m_iAssignFromScratchTurn = -1;
 	m_bAssignCacheActive = false;
 	m_iYieldValueContextDepth = 0;
 	m_bYieldValueContextValid = false;
@@ -253,13 +254,15 @@ void CvCityAI::AI_assignWorkingPlots()
 	m_bAssignCacheActive = true;
 	m_iAssignCacheChangeCount = -1;
 
-	// remove all assigned plots if we automated
-	if (!isHuman() || isCitizensAutomated())
+	// remove all assigned plots if we automated (see AI_isAssignedFromScratch(): an AI city
+	// mostly keeps them and improves on them)
+	if ((!isHuman() || isCitizensAutomated()) && AI_isAssignedFromScratch())
 	{
 		for (iI = 0; iI < NUM_CITY_PLOTS; iI++)
 		{
 			setWorkingPlot(iI, false);
 		}
+		m_iAssignFromScratchTurn = GC.getGameINLINE().getGameTurn();
 	}
 	
 	//update the special yield multiplier to be current
@@ -4819,6 +4822,53 @@ bool CvCityAI::AI_isEmphasizeGreatPeople()
 bool CvCityAI::AI_isAssignWorkDirty()
 {
 	return m_bAssignWorkDirty;
+}
+
+
+//
+// Whether AI_assignWorkingPlots() starts from no plot worked, as stock always does for an
+// AI city: it takes every citizen off its plot and adds them back one at a time, the best
+// plot or specialist first (AI_addBestCitizen()), and then swaps the worst worked plot for
+// the best one until a swap brings back the plot it took away (AI_juggleCitizens()). The
+// adding is most of the cost: about eight AI_addBestCitizen() calls each time, every turn,
+// for every city. An AI player's city now keeps the plots it works and goes straight to
+// the swaps, which from an assignment already swapped into place stop after one; the
+// specialists are still reset to those forced and added back, so the swaps weigh them
+// against the plots again. It starts from scratch, as stock does, every four turns at
+// normal speed (by the game speed's train percent). A human's cities are left as stock
+// has them.
+//
+// Tier 2 (see BridgedTiers.h): swapping from last turn's plots can settle on another
+// assignment than adding them all again would, so the cities can work other plots.
+// CITIZENS_STOCK=1 is the off switch; a REPRODUCE_BTS build always starts from scratch.
+// Nothing here goes into a saved game: a loaded game starts each city from scratch.
+//
+static bool citizensSwappedInPlace()
+{
+#ifdef REPRODUCE_BTS
+	return false;
+#else
+	static int iOff = -1;
+
+	if (iOff == -1)
+	{
+		iOff = ((GC.getDefineINT("CITIZENS_STOCK") != 0) ? 1 : 0);
+	}
+
+	return (iOff == 0);
+#endif
+}
+
+bool CvCityAI::AI_isAssignedFromScratch() const
+{
+	if (!citizensSwappedInPlace() || isHuman() || (m_iAssignFromScratchTurn < 0))
+	{
+		return true;
+	}
+
+	const int iTurns = std::max(1, (4 * GC.getGameSpeedInfo(GC.getGameINLINE().getGameSpeedType()).getTrainPercent()) / 100);
+
+	return ((GC.getGameINLINE().getGameTurn() - m_iAssignFromScratchTurn) >= iTurns);
 }
 
 
