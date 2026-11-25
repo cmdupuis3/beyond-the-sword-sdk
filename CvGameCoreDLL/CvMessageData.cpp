@@ -1631,6 +1631,15 @@ void CvDecisionQueue::describe(CvQueuedDecision& kDecision)
 
 bool CvDecisionQueue::defer(CvMessageData* pMessage)
 {
+	// a decision of the player's own: this turn is not one that ends by itself
+	// (CvGame::updateTestEndTurn()). The automated units' moves and the turn's end are sent by
+	// the game, not decided.
+	if ((pMessage->getType() != GAMEMESSAGE_AUTO_MOVES) && (pMessage->getType() != GAMEMESSAGE_TURN_COMPLETE)
+		&& (GC.getGameINLINE().getActivePlayer() != NO_PLAYER))
+	{
+		GET_PLAYER(GC.getGameINLINE().getActivePlayer()).setTurnNeedsPlayer(true);
+	}
+
 	if (s_bPlayingBack || !CvPlayerAI::AI_isWorkAheadUnderWay() || stopForDecision())
 	{
 		return false;

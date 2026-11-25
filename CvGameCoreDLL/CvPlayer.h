@@ -615,6 +615,10 @@ public:
 	DllExport void setPbemNewTurn(bool bNew);
 
 	bool isEndTurn() const;
+	// whether something this turn, or since the player's last one, needs the player: see
+	// CvGame::updateTestEndTurn()
+	bool isTurnNeedsPlayer() const { return m_bTurnNeedsPlayer; }
+	void setTurnNeedsPlayer(bool bNewValue) { m_bTurnNeedsPlayer = bNewValue; }
 	DllExport void setEndTurn(bool bNewValue);
 
 	DllExport bool isTurnDone() const;
@@ -1149,6 +1153,7 @@ protected:
 	bool m_bTurnActive;
 	bool m_bAutoMoves;
 	bool m_bEndTurn;
+	bool m_bTurnNeedsPlayer;	// not saved: set again when a game is loaded
 	bool m_bPbemNewTurn;
 	bool m_bExtendedGame;
 	bool m_bFoundedFirstCity;

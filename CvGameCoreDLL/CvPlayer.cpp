@@ -478,6 +478,7 @@ void CvPlayer::reset(PlayerTypes eID, bool bConstructorCall)
 	m_bTurnActive = false;
 	m_bAutoMoves = false;
 	m_bEndTurn = false;
+	m_bTurnNeedsPlayer = true;	// a game just started or loaded is the player's to look at
 	m_bPbemNewTurn = false;
 	m_bExtendedGame = false;
 	m_bFoundedFirstCity = false;
@@ -9904,6 +9905,9 @@ void CvPlayer::setTurnActive(bool bNewValue, bool bDoTurn)
 
 			GC.getGameINLINE().changeNumGameTurnActive(-1);
 
+			// from here on what happens counts for the player's next turn: see CvGame::updateTestEndTurn()
+			setTurnNeedsPlayer(false);
+
 			if (bDoTurn)
 			{
 				if (!GC.getGameINLINE().isMPOption(MPOPTION_SIMULTANEOUS_TURNS))
@@ -15578,6 +15582,7 @@ void CvPlayer::doWarnings()
 
 							if (pNearestCity != NULL)
 							{	
+								setTurnNeedsPlayer(true);	// enemy troops near a city
 								swprintf(szBuffer, gDLL->getText("TXT_KEY_MISC_ENEMY_TROOPS_SPOTTED", pNearestCity->getNameKey()).GetCString());
 								gDLL->getInterfaceIFace()->addMessage(getID(), true, GC.getEVENT_MESSAGE_TIME(), szBuffer, "AS2D_ENEMY_TROOPS", MESSAGE_TYPE_INFO, pUnit->getButton(), (ColorTypes)GC.getInfoTypeForString("COLOR_RED"), pLoopPlot->getX_INLINE(), pLoopPlot->getY_INLINE(), true, true);
 
