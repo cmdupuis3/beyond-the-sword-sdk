@@ -1237,7 +1237,9 @@ void CvNetPing::Execute()
 
 
 //
-// The human's decisions while the AI's work ahead runs in the background.
+// The human's decisions while the AI's work ahead runs in the background. By default a decision
+// stops the work and is done at once (stopForDecision()); WORK_AHEAD_QUEUE_DECISIONS=1 keeps it,
+// as below.
 //
 // In a tier 3 build the work the AI players can do while a human takes their turn runs on worker
 // threads while the game goes on drawing and taking input (CvGame::update(),
@@ -1371,6 +1373,38 @@ namespace
 		}
 
 		return false;
+	}
+
+	// WORK_AHEAD_QUEUE_DECISIONS=1: a decision made while the work ahead runs is kept and done
+	// after it, at the exe's next call of CvGame::update(), in lanes. Unset, the work is stopped
+	// when the decision comes (the main thread waits for the items in hand, a few milliseconds at
+	// most) and the decision is done at once: the exe calls CvGame::update() only about four
+	// times a second during a human's turn, so a kept decision waited up to a quarter of a second
+	// (122 ms on average in the first playtest).
+	bool isQueueDecisions()
+	{
+		static int iQueue = -1;
+		if (iQueue == -1)
+		{
+			iQueue = ((GC.getDefineINT("WORK_AHEAD_QUEUE_DECISIONS") != 0) ? 1 : 0);
+		}
+		return (iQueue != 0);
+	}
+
+	// Not queueing: the work ahead stopped for a decision, which is then done at once.
+	bool stopForDecision()
+	{
+		if (isQueueDecisions())
+		{
+			return false;
+		}
+
+#ifdef BRIDGED_PROFILE
+		static BridgedProfileSample kStopped = { "decision: work ahead stopped for it, time waited" };
+		BridgedProfileManual kTimer(&kStopped);
+#endif
+		CvDecisionQueue::settle();
+		return true;
 	}
 
 	bool isArrivalOrder()
@@ -1596,7 +1630,7 @@ void CvDecisionQueue::describe(CvQueuedDecision& kDecision)
 
 bool CvDecisionQueue::defer(CvMessageData* pMessage)
 {
-	if (s_bPlayingBack || !CvPlayerAI::AI_isWorkAheadUnderWay())
+	if (s_bPlayingBack || !CvPlayerAI::AI_isWorkAheadUnderWay() || stopForDecision())
 	{
 		return false;
 	}
@@ -1619,7 +1653,7 @@ bool CvDecisionQueue::defer(CvMessageData* pMessage)
 
 bool CvDecisionQueue::deferDeal(PlayerTypes eWho, PlayerTypes eOtherWho, CLinkList<TradeData>* pOurList, CLinkList<TradeData>* pTheirList, bool bForce)
 {
-	if (s_bPlayingBack || !CvPlayerAI::AI_isWorkAheadUnderWay())
+	if (s_bPlayingBack || !CvPlayerAI::AI_isWorkAheadUnderWay() || stopForDecision())
 	{
 		return false;
 	}

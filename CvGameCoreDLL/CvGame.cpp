@@ -2168,7 +2168,7 @@ bool CvGame::holdForWorkAhead()
 	{
 		const bool bHeldLong = ((GetTickCount() - s_uiWorkAheadStartMs) > workAheadHoldMs());
 #ifdef BRIDGED_PROFILE
-		if (bHeldLong && !CvDecisionQueue::hasQueued() && !BridgedThreads::isStopRequested())
+		if (bHeldLong && !CvDecisionQueue::hasQueued() && !BridgedThreads::isBackgroundDone())
 		{
 			static BridgedProfileSample kLong = { "work ahead in the background: stopped, held the game too long" };
 			bridgedProfileAdd(&kLong, 0);
@@ -2176,6 +2176,10 @@ bool CvGame::holdForWorkAhead()
 #endif
 		if (CvPlayerAI::AI_updateWorkAhead(CvDecisionQueue::hasQueued() || bHeldLong))
 		{
+#ifdef BRIDGED_PROFILE
+			static BridgedProfileSample kHeld = { "work ahead in the background: a pass of the game held for it" };
+			bridgedProfileAdd(&kHeld, 0);
+#endif
 			return true;
 		}
 

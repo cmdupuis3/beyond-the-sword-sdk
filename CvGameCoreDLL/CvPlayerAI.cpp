@@ -2174,8 +2174,12 @@ bool CvPlayerAI::AI_isWorkAheadUnderWay()
 	return s_kWorkAhead.bActive;
 }
 
-// true while it is under way. bStopAsked: it is to end as soon as the workers have finished the
-// items in hand, with the rest left (CvDecisionQueue: a decision is waiting).
+// true while it is under way. Once the first burst is done the rest (the rounds for what was
+// handed back, a few items) is done at once, the main thread waiting for it: the exe calls
+// CvGame::update() only about four times a second during a human's turn, so a round left for the
+// next call would keep the game still that long. bStopAsked: if it is still running, it is ended
+// as soon as the workers have finished the items in hand (a few milliseconds at most), with the
+// rest left.
 bool CvPlayerAI::AI_updateWorkAhead(bool bStopAsked)
 {
 	if (!s_kWorkAhead.bActive)
@@ -2183,33 +2187,28 @@ bool CvPlayerAI::AI_updateWorkAhead(bool bStopAsked)
 		return false;
 	}
 
-	if (bStopAsked)
-	{
-		BridgedThreads::requestStop();
-	}
+	WorkAhead& kWork = s_kWorkAhead;
 
-	if (!BridgedThreads::isBackgroundDone())
+	if (BridgedThreads::isBackgroundDone())
 	{
-		return true;
-	}
+		PROFILE("CvPlayerAI::AI_updateWorkAhead: a burst done");
 
-	if (bStopAsked)
-	{
-		AI_finishWorkAhead(false);
+		while (AI_resolveWorkAheadBurst())
+		{
+			BridgedThreads::parallelFor((int)kWork.aiAgain.size(), 1, workAheadRange, &kWork.kBurst);
+		}
+
+		AI_finishWorkAhead(true);
 		return false;
 	}
 
-	PROFILE("CvPlayerAI::AI_updateWorkAhead: a burst done");
-
-	WorkAhead& kWork = s_kWorkAhead;
-
-	if (AI_resolveWorkAheadBurst() && BridgedThreads::startInBackground((int)kWork.aiAgain.size(), 1, workAheadRange, &kWork.kBurst))
+	if (bStopAsked)
 	{
-		return true;
+		AI_stopWorkAhead(false);
+		return false;
 	}
 
-	AI_finishWorkAhead(true);
-	return false;
+	return true;
 }
 
 // Stops the work ahead under way at once: what a worker has started is finished, the rest is done
