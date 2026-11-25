@@ -1269,6 +1269,7 @@ void CvUnit::updateCombat(bool bQuick)
 			}
 
 			setCombatUnit(pDefender, true);
+			GET_PLAYER(pDefender->getOwnerINLINE()).setTurnNeedsPlayer(true);	// a unit of theirs is attacked
 			pDefender->setCombatUnit(this, false);
 
 			pDefender->getGroup()->clearMissionQueue();
