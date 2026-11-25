@@ -1101,6 +1101,16 @@ void CvTeam::declareWar(TeamTypes eTeam, bool bNewDiplo, WarPlanTypes eWarPlan)
 {
 	PROFILE_FUNC();
 
+	// war is a matter for both sides' players to look at: see CvGame::updateTestEndTurn()
+	for (int iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
+	{
+		CvPlayer& kLoopPlayer = GET_PLAYER((PlayerTypes)iPlayer);
+		if (kLoopPlayer.isAlive() && ((kLoopPlayer.getTeam() == eTeam) || (kLoopPlayer.getTeam() == getID())))
+		{
+			kLoopPlayer.setTurnNeedsPlayer(true);
+		}
+	}
+
 	CLLNode<TradeData>* pNode;
 	CvDiploParameters* pDiplo;
 	CvDeal* pLoopDeal;
