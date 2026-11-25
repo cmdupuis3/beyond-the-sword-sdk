@@ -436,6 +436,10 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 					}
 				}
 
+#ifdef BRIDGED_PROFILE
+				const bool bTripwire = (GC.getDefineINT("WORK_AHEAD_TRIPWIRE") != 0);
+				const int iChecksum = bTripwire ? GC.getGameINLINE().calculateSyncChecksum() : 0;
+#endif
 				if (AI_startWorkAheadInBackground(bFoundTest, bBuildsTest, getID()))
 				{
 					if (GC.getDefineINT("WORK_AHEAD_STOP_TEST") != 0)
@@ -448,6 +452,14 @@ void CvPlayerAI::AI_doTurnUnitsPre()
 						Sleep(0);
 					}
 				}
+#ifdef BRIDGED_PROFILE
+				if (bTripwire)
+				{
+					static BridgedProfileSample kSame = { "work ahead tripwire: game the same after the work" };
+					static BridgedProfileSample kChanged = { "work ahead tripwire: GAME CHANGED WHILE THE WORK RAN" };
+					bridgedProfileAdd((GC.getGameINLINE().calculateSyncChecksum() == iChecksum) ? &kSame : &kChanged, 0);
+				}
+#endif
 			}
 			else if (GC.getDefineINT("WORK_AHEAD_SERIAL") != 0)
 			{
@@ -2162,30 +2174,76 @@ bool CvPlayerAI::AI_isWorkAheadUnderWay()
 	return s_kWorkAhead.bActive;
 }
 
-// true while it is under way
-bool CvPlayerAI::AI_updateWorkAhead()
+// true while it is under way. Once the first burst is done the rest (the rounds for what was
+// handed back, a few items) is done at once, the main thread waiting for it: the exe calls
+// CvGame::update() only about four times a second during a human's turn, so a round left for the
+// next call would keep the game still that long. bStopAsked: if it is still running, it is ended
+// as soon as the workers have finished the items in hand (a few milliseconds at most), with the
+// rest left.
+bool CvPlayerAI::AI_updateWorkAhead(bool bStopAsked)
 {
 	if (!s_kWorkAhead.bActive)
 	{
 		return false;
 	}
 
-	if (!BridgedThreads::isBackgroundDone())
-	{
-		return true;
-	}
-
-	PROFILE("CvPlayerAI::AI_updateWorkAhead: a burst done");
-
 	WorkAhead& kWork = s_kWorkAhead;
 
-	if (AI_resolveWorkAheadBurst() && BridgedThreads::startInBackground((int)kWork.aiAgain.size(), 1, workAheadRange, &kWork.kBurst))
+	if (BridgedThreads::isBackgroundDone())
 	{
-		return true;
+		PROFILE("CvPlayerAI::AI_updateWorkAhead: a burst done");
+
+		while (AI_resolveWorkAheadBurst())
+		{
+			BridgedThreads::parallelFor((int)kWork.aiAgain.size(), 1, workAheadRange, &kWork.kBurst);
+		}
+
+		AI_finishWorkAhead(true);
+		return false;
 	}
 
-	AI_finishWorkAhead(true);
-	return false;
+	if (bStopAsked)
+	{
+		AI_stopWorkAhead(false);
+		return false;
+	}
+
+	return true;
+}
+
+// The work ahead under way brought to its end for something that cannot wait (a decision of the
+// human's, a save). The workers get a few milliseconds to finish what they have, which is
+// nearly always enough, and the work is then ended as usual; only if they are still at it are
+// they stopped after the items in hand, with the rest left for the next time.
+// WORK_AHEAD_FINISH_MS sets how long they get (unset or 0: 10 ms).
+void CvPlayerAI::AI_settleWorkAhead()
+{
+	if (!s_kWorkAhead.bActive)
+	{
+		return;
+	}
+
+	static int iMs = -1;
+	if (iMs == -1)
+	{
+		iMs = GC.getDefineINT("WORK_AHEAD_FINISH_MS");
+		if (iMs <= 0)
+		{
+			iMs = 10;
+		}
+	}
+
+	if (BridgedThreads::waitBackgroundFor((unsigned int)iMs))
+	{
+		AI_updateWorkAhead();	// done: its rounds and its end
+		return;
+	}
+
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample kStopped = { "work ahead in the background: stopped part way for a decision or a save" };
+	bridgedProfileAdd(&kStopped, 0);
+#endif
+	AI_stopWorkAhead(false);
 }
 
 // Stops the work ahead under way at once: what a worker has started is finished, the rest is done
@@ -2202,6 +2260,31 @@ void CvPlayerAI::AI_stopWorkAhead(bool bDoLeftovers)
 	BridgedThreads::requestStop();
 	BridgedThreads::waitBackground();
 	AI_finishWorkAhead(bDoLeftovers);
+}
+
+// Stops the work ahead under way and lets it go without ending it: the game it was for is being
+// let go (a game loaded, the game left), and its players and cities may be gone already.
+void CvPlayerAI::AI_discardWorkAhead()
+{
+	if (!s_kWorkAhead.bActive)
+	{
+		return;
+	}
+
+	BridgedThreads::requestStop();
+	BridgedThreads::waitBackground();
+
+	WorkAhead& kWork = s_kWorkAhead;
+	s_bBonusValuesInBurst = false;
+	for (int iPlayer = 0; iPlayer < MAX_PLAYERS; iPlayer++)
+	{
+		kWork.abBuilds[iPlayer] = false;
+	}
+	kWork.aItems.clear();
+	kWork.aStates.clear();
+	kWork.aiAgain.clear();
+	kWork.aRuns.clear();
+	kWork.bActive = false;
 }
 
 

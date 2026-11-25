@@ -9,6 +9,7 @@
 
 
 #include "CvGameCoreDLL.h"
+#include "CvMessageData.h"
 #include "CvMap.h"
 #include "CvCity.h"
 #include "CvPlotGroup.h"
@@ -105,6 +106,8 @@ void CvMap::init(CvMapInitData* pInitInfo/*=NULL*/)
 
 void CvMap::uninit()
 {
+	CvDecisionQueue::discardAll();	// the work ahead in the background, and what it kept, let go
+
 	SAFE_DELETE_ARRAY(m_paiNumBonus);
 	SAFE_DELETE_ARRAY(m_paiNumBonusOnLand);
 
@@ -1619,6 +1622,8 @@ void CvMap::read(FDataStreamBase* pStream)
 //
 void CvMap::write(FDataStreamBase* pStream)
 {
+	CvDecisionQueue::settle();	// the work ahead in the background stopped, and what it kept done, first
+
 	uint uiFlag=0;
 	pStream->Write(uiFlag);		// flag for expansion
 
