@@ -388,10 +388,11 @@ void CvGame::updateSelectionList()
 // updateTestEndTurn() has gone through its steps, one each time the exe calls it (about four times
 // a second): queued popups first, the automated units' moves, then the message; the end-turn key
 // does nothing until then, about a second. Here the key ends the turn as soon as nothing is left
-// to do: no unit busy or waiting for orders, no popup or diplomacy waiting. The automated units
-// still move (CvPlayer::setEndTurn() sets them going), as with stock's force-end-turn key. And when
-// no popup is queued, updateTestEndTurn() goes on from the popup step in the same call.
-// END_TURN_STOCK_WAIT=1 is stock.
+// to decide: no unit waiting for orders, no popup or diplomacy waiting. A unit still busy (a move
+// or a fight being shown, the automated units on their way) finishes first, and the automated
+// units still move (CvPlayer::setEndTurn() sets them going), as with stock's force-end-turn key;
+// what is left is then not played (CvGame::isHumanTurnEndQuick()). And when no popup is queued,
+// updateTestEndTurn() goes on from the popup step in the same call. END_TURN_STOCK_WAIT=1 is stock.
 //
 static bool isEndTurnStockWait()
 {
@@ -415,7 +416,7 @@ static bool isTurnReadyToEnd()
 	const CvPlayer& kPlayer = GET_PLAYER(kGame.getActivePlayer());
 	const bool bAny = ((gDLL->getInterfaceIFace()->getHeadSelectedUnit() != NULL) && !kPlayer.isOption(PLAYEROPTION_NO_UNIT_CYCLING));
 
-	return kPlayer.isTurnActive() && !kPlayer.hasBusyUnit() && !kPlayer.hasReadyUnit(bAny)
+	return kPlayer.isTurnActive() && !kPlayer.isEndTurn() && !kPlayer.hasReadyUnit(bAny)
 		&& !gDLL->getInterfaceIFace()->isDiploOrPopupWaiting() && !gDLL->getInterfaceIFace()->isPopupUp();
 }
 

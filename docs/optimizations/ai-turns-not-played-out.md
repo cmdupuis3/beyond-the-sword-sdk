@@ -20,7 +20,9 @@ settled at once, as stock does for what the human cannot see
 `CvUnit::isCombatVisible()`). The players after the human then take their turns in one
 call of `CvGame::update()`, in the stock order, and the human sees the outcome of all of
 them together when their own turn starts. A human's own units, automated ones too, are
-shown as before, and so is an AI's diplomacy.
+shown as before, and so is an AI's diplomacy. An AI's attack on a human's unit is played
+again, as stock plays it (`CvGame::isAIAttacksShown()`; `HIDE_AI_ATTACKS=1` settles it at
+once), and the turn keeps the stock pace while it is.
 
 ## What differs from stock
 Nothing in the game state: the turns are the stock ones. A human no longer watches the

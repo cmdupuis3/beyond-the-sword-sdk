@@ -136,6 +136,8 @@ public:
 	DllExport CivilizationTypes getActiveCivilizationType() const;								// Exposed to Python
 
 	DllExport bool isNetworkMultiPlayer() const;																	// Exposed to Python
+	bool isHumanTurnEndQuick(PlayerTypes ePlayer) const;	// see CvGame::update()
+	bool isAIAttacksShown() const;
 	bool isAITurnsShown() const;	// see CvGame::update()
 	DllExport bool isGameMultiPlayer() const;																			// Exposed to Python
 	DllExport bool isTeamGame() const;																						// Exposed to Python
