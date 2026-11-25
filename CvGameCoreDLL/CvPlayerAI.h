@@ -58,6 +58,12 @@ public:
 	void AI_updateBestBuildsAhead();
 	// the work ahead for every AI player but eSkip, in one burst: see CvPlayerAI.cpp
 	static void AI_doWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip);
+	// the same in the background, while the main thread goes on: started, then looked at until
+	// it is over, or stopped
+	static bool AI_startWorkAheadInBackground(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip);
+	static bool AI_updateWorkAhead();
+	static bool AI_isWorkAheadUnderWay();
+	static void AI_stopWorkAhead(bool bDoLeftovers);
 	bool AI_isFoundValueKept() const;
 	bool AI_isFoundPlanKept() const;
 	void AI_updateAreaTargets();
@@ -441,6 +447,10 @@ protected:
 	void AI_refreshFoundValues(bool bAhead) const;
 	void AI_beginFoundValueSweep(bool bAhead, FoundValueSweepRun& kRun) const;
 	void AI_endFoundValueSweep(FoundValueSweepRun& kRun) const;
+	void AI_abandonFoundValueSweep(FoundValueSweepRun& kRun) const;
+	static bool AI_beginWorkAhead(bool bFoundValues, bool bBestBuilds, PlayerTypes eSkip);
+	static bool AI_resolveWorkAheadBurst();
+	static void AI_finishWorkAhead(bool bDoLeftovers);
 	int AI_foundSweepBonusVal(FoundValueSweep& kSweep, BonusTypes eBonus) const;
 	int AI_foundBonusVal(BonusTypes eBonus) const;
 	bool AI_foundNoTradeableBonus(BonusTypes eBonus) const;

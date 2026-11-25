@@ -2145,8 +2145,10 @@ static const int MAX_SLICE_PASSES = 500;
 // settled at once, as stock does for what the human cannot see, so that the players after
 // the human take their turns in one call of update() and the human sees the outcome of all
 // of them together. The turns themselves are the same and in the same order. A human's own
-// units, automated ones too, are shown as before. SHOW_AI_TURNS=1 shows the AI's turns as
-// stock does; so does STOCK_TURN_SLICES, and a multiplayer game always does.
+// units, automated ones too, are shown as before until the human ends the turn
+// (isHumanTurnEndQuick()), and an AI's attack on a human's unit is played (isAIAttacksShown()).
+// SHOW_AI_TURNS=1 shows the AI's turns as stock does; so does STOCK_TURN_SLICES, and a
+// multiplayer game always does.
 //
 bool CvGame::isAITurnsShown() const
 {
@@ -2158,6 +2160,52 @@ bool CvGame::isAITurnsShown() const
 	}
 
 	return ((iShown != 0) || isGameMultiPlayer());
+}
+
+
+//
+// A human who has ended the turn has nothing left to watch for: what is left of their units'
+// orders (the automated units, the moves under way) is done without being played, in passes that
+// do not wait for the exe. The passes are the stock ones in the stock order, and the mission
+// timers still count them, so the game is the same; a unit is put where it moved to, and a fight
+// one of them starts is settled at once, as with stock's quick-combat option. Until the turn is
+// ended the human's units are shown as stock shows them. Single-player games only;
+// END_TURN_SHOW_MOVES=1 or STOCK_TURN_SLICES shows them as stock does.
+//
+bool CvGame::isHumanTurnEndQuick(PlayerTypes ePlayer) const
+{
+	static int iShown = -1;
+
+	if (iShown == -1)
+	{
+		iShown = (((GC.getDefineINT("END_TURN_SHOW_MOVES") != 0) || (GC.getDefineINT("STOCK_TURN_SLICES") != 0)) ? 1 : 0);
+	}
+
+	if ((iShown != 0) || (ePlayer == NO_PLAYER) || isGameMultiPlayer())
+	{
+		return false;
+	}
+
+	const CvPlayer& kPlayer = GET_PLAYER(ePlayer);
+	return kPlayer.isHuman() && kPlayer.isEndTurn();
+}
+
+//
+// An AI's attack on a human's unit is played for the human, as stock plays it unless "quick
+// combat (defense)" is on, and the turn keeps the stock pace while it is: a fight is the one thing
+// in the other players' turns a human is shown (see isAITurnsShown()). HIDE_AI_ATTACKS=1 settles
+// it at once like the rest.
+//
+bool CvGame::isAIAttacksShown() const
+{
+	static int iHidden = -1;
+
+	if (iHidden == -1)
+	{
+		iHidden = ((GC.getDefineINT("HIDE_AI_ATTACKS") != 0) ? 1 : 0);
+	}
+
+	return ((iHidden == 0) || isAITurnsShown());
 }
 
 
@@ -2224,6 +2272,12 @@ int CvGame::nextSliceWait(bool bNewGameTurn, int iStartRequests, int iPasses, DW
 			if (kPlayer.isHuman() && !kPlayer.isAutoMoves())
 			{
 				return SLICE_WAIT_HUMAN_TURN;
+			}
+
+			// what is left of an ended turn is not played: see isHumanTurnEndQuick()
+			if (isHumanTurnEndQuick((PlayerTypes)iI))
+			{
+				continue;
 			}
 
 			// Mission and combat timers are only started for what a human is shown (see

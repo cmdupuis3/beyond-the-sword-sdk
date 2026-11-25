@@ -2641,11 +2641,11 @@ namespace
 		}
 	}
 
-	// Runs a first lookup under the lock on a thread of a burst: see BridgedThreads.h
+	// Runs a first lookup under the lock on any thread while a burst is under way: see BridgedThreads.h
 	struct DefineBurstLock
 	{
 		bool bLocked;
-		DefineBurstLock() : bLocked(BridgedThreads::isInBurst()) { if (bLocked) { BridgedThreads::lock(); } }
+		DefineBurstLock() : bLocked(BridgedThreads::isBurstUnderWay()) { if (bLocked) { BridgedThreads::lock(); } }
 		~DefineBurstLock() { if (bLocked) { BridgedThreads::unlock(); } }
 	};
 

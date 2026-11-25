@@ -7,7 +7,9 @@
 // Work spread over threads in bursts: the main thread hands a range of independent items to
 // a pool of worker threads, takes a share of it itself, and waits until all are done. Nothing
 // else runs in the game while a burst is under way, so the work only has to be safe against
-// itself, not against the game changing under it.
+// itself, not against the game changing under it. A burst in the background
+// (startInBackground()) runs on the workers alone while the main thread goes on; the caller
+// then keeps the game still until it is done.
 //
 // What the work may do, on any thread taking part in a burst (isInBurst()):
 //  - read the game;
@@ -43,6 +45,24 @@ namespace BridgedThreads
 	// and returns when every piece is done.
 	void parallelFor(int iCount, int iChunk, RangeFunction fn, void* pContext);
 
+	// A burst in the background: fn over 0 to iCount - 1 on the workers alone, while the main
+	// thread goes on with other work (main thread only). The main thread is not in the burst
+	// (isInBurst() is false there), so it must not change what the work reads: the caller
+	// keeps the game still until the burst is done. false if there are no workers or a burst is
+	// under way; nothing was started then.
+	bool startInBackground(int iCount, int iChunk, RangeFunction fn, void* pContext);
+	bool isBackgroundUnderWay();	// main thread
+	bool isBackgroundDone();		// main thread: true once every worker has stopped (the burst is then over)
+	void waitBackground();			// main thread: until it is done
+
+	// Asks the threads of the burst under way to start no more pieces: a piece already started
+	// is finished. Cleared when the next burst starts.
+	void requestStop();
+	bool isStopRequested();
+
+	// true while a burst, in the background or not, is under way, on any thread
+	bool isBurstUnderWay();
+
 	// true on a worker thread
 	bool isWorkerThread();
 
@@ -73,7 +93,7 @@ namespace BridgedThreads
 	};
 	void needMainThread(int eType = NEED_OTHER, int iData1 = 0, int iData2 = 0);
 	bool takeNeedMainThread(Need* pNeed = NULL);
-	bool hasNeedMainThread();	// whether the thread's item has been handed back, without clearing it	// whether the thread's item since the last call was handed back, and what for; clears it
+	bool hasNeedMainThread();	// whether the thread's item has been handed back, without clearing it
 
 	// the lock for work a burst's threads must not do at once (a define's first lookup)
 	void lock();
