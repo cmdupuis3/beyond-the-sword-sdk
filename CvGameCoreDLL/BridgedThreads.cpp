@@ -31,10 +31,12 @@ namespace
 	int s_iChunk = 1;
 	volatile long s_lNext = 0;		// the next index to hand out
 	volatile long s_lRunning = 0;	// threads still working, the main thread included
+	volatile long s_lStop = 0;		// requestStop(): no more pieces are started
+	bool s_bBackground = false;		// a burst in the background is under way (the main thread's to know)
 
 	void runPieces(int iThread)
 	{
-		while (true)
+		while (s_lStop == 0)
 		{
 			const long lBegin = InterlockedExchangeAdd(&s_lNext, s_iChunk);
 
@@ -210,6 +212,75 @@ void BridgedThreads::workerFree(void* p)
 	}
 }
 
+bool BridgedThreads::isBurstUnderWay()
+{
+	return (g_lBurstActive != 0) && (s_iWorkers > 0);
+}
+
+void BridgedThreads::requestStop()
+{
+	InterlockedExchange(&s_lStop, 1);
+}
+
+bool BridgedThreads::isStopRequested()
+{
+	return (s_lStop != 0);
+}
+
+bool BridgedThreads::startInBackground(int iCount, int iChunk, RangeFunction fn, void* pContext)
+{
+	if ((iCount <= 0) || (workerCount() == 0) || (g_lBurstActive != 0))
+	{
+		return false;
+	}
+
+	s_pfnRange = fn;
+	s_pContext = pContext;
+	s_iCount = iCount;
+	s_iChunk = std::max(1, iChunk);
+	s_lNext = 0;
+	s_lStop = 0;
+	s_lRunning = s_iWorkers;
+	ResetEvent(s_hDone);
+	s_bBackground = true;
+
+	InterlockedExchange(&g_lBurstActive, 1);
+	ReleaseSemaphore(s_hStart, s_iWorkers, NULL);
+	return true;
+}
+
+bool BridgedThreads::isBackgroundUnderWay()
+{
+	return s_bBackground;
+}
+
+bool BridgedThreads::isBackgroundDone()
+{
+	if (!s_bBackground)
+	{
+		return true;
+	}
+
+	if (WaitForSingleObject(s_hDone, 0) != WAIT_OBJECT_0)
+	{
+		return false;
+	}
+
+	s_bBackground = false;
+	InterlockedExchange(&g_lBurstActive, 0);
+	return true;
+}
+
+void BridgedThreads::waitBackground()
+{
+	if (s_bBackground)
+	{
+		WaitForSingleObject(s_hDone, INFINITE);
+		s_bBackground = false;
+		InterlockedExchange(&g_lBurstActive, 0);
+	}
+}
+
 void BridgedThreads::parallelFor(int iCount, int iChunk, RangeFunction fn, void* pContext)
 {
 	if (iCount <= 0)
@@ -229,6 +300,7 @@ void BridgedThreads::parallelFor(int iCount, int iChunk, RangeFunction fn, void*
 	s_iCount = iCount;
 	s_iChunk = std::max(1, iChunk);
 	s_lNext = 0;
+	s_lStop = 0;
 	s_lRunning = s_iWorkers + 1;
 	ResetEvent(s_hDone);
 

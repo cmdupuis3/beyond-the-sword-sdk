@@ -9632,6 +9632,12 @@ void CvUnit::setXY(int iX, int iY, bool bGroup, bool bUpdate, bool bShow, bool b
 				bShow = false;
 			}
 
+			// nor is a human's unit once the human has ended the turn: see CvGame::isHumanTurnEndQuick()
+			if (bShow && GC.getGameINLINE().isHumanTurnEndQuick(getOwnerINLINE()))
+			{
+				bShow = false;
+			}
+
 			if (bShow)
 			{
 				QueueMove(pNewPlot);
@@ -12860,15 +12866,16 @@ bool CvUnit::isCombatVisible(const CvUnit* pDefender) const
 		{
 			if (isHuman())
 			{
-				if (!GET_PLAYER(getOwnerINLINE()).isOption(PLAYEROPTION_QUICK_ATTACK))
+				// a fight started after the human ended the turn is settled at once: see CvGame::isHumanTurnEndQuick()
+				if (!GET_PLAYER(getOwnerINLINE()).isOption(PLAYEROPTION_QUICK_ATTACK) && !GC.getGameINLINE().isHumanTurnEndQuick(getOwnerINLINE()))
 				{
 					bVisible = true;
 				}
 			}
 			else if (NULL != pDefender && pDefender->isHuman())
 			{
-				// an AI attack is settled at once unless the AI's turns are shown: see CvGame::isAITurnsShown()
-				if (GC.getGameINLINE().isAITurnsShown() && !GET_PLAYER(pDefender->getOwnerINLINE()).isOption(PLAYEROPTION_QUICK_DEFENSE))
+				// an AI's attack on a human's unit is played, as in stock: see CvGame::isAIAttacksShown()
+				if (GC.getGameINLINE().isAIAttacksShown() && !GET_PLAYER(pDefender->getOwnerINLINE()).isOption(PLAYEROPTION_QUICK_DEFENSE))
 				{
 					bVisible = true;
 				}
