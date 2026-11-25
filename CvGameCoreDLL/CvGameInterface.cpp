@@ -392,7 +392,8 @@ void CvGame::updateSelectionList()
 // or a fight being shown, the automated units on their way) finishes first, and the automated
 // units still move (CvPlayer::setEndTurn() sets them going), as with stock's force-end-turn key;
 // what is left is then not played (CvGame::isHumanTurnEndQuick()). And when no popup is queued,
-// updateTestEndTurn() goes on from the popup step in the same call. END_TURN_STOCK_WAIT=1 is stock.
+// updateTestEndTurn() goes on from the popup step in the same call. Single-player games only;
+// END_TURN_STOCK_WAIT=1 is stock.
 //
 static bool isEndTurnStockWait()
 {
@@ -401,7 +402,7 @@ static bool isEndTurnStockWait()
 	{
 		iStock = ((GC.getDefineINT("END_TURN_STOCK_WAIT") != 0) ? 1 : 0);
 	}
-	return (iStock != 0);
+	return ((iStock != 0) || GC.getGameINLINE().isGameMultiPlayer());	// multiplayer keeps the stock steps
 }
 
 static bool isTurnReadyToEnd()
