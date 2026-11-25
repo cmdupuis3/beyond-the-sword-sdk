@@ -383,6 +383,42 @@ void CvGame::updateSelectionList()
 }
 
 
+//
+// The end of a human's turn without waiting. Stock shows the end-turn message only after
+// updateTestEndTurn() has gone through its steps, one each time the exe calls it (about four times
+// a second): queued popups first, the automated units' moves, then the message; the end-turn key
+// does nothing until then, about a second. Here the key ends the turn as soon as nothing is left
+// to do: no unit busy or waiting for orders, no popup or diplomacy waiting. The automated units
+// still move (CvPlayer::setEndTurn() sets them going), as with stock's force-end-turn key. And when
+// no popup is queued, updateTestEndTurn() goes on from the popup step in the same call.
+// END_TURN_STOCK_WAIT=1 is stock.
+//
+static bool isEndTurnStockWait()
+{
+	static int iStock = -1;
+	if (iStock == -1)
+	{
+		iStock = ((GC.getDefineINT("END_TURN_STOCK_WAIT") != 0) ? 1 : 0);
+	}
+	return (iStock != 0);
+}
+
+static bool isTurnReadyToEnd()
+{
+	const CvGame& kGame = GC.getGameINLINE();
+
+	if (isEndTurnStockWait() || (kGame.getActivePlayer() == NO_PLAYER))
+	{
+		return false;
+	}
+
+	const CvPlayer& kPlayer = GET_PLAYER(kGame.getActivePlayer());
+	const bool bAny = ((gDLL->getInterfaceIFace()->getHeadSelectedUnit() != NULL) && !kPlayer.isOption(PLAYEROPTION_NO_UNIT_CYCLING));
+
+	return kPlayer.isTurnActive() && !kPlayer.hasBusyUnit() && !kPlayer.hasReadyUnit(bAny)
+		&& !gDLL->getInterfaceIFace()->isDiploOrPopupWaiting() && !gDLL->getInterfaceIFace()->isPopupUp();
+}
+
 void CvGame::updateTestEndTurn()
 {
 	bool bAny;
@@ -402,11 +438,15 @@ void CvGame::updateTestEndTurn()
 		{
 			if (!(GET_PLAYER(getActivePlayer()).hasBusyUnit()) && !(GET_PLAYER(getActivePlayer()).hasReadyUnit(bAny)))
 			{
-				if (!(gDLL->getInterfaceIFace()->isForcePopup()))
+				const bool bPopupsShown = gDLL->getInterfaceIFace()->isForcePopup();
+
+				if (!bPopupsShown)
 				{
 					gDLL->getInterfaceIFace()->setForcePopup(true);
 				}
-				else
+
+				// with nothing queued the popups' step has nothing to show: on at once (see above)
+				if (bPopupsShown || (!isEndTurnStockWait() && !gDLL->getInterfaceIFace()->isDiploOrPopupWaiting()))
 				{
 					if (GET_PLAYER(getActivePlayer()).hasAutoUnit())
 					{
@@ -1369,7 +1409,7 @@ bool CvGame::canDoControl(ControlTypes eControl) const
 
 	case CONTROL_ENDTURN:
 	case CONTROL_ENDTURN_ALT:
-		if (gDLL->getInterfaceIFace()->isEndTurnMessage() && !gDLL->getInterfaceIFace()->isFocused() && !gDLL->getInterfaceIFace()->isInAdvancedStart())
+		if ((gDLL->getInterfaceIFace()->isEndTurnMessage() || isTurnReadyToEnd()) && !gDLL->getInterfaceIFace()->isFocused() && !gDLL->getInterfaceIFace()->isInAdvancedStart())
 		{
 			return true;
 		}
@@ -1546,7 +1586,7 @@ void CvGame::doControl(ControlTypes eControl)
 
 	case CONTROL_ENDTURN:
 	case CONTROL_ENDTURN_ALT:
-		if (gDLL->getInterfaceIFace()->isEndTurnMessage())
+		if (gDLL->getInterfaceIFace()->isEndTurnMessage() || isTurnReadyToEnd())
 		{
 			CvMessageControl::getInstance().sendTurnComplete();
 		}
