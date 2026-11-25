@@ -2211,6 +2211,41 @@ bool CvPlayerAI::AI_updateWorkAhead(bool bStopAsked)
 	return true;
 }
 
+// The work ahead under way brought to its end for something that cannot wait (a decision of the
+// human's, a save). The workers get a few milliseconds to finish what they have, which is
+// nearly always enough, and the work is then ended as usual; only if they are still at it are
+// they stopped after the items in hand, with the rest left for the next time.
+// WORK_AHEAD_FINISH_MS sets how long they get (unset or 0: 10 ms).
+void CvPlayerAI::AI_settleWorkAhead()
+{
+	if (!s_kWorkAhead.bActive)
+	{
+		return;
+	}
+
+	static int iMs = -1;
+	if (iMs == -1)
+	{
+		iMs = GC.getDefineINT("WORK_AHEAD_FINISH_MS");
+		if (iMs <= 0)
+		{
+			iMs = 10;
+		}
+	}
+
+	if (BridgedThreads::waitBackgroundFor((unsigned int)iMs))
+	{
+		AI_updateWorkAhead();	// done: its rounds and its end
+		return;
+	}
+
+#ifdef BRIDGED_PROFILE
+	static BridgedProfileSample kStopped = { "work ahead in the background: stopped part way for a decision or a save" };
+	bridgedProfileAdd(&kStopped, 0);
+#endif
+	AI_stopWorkAhead(false);
+}
+
 // Stops the work ahead under way at once: what a worker has started is finished, the rest is done
 // here (bDoLeftovers) or left (AI_finishWorkAhead()).
 void CvPlayerAI::AI_stopWorkAhead(bool bDoLeftovers)

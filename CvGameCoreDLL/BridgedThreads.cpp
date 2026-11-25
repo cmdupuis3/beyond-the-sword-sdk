@@ -302,6 +302,23 @@ bool BridgedThreads::isBackgroundDone()
 	return true;
 }
 
+bool BridgedThreads::waitBackgroundFor(unsigned int uiMs)
+{
+	if (!s_bBackground)
+	{
+		return true;
+	}
+
+	if (WaitForSingleObject(s_hDone, uiMs) != WAIT_OBJECT_0)
+	{
+		return false;
+	}
+
+	s_bBackground = false;
+	InterlockedExchange(&g_lBurstActive, 0);
+	return true;
+}
+
 void BridgedThreads::waitBackground()
 {
 	if (s_bBackground)

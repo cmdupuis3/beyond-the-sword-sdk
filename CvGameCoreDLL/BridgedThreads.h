@@ -56,6 +56,7 @@ namespace BridgedThreads
 	bool isBackgroundUnderWay();	// main thread
 	bool isBackgroundDone();		// main thread: true once every worker has stopped (the burst is then over)
 	void waitBackground();			// main thread: until it is done
+	bool waitBackgroundFor(unsigned int uiMs);	// main thread: until it is done or the time is up; whether it is done
 
 	// Asks the threads of the burst under way to start no more pieces: a piece already started
 	// is finished. Cleared when the next burst starts.

@@ -1376,9 +1376,10 @@ namespace
 	}
 
 	// WORK_AHEAD_QUEUE_DECISIONS=1: a decision made while the work ahead runs is kept and done
-	// after it, at the exe's next call of CvGame::update(), in lanes. Unset, the work is stopped
-	// when the decision comes (the main thread waits for the items in hand, a few milliseconds at
-	// most) and the decision is done at once: the exe calls CvGame::update() only about four
+	// after it, at the exe's next call of CvGame::update(), in lanes. Unset, the work is brought
+	// to its end when the decision comes (CvPlayerAI::AI_settleWorkAhead(): the workers get a few
+	// milliseconds to finish, and are stopped only if that is not enough) and the decision is
+	// done at once: the exe calls CvGame::update() only about four
 	// times a second during a human's turn, so a kept decision waited up to a quarter of a second
 	// (122 ms on average in the first playtest).
 	bool isQueueDecisions()
@@ -1813,11 +1814,7 @@ void CvDecisionQueue::playBack()
 
 void CvDecisionQueue::settle()
 {
-	if (CvPlayerAI::AI_isWorkAheadUnderWay())
-	{
-		CvPlayerAI::AI_stopWorkAhead(false);
-	}
-
+	CvPlayerAI::AI_settleWorkAhead();	// finished if the workers are nearly done, stopped if not
 	playBack();
 }
 
