@@ -406,24 +406,24 @@ static bool isEndTurnStockWait()
 }
 
 //
-// A turn with nothing in it for the player ends by itself. Stock ends the turn by itself only
-// when the player moved a unit and has not asked to wait; a turn in which nothing was moved
-// shows the end-turn message and waits for the key, turn after turn while a player is only
-// waiting for something to finish. Here, in a single-player game, such a turn does not show the
-// message: after a short count (AUTO_END_TURN_TICKS calls of updateTestEndTurn(), 1 if unset) it
-// ends, unless something needs the player (CvPlayer::isTurnNeedsPlayer()): a unit waiting for
-// orders, a popup or diplomacy, enemy troops near a city, an attack on a unit, war declared, or
-// anything the player did this turn (an order given, a control used, a city looked at). The first
-// turn of a game and the first after a load always wait. AUTO_END_TURN_OFF=1 is stock.
+// AUTO_END_TURN=1: a turn with nothing in it for the player ends by itself. Stock ends the turn
+// by itself only when the player moved a unit and has not asked to wait; a turn in which nothing
+// was moved shows the end-turn message and waits for the key. With the define, in a single-player
+// game, such a turn does not show the message: after a short count (AUTO_END_TURN_TICKS calls of
+// updateTestEndTurn(), 1 if unset) it ends, unless something needs the player
+// (CvPlayer::isTurnNeedsPlayer()): a unit waiting for orders, a popup or diplomacy, enemy troops
+// near a city, an attack on a unit, war declared, or anything the player did this turn (an order
+// given, a control used, a city looked at). The first turn of a game and the first after a load
+// always wait. Unset, the turn waits for the key as in stock.
 //
 static bool isAutoEndQuietTurns()
 {
-	static int iOff = -1;
-	if (iOff == -1)
+	static int iOn = -1;
+	if (iOn == -1)
 	{
-		iOff = ((GC.getDefineINT("AUTO_END_TURN_OFF") != 0) ? 1 : 0);
+		iOn = ((GC.getDefineINT("AUTO_END_TURN") != 0) ? 1 : 0);
 	}
-	return ((iOff == 0) && !isEndTurnStockWait());
+	return ((iOn != 0) && !isEndTurnStockWait());
 }
 
 static int autoEndTurnTicks()
@@ -480,7 +480,14 @@ void CvGame::updateTestEndTurn()
 		}
 		else
 		{
-			if (!(GET_PLAYER(getActivePlayer()).hasBusyUnit()) && !(GET_PLAYER(getActivePlayer()).hasReadyUnit(bAny)))
+			// A turn the player has not touched yet starts ready to end: the automated units and
+			// the moves under way from earlier turns do not hold the message back while they are
+			// shown, and they are set going in the same call as it (below). If one of them comes
+			// to want orders, the message goes, as when a unit is woken. Stock waits for them to
+			// finish, a quarter of a second at a time, before showing it. Single-player games only.
+			const bool bStartReady = !isEndTurnStockWait() && !(gDLL->getInterfaceIFace()->isHasMovedUnit());
+
+			if ((bStartReady || !(GET_PLAYER(getActivePlayer()).hasBusyUnit())) && !(GET_PLAYER(getActivePlayer()).hasReadyUnit(bAny)))
 			{
 				const bool bPopupsShown = gDLL->getInterfaceIFace()->isForcePopup();
 
@@ -492,14 +499,17 @@ void CvGame::updateTestEndTurn()
 				// with nothing queued the popups' step has nothing to show: on at once (see above)
 				if (bPopupsShown || (!isEndTurnStockWait() && !gDLL->getInterfaceIFace()->isDiploOrPopupWaiting()))
 				{
-					if (GET_PLAYER(getActivePlayer()).hasAutoUnit())
+					const bool bAutoUnits = GET_PLAYER(getActivePlayer()).hasAutoUnit();
+
+					if (bAutoUnits)
 					{
 						if (!(gDLL->shiftKey()))
 						{
 							CvMessageControl::getInstance().sendAutoMoves();
 						}
 					}
-					else
+
+					if (!bAutoUnits || bStartReady)
 					{
 						// a turn with nothing in it for the player ends by itself: see isAutoEndQuietTurns()
 						const bool bQuietTurn = (isAutoEndQuietTurns() && !GET_PLAYER(getActivePlayer()).isTurnNeedsPlayer());
