@@ -46,7 +46,9 @@ namespace BridgedThreads
 	void parallelFor(int iCount, int iChunk, RangeFunction fn, void* pContext);
 
 	// A burst in the background: fn over 0 to iCount - 1 on the workers alone, while the main
-	// thread goes on with other work (main thread only). The main thread is not in the burst
+	// thread goes on with other work (main thread only). The workers run below normal priority,
+	// and one fewer of them than in a burst the main thread waits for (WORKER_THREADS_BACKGROUND
+	// sets how many). The main thread is not in the burst
 	// (isInBurst() is false there), so it must not change what the work reads: the caller
 	// keeps the game still until the burst is done. false if there are no workers or a burst is
 	// under way; nothing was started then.
@@ -54,6 +56,7 @@ namespace BridgedThreads
 	bool isBackgroundUnderWay();	// main thread
 	bool isBackgroundDone();		// main thread: true once every worker has stopped (the burst is then over)
 	void waitBackground();			// main thread: until it is done
+	bool waitBackgroundFor(unsigned int uiMs);	// main thread: until it is done or the time is up; whether it is done
 
 	// Asks the threads of the burst under way to start no more pieces: a piece already started
 	// is finished. Cleared when the next burst starts.

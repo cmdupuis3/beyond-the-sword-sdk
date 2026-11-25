@@ -22,6 +22,27 @@ namespace
 	HANDLE s_hDone = NULL;		// event: the burst's last thread has finished
 	CRITICAL_SECTION s_kLock;
 	int s_iWorkers = -1;		// -1 until the pool is set up
+	int s_iBackgroundWorkers = 0;	// how many of them a burst in the background uses
+	HANDLE s_ahThreads[MAX_WORKERS + 1];
+	int s_iPriority = THREAD_PRIORITY_NORMAL;	// the workers' now
+
+	// A burst in the background gives way to the game: the workers below normal priority, so that
+	// the exe's threads (drawing, sound, input) come first. A burst the main thread waits for has
+	// them at normal priority.
+	void setWorkerPriority(int iPriority)
+	{
+		if (iPriority == s_iPriority)
+		{
+			return;
+		}
+
+		for (int iI = 1; iI <= s_iWorkers; iI++)
+		{
+			SetThreadPriority(s_ahThreads[iI], iPriority);
+		}
+
+		s_iPriority = iPriority;
+	}
 	BridgedThreads::Need s_aNeed[MAX_WORKERS + 1];	// per thread: see needMainThread()
 
 	// the burst under way
@@ -113,9 +134,18 @@ namespace
 				break;
 			}
 
-			CloseHandle(hThread);
+			s_ahThreads[iI] = hThread;
 			s_iWorkers = iI;
 		}
+
+		// WORKER_THREADS_BACKGROUND: how many work in the background (unset or 0: one fewer than
+		// work in a burst the main thread waits for, which leaves the exe a processor of its own)
+		s_iBackgroundWorkers = GC.getDefineINT("WORKER_THREADS_BACKGROUND");
+		if (s_iBackgroundWorkers <= 0)
+		{
+			s_iBackgroundWorkers = s_iWorkers - 1;
+		}
+		s_iBackgroundWorkers = std::max(1, std::min(s_iWorkers, s_iBackgroundWorkers));
 	}
 }
 
@@ -240,12 +270,13 @@ bool BridgedThreads::startInBackground(int iCount, int iChunk, RangeFunction fn,
 	s_iChunk = std::max(1, iChunk);
 	s_lNext = 0;
 	s_lStop = 0;
-	s_lRunning = s_iWorkers;
+	s_lRunning = s_iBackgroundWorkers;
 	ResetEvent(s_hDone);
 	s_bBackground = true;
+	setWorkerPriority(THREAD_PRIORITY_BELOW_NORMAL);
 
 	InterlockedExchange(&g_lBurstActive, 1);
-	ReleaseSemaphore(s_hStart, s_iWorkers, NULL);
+	ReleaseSemaphore(s_hStart, s_iBackgroundWorkers, NULL);
 	return true;
 }
 
@@ -262,6 +293,23 @@ bool BridgedThreads::isBackgroundDone()
 	}
 
 	if (WaitForSingleObject(s_hDone, 0) != WAIT_OBJECT_0)
+	{
+		return false;
+	}
+
+	s_bBackground = false;
+	InterlockedExchange(&g_lBurstActive, 0);
+	return true;
+}
+
+bool BridgedThreads::waitBackgroundFor(unsigned int uiMs)
+{
+	if (!s_bBackground)
+	{
+		return true;
+	}
+
+	if (WaitForSingleObject(s_hDone, uiMs) != WAIT_OBJECT_0)
 	{
 		return false;
 	}
@@ -303,6 +351,7 @@ void BridgedThreads::parallelFor(int iCount, int iChunk, RangeFunction fn, void*
 	s_lStop = 0;
 	s_lRunning = s_iWorkers + 1;
 	ResetEvent(s_hDone);
+	setWorkerPriority(THREAD_PRIORITY_NORMAL);
 
 	TlsSetValue(s_uiTlsIndex, (LPVOID)1);
 	InterlockedExchange(&g_lBurstActive, 1);

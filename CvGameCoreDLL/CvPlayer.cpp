@@ -1,6 +1,7 @@
 // player.cpp
 
 #include "CvGameCoreDLL.h"
+#include "CvMessageData.h"
 #include "CvGlobals.h"
 #include "CvInfoTables.h"
 #include "CvArea.h"
@@ -293,6 +294,8 @@ void CvPlayer::init(PlayerTypes eID)
 
 void CvPlayer::uninit()
 {
+	CvDecisionQueue::discardAll();	// the work ahead in the background, and what it kept, let go
+
 	SAFE_DELETE_ARRAY(m_paiBonusExport);
 	SAFE_DELETE_ARRAY(m_paiBonusImport);
 	SAFE_DELETE_ARRAY(m_paiImprovementCount);
@@ -16199,6 +16202,8 @@ void CvPlayer::read(FDataStreamBase* pStream)
 //
 void CvPlayer::write(FDataStreamBase* pStream)
 {
+	CvDecisionQueue::settle();	// the work ahead in the background stopped, and what it kept done, first
+
 	int iI;
 
 	uint uiFlag = 1;

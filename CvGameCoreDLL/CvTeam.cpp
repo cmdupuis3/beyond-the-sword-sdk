@@ -1,6 +1,7 @@
 // team.cpp
 
 #include "CvGameCoreDLL.h"
+#include "CvMessageData.h"
 #include "CvPlayerAI.h"
 #include "CvDefines.h"
 #include "CvGameCoreUtils.h"
@@ -108,6 +109,8 @@ void CvTeam::init(TeamTypes eID)
 
 void CvTeam::uninit()
 {
+	CvDecisionQueue::discardAll();	// the work ahead in the background, and what it kept, let go
+
 	int iI;
 
 	SAFE_DELETE_ARRAY(m_abCanLaunch);
@@ -6130,6 +6133,8 @@ void CvTeam::read(FDataStreamBase* pStream)
 
 void CvTeam::write(FDataStreamBase* pStream)
 {
+	CvDecisionQueue::settle();	// the work ahead in the background stopped, and what it kept done, first
+
 	int iI;
 
 	uint uiFlag = 0;

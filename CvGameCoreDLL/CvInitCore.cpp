@@ -1,6 +1,7 @@
 // game.cpp
 
 #include "CvGameCoreDLL.h"
+#include "CvMessageData.h"
 #include "CvInitCore.h"
 #include "CvDLLPythonIFaceBase.h"
 #include "CyArgsList.h"
@@ -1988,6 +1989,8 @@ void CvInitCore::read(FDataStreamBase* pStream)
 
 void CvInitCore::write(FDataStreamBase* pStream)
 {
+	CvDecisionQueue::settle();	// the work ahead in the background stopped, and what it kept done, first
+
 	uint uiSaveFlag=1;
 	pStream->Write(uiSaveFlag);		// flag for expansion, see SaveBits)
 

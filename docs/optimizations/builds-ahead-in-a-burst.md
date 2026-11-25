@@ -32,7 +32,9 @@ human's turn, same game, all the work ahead over the game:
 | one player at a time (`WORK_AHEAD_SERIAL=1`) | 370 ms | 2,207 ms |
 | in bursts | 164 ms | 998 ms |
 
-No AI turn time is saved: the work runs on the human's turn, which waits less for it.
+The work runs on the human's turn, so what is cut is how long the screen is held for it;
+in the background ([Work ahead done in the background](work-ahead-in-the-background.md))
+it is not held at all.
 
 ## Not checked
 A game with a human in it: the burst has run only from the stand-in. Mods with the
