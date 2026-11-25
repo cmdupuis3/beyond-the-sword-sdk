@@ -25,8 +25,8 @@ burst leaves is what the same work one player at a time leaves.
 ## Measured
 Seeded standard game, profile build, `FOUND_VALUE_AHEAD_TEST` standing in for a human's
 turn, same game: the work ahead takes 157 ms over the game one player at a time
-(`WORK_AHEAD_SERIAL=1`) and 123 ms in bursts. No AI turn time is saved: this work runs
-on the human's turn. The pool pays more with the cities' builds
+(`WORK_AHEAD_SERIAL=1`) and 123 ms in bursts. The work runs on the human's turn, so what is
+cut is how long the screen is held for it. The pool pays more with the cities' builds
 ([City builds worked out ahead on several threads](builds-ahead-in-a-burst.md)).
 
 ## Not checked

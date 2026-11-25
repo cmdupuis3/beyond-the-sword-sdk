@@ -47,6 +47,7 @@
 | [Plot yields in one call](plot-yields-in-one-call.md) | 1 | not measured | late | low |
 | [AI groups put in move order by one sort](unit-move-order-sorted.md) | 1 | not measured | late | low |
 | [City-site scores worked out ahead on several threads](found-values-ahead-in-a-burst.md) | 1 | not measured | late | low |
+| [A human's turn ends without waiting](human-turn-ends-without-waiting.md) | 1 | not measured | not measured | low |
 | [AI choices draw from streams of their own](ai-random-streams.md) | 2 | not measured | not measured | low |
 | [Idle units at peace keep their decision](idle-units-kept.md) | 2 | flat | not measured | low |
 | [Explorers look for paths from the best plot down](explore-best-first.md) | 2 | flat | not measured | low |
